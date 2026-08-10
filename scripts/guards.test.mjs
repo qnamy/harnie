@@ -83,6 +83,65 @@ test("decideBash: sanctioned CLI는 active root·slug·positional repo에 바인
   assert.equal(decideBash({ command: "node /repo/scripts/loop.mjs apply --root /repo --ledger /other/.harnie/l.json --state /other/.harnie/s.json --ns CR --review r --artifact a", ...ctx }).deny, true)
 })
 
+test("decideBash: auto-allow는 sanctioned 4종만(capture·delta·completion·seal-verify), 나머지 sanctioned는 프롬프트", () => {
+  const AR = "/repo", TT = new Set(["/repo/scripts/loop.mjs", "/repo/scripts/execution.mjs"])
+  const ctx = { phase: "executing", trustedClis: TT, activeRoot: AR, activeSlug: "feat-x", activeTrack: "plan" }
+  // 4종 → deny:false, autoAllow:true
+  assert.equal(decideBash({ command: "node /repo/scripts/loop.mjs capture /repo", ...ctx }).autoAllow, true)
+  assert.equal(decideBash({ command: "node /repo/scripts/loop.mjs delta /repo abc --out .harnie/plan/feat-x/review/u/d.patch", ...ctx }).autoAllow, true)
+  assert.equal(decideBash({ command: "node /repo/scripts/execution.mjs completion --root /repo --slug feat-x", ...ctx }).autoAllow, true)
+  assert.equal(decideBash({ command: "node /repo/scripts/execution.mjs seal-verify --root /repo --slug feat-x", ...ctx }).autoAllow, true)
+  // 나머지 sanctioned → 통과하되 autoAllow:false(프롬프트 유지)
+  const notAuto = (cmd) => { const d = decideBash({ command: cmd, ...ctx }); assert.equal(d.deny, false, cmd); assert.equal(d.autoAllow, false, cmd) }
+  notAuto("node /repo/scripts/loop.mjs apply --root /repo --ledger .harnie/plan/feat-x/review/u/ledger.json --state .harnie/plan/feat-x/review/u/state.json --ns CR --review .harnie/plan/feat-x/review/u/round-1.txt --artifact " + "0".repeat(40))
+  notAuto("node /repo/scripts/execution.mjs verify --root /repo --slug feat-x --task T1")
+  notAuto("node /repo/scripts/execution.mjs seal --root /repo --slug feat-x")
+  notAuto("node /repo/scripts/execution.mjs set-task --root /repo --slug feat-x --task T1 --run-status building")
+  notAuto("node /repo/scripts/execution.mjs init --root /repo --slug feat-x")
+  // 일반 read-only Bash는 auto-allow 아님(범위 확대 안 함)
+  assert.equal(decideBash({ command: "git status", ...ctx }).autoAllow, false)
+  assert.equal(decideBash({ command: "cat src/foo.ts", ...ctx }).autoAllow, false)
+})
+
+test("decideBash: 인터프리터 바인딩 — bare node/신뢰 execPath만, 위장 /tmp/node 거부(DR-004)", () => {
+  const AR = "/repo", TT = new Set(["/repo/scripts/loop.mjs"])
+  const ctx = { phase: "executing", trustedClis: TT, activeRoot: AR, activeSlug: "feat-x", activeTrack: "plan" }
+  // bare node → sanctioned·auto-allow
+  assert.equal(decideBash({ command: "node /repo/scripts/loop.mjs capture /repo", ...ctx }).autoAllow, true)
+  // trustedNode 절대경로 일치 → 허용
+  assert.equal(decideBash({ command: "/opt/n/bin/node /repo/scripts/loop.mjs capture /repo", trustedNode: "/opt/n/bin/node", ...ctx }).autoAllow, true)
+  // 위장 /tmp/node → sanctioned 아님 → executing이라 deny는 아니지만 autoAllow:false(프롬프트)
+  const evil = decideBash({ command: "/tmp/node /repo/scripts/loop.mjs capture /repo", trustedNode: "/opt/n/bin/node", ...ctx })
+  assert.equal(evil.autoAllow, false)
+  // planning에서 위장 인터프리터 → read-only 아님 → deny
+  assert.equal(decideBash({ command: "/tmp/node /repo/scripts/loop.mjs capture /repo", phase: "planning", trustedClis: TT, activeRoot: AR, activeSlug: "feat-x", activeTrack: "plan", trustedNode: "/opt/n/bin/node" }).deny, true)
+})
+
+test("decideBash: 유효 컨텍스트 없으면 auto-allow 금지 — null·빈문자열·공백slug·규약밖 track(CR-001)", () => {
+  const T2 = new Set(["/repo/scripts/loop.mjs"])
+  const cmd = "node /repo/scripts/loop.mjs capture /repo"
+  // activeRoot 없음(호환 경로): sanctioned 통과하지만 auto-allow 금지
+  const d0 = decideBash({ command: cmd, trustedClis: T2 })
+  assert.equal(d0.deny, false); assert.equal(d0.autoAllow, false)
+  // 빈 문자열 slug/track → auto-allow 금지
+  assert.equal(decideBash({ command: cmd, trustedClis: T2, activeRoot: "/repo", activeSlug: "", activeTrack: "" }).autoAllow, false)
+  // 공백 slug(failClosed의 " ") → 금지
+  assert.equal(decideBash({ command: cmd, trustedClis: T2, activeRoot: "/repo", activeSlug: " ", activeTrack: "plan" }).autoAllow, false)
+  // 규약 밖 track → 금지
+  assert.equal(decideBash({ command: cmd, trustedClis: T2, activeRoot: "/repo", activeSlug: "feat-x", activeTrack: "weird" }).autoAllow, false)
+  // 유효 컨텍스트 → auto-allow
+  assert.equal(decideBash({ command: cmd, trustedClis: T2, activeRoot: "/repo", activeSlug: "feat-x", activeTrack: "plan" }).autoAllow, true)
+})
+
+test("decideBash: execution --track 생략은 plan로 간주 — 비-plan 컨텍스트에선 매치 안 됨(CR-002)", () => {
+  const TT = new Set(["/repo/scripts/execution.mjs"])
+  const qctx = { trustedClis: TT, activeRoot: "/repo", activeSlug: "feat-x", activeTrack: "quick" }
+  // --track 생략(=plan) but active track=quick → 불일치 → sanctioned 아님 → planning deny
+  assert.equal(decideBash({ command: "node /repo/scripts/execution.mjs completion --root /repo --slug feat-x", phase: "planning", ...qctx }).deny, true)
+  // 명시 --track quick → 매치 → executing에서 auto-allow
+  assert.equal(decideBash({ command: "node /repo/scripts/execution.mjs completion --root /repo --slug feat-x --track quick", phase: "executing", ...qctx }).autoAllow, true)
+})
+
 test("decideBash: 승인 前 read-only allowlist — 쓰기 옵션 있는 명령 deny", () => {
   assert.equal(decideBash({ command: "find src -delete", phase: "planning" }).deny, true)
   assert.equal(decideBash({ command: "sort -o src/out.txt input.txt", phase: "planning" }).deny, true)

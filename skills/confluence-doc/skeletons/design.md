@@ -1,6 +1,6 @@
 # Skeleton — Design Document (Architecture / Detailed)
 
-This is the **design-document section skeleton** loaded by the `confluence-doc` engine. The skill body (`SKILL.md`) owns rendering, degradation, and publication rules. This file defines **only section structure and relative emphasis**.
+This is the **design-document section skeleton** loaded by the `confluence-doc` engine. The skill body (`SKILL.md`) owns rendering, diagram handling, and publication rules. This file defines **only section structure and relative emphasis**.
 
 Render the final Confluence document **in Korean**. The English labels and prose in this skeleton describe structure only; translate generated section headings, labels, tables, panels, and explanatory text into Korean while preserving identifiers and quoted source text.
 
@@ -45,4 +45,4 @@ Fold the outputs produced under upstream `instructions/design-authoring-arch.md`
 - Failure handling · error conventions · constraints → §6
 - Risks and open decisions → §7
 
-Convert upstream **Mermaid diagrams (C4 Container, sequence, and state)** into tables/ASCII plus preserved source in an Expand, following the degradation rules in `SKILL.md`.
+Handle upstream **Mermaid diagrams (C4 Container, sequence, and state)** per the diagram-rendering rules in `SKILL.md`: render natively when a Mermaid macro **and** a compatible publication adapter are available (Mode A), otherwise degrade to tables/ASCII plus preserved source in an Expand (Mode B).

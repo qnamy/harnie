@@ -69,10 +69,13 @@ function isReadOnlyBash(cmd) {
 // sanctioned 상태 CLI 판별: `node <script> …`에서 <script>가 **신뢰 CLI 경로와 정확 일치**하고, 어떤 셸 메타도 없고,
 // **서브커맨드별 argv가 현재 active context(root·slug·track·positional repo·출력경로)에 정확히 바인딩**될 때만.
 // (다른 repo·stale slug 타겟 차단 — 특히 execution.mjs verify가 과거 manifest의 executable을 승인 前 실행하는 것 방지.)
-function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack }) {
+function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack, trustedNode = null }) {
   if (SHELL_ANY.test(cmd)) return false
   const toks = cmd.trim().split(/\s+/)
-  if ((toks[0] || "").split("/").pop() !== "node") return false
+  // 인터프리터 바인딩(DR-004): bare `node`(PATH의 세션 node) 또는 신뢰 절대경로(process.execPath)만.
+  // `/tmp/node`·`./node` 같은 경로지정 위장 인터프리터는 신뢰 스크립트를 무시하고 임의 실행할 수 있어 거부.
+  const exe = toks[0] || ""
+  if (exe !== "node" && !(trustedNode != null && resolve(exe) === trustedNode)) return false
   const scriptAbs = toks[1] ? resolve(toks[1]) : ""
   if (!trustedClis.has(scriptAbs)) return false
   if (activeRoot == null) return true // 바인딩 컨텍스트 없음(테스트 등)
@@ -87,7 +90,7 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack
   if (scriptAbs.endsWith("execution.mjs")) {
     if (!isRepo(flagVal("--root"))) return false                  // --root === active repo
     if (flagVal("--slug") !== activeSlug) return false            // --slug === active slug(stale slug 차단)
-    const tk = flagVal("--track"); if (tk !== undefined && tk !== activeTrack) return false
+    const tk = flagVal("--track"); if ((tk === undefined ? "plan" : tk) !== activeTrack) return false // 생략=plan(execution 기본)로 간주해 track 정확 바인딩(CR-002)
     return true
   }
   if (scriptAbs.endsWith("loop.mjs")) {
@@ -102,18 +105,47 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack
   }
   return false
 }
+// auto-allow 대상 sanctioned 서브커맨드(명시 allowlist) — 효과가 제한된 4종만. isSanctionedCli의 넓은
+// 결과를 그대로 auto-allow하지 않는다: 그건 apply·verify·seal·init·set-task 등 상태 변경 서브커맨드도
+// 정상으로 판정하므로, 여기서 **서브커맨드를 명시적으로 4종으로 좁혀** 프롬프트 skip 대상을 한정한다.
+//   loop.mjs: capture(임시 index+tree object 생성, worktree 불변), delta(.harnie 하위 delta.patch만 write)
+//   execution.mjs: completion(재도출 read-only), seal-verify(재해시 비교 read-only)
+// apply(ledger/state 전이)·verify(receipt+argv 실행)·seal(baseline 재기록)·상태변경 execution·codex는 auto-allow 제외.
+const AUTO_ALLOW_SUB = { "loop.mjs": new Set(["capture", "delta"]), "execution.mjs": new Set(["completion", "seal-verify"]) }
+// auto-allow는 **유효한 완전 active context**를 전제(CR-001). null뿐 아니라 빈 문자열·공백 slug(failClosed의 " ")·
+// 규약 밖 track도 거부한다. slug는 execution.mjs와 동일 형식, track은 plan|quick만.
+const SLUG_RE = /^[A-Za-z0-9._-]+$/
+function hasValidActiveContext(root, slug, track) {
+  if (typeof root !== "string" || root.length === 0) return false
+  if (typeof slug !== "string" || !SLUG_RE.test(slug) || slug === "." || slug === "..") return false
+  return track === "plan" || track === "quick"
+}
+function isAutoAllowSanctionedSub(cmd) {
+  const toks = cmd.trim().split(/\s+/)
+  const script = toks[1] || ""
+  const sub = toks[2] // 서브커맨드는 항상 스크립트 바로 뒤 첫 토큰(비정상 순서면 미허용 → 프롬프트, 안전 기본값)
+  if (sub == null || sub.startsWith("--")) return false
+  for (const [name, subs] of Object.entries(AUTO_ALLOW_SUB)) if (script.endsWith(name) && subs.has(sub)) return true
+  return false
+}
 // trustedClis = 플러그인의 loop.mjs·execution.mjs 절대경로 Set. active{Root,Slug,Track} = 현재 활성 컨텍스트(훅이 주입).
-export function decideBash({ command, phase, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
+// trustedNode = process.execPath(훅 주입) — 인터프리터 바인딩용. 반환 autoAllow=true면 훅이 PreToolUse allow(프롬프트 skip).
+export function decideBash({ command, phase, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null, trustedNode = null }) {
   const cmd = String(command || "")
-  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack })) return { deny: false } // active context에 바인딩된 상태 CLI
+  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, activeTrack, trustedNode })) {
+    // auto-allow는 **유효한 완전 active 바인딩** 전제(root·slug·track). isSanctionedCli의 activeRoot==null
+    // 호환 경로나 빈/규약밖 컨텍스트에선 바인딩 검증이 무력하므로 auto-allow 금지 — 그땐 프롬프트(CR-001).
+    const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
+    return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) } // sanctioned은 통과; 그 중 4종·유효바인딩만 auto-allow
+  }
   // 비-sanctioned Bash의 .harnie 접근은 phase 무관 전면 차단(승인 후 find .harnie -delete·git clean·node -e 등 포함).
   if (HARNIE_REF.test(cmd))
     return { deny: true, reason: `Bash로 .harnie 접근 금지 — 상태는 loop.mjs·execution.mjs(신뢰 CLI)로만` }
   if (PLANNING_PHASES.has(phase)) {
-    if (isReadOnlyBash(cmd)) return { deny: false }
+    if (isReadOnlyBash(cmd)) return { deny: false, autoAllow: false } // read-only는 허용하되 auto-allow 범위 확대 안 함(프롬프트 유지)
     return { deny: true, reason: `승인 前(${phase}) Bash는 read-only 명령·신뢰 CLI만 — 파일 쓰기·개행연쇄·프로세스치환·git 변경·임의 실행은 승인 게이트 후에만` }
   }
-  return { deny: false } // 승인 후: 소스 쓰기 허용(.harnie는 위에서 전면 차단)
+  return { deny: false, autoAllow: false } // 승인 후: 소스 쓰기 허용(.harnie는 위에서 전면 차단). 자동허용은 sanctioned 4종만.
 }
 
 // ── H1: Task(서브에이전트 위임) ─────────────────────────────────────────

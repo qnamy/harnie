@@ -94,6 +94,7 @@ function toExecuting(root) {
   hook(POST, { tool_name: "AskUserQuestion", tool_use_id: "tu-1", tool_response: JSON.stringify({ answers: { [AQ]: "승인" } }), cwd: root })
 }
 const deny = (r) => r && r.hookSpecificOutput && r.hookSpecificOutput.permissionDecision === "deny"
+const autoAllow = (r) => r && r.hookSpecificOutput && r.hookSpecificOutput.permissionDecision === "allow"
 
 // ── PreToolUse H1 ────────────────────────────────────────────────────────
 test("비활성 repo: 훅 통과(no output)", () => {
@@ -134,12 +135,30 @@ test("Bash: 개행으로 밀반입한 소스 쓰기 deny(planning)", () => {
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "git status\nrm -rf src" }, cwd: root })))
 })
 
-test("Bash: .harnie 변형 deny, 신뢰 경로 sanctioned CLI allow, 임의 경로 CLI deny", () => {
+test("Bash: .harnie 변형 deny, 신뢰 경로 sanctioned 4종 auto-allow, 임의 경로 CLI deny", () => {
   const { root } = setupRepo()
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie/plan/feat-x/review" }, cwd: root })))
-  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + REAL_LOOP + " capture " + root }, cwd: root }), null)
+  // sanctioned 4종(capture)은 프롬프트 skip(auto-allow)
+  assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + REAL_LOOP + " capture " + root }, cwd: root })))
   // 위장 경로 CLI는 planning에서 deny
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "node /tmp/scripts/loop.mjs capture " + root }, cwd: root })))
+})
+
+test("Bash: sanctioned auto-allow는 4종만 — apply/verify/seal 등은 통과하되 프롬프트(무의견)", () => {
+  const { root, dir } = setupRepo()
+  const rev = join(dir, "review", "task-a")
+  // completion·seal-verify(execution.mjs) auto-allow
+  assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " completion --root " + root + " --slug feat-x" }, cwd: root })))
+  assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal-verify --root " + root + " --slug feat-x" }, cwd: root })))
+  // apply(loop.mjs)·verify/seal(execution.mjs)는 sanctioned지만 auto-allow 아님 → 무의견(null=프롬프트)
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + REAL_LOOP + " apply --root " + root + " --ledger " + join(rev, "ledger.json") + " --review " + join(rev, "round-1.txt") + " --ns CR --state " + join(rev, "state.json") + " --artifact " + "0".repeat(40) }, cwd: root }), null)
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " verify --root " + root + " --slug feat-x --task T1" }, cwd: root }), null)
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal --root " + root + " --slug feat-x" }, cwd: root }), null)
+})
+
+test("Bash: 위장 인터프리터 /tmp/node <신뢰 스크립트>는 sanctioned 아님 → planning deny(DR-004)", () => {
+  const { root } = setupRepo()
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "/tmp/node " + REAL_LOOP + " capture " + root }, cwd: root })))
 })
 
 test("Task: planning은 write 에이전트 deny, read-only allow", () => {

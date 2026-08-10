@@ -60,9 +60,9 @@ claude --plugin-dir ./harnie
 harnie/
 ├── .claude-plugin/plugin.json   # 플러그인 정체성(name: harnie)
 ├── .mcp.json                    # codex MCP 서버 선언
-├── commands/                    # /harnie:build · quick · plan
+├── commands/                    # /harnie:build · quick · plan (영문 정본 + *-ko.md 미러)
 ├── skills/                      # quick·plan 오케스트레이터 + 방법론 스킬
-├── agents/                      # harnie-scout · designer · builder · reviewer
+├── agents/                      # harnie-scout · designer · builder · reviewer (영문 정본 + *-ko.md 미러)
 ├── instructions/                # canonical 런타임 계약(영문 실행 정본). *-ko.md는 한국어 미러
 ├── scripts/                     # loop / ledger / delta / execution / guards (루프·상태 코어)
 ├── hooks/                       # plan 트랙 강제 훅(PreToolUse · Stop · PostToolUse)

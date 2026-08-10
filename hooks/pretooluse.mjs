@@ -3,7 +3,7 @@
 // 오류·상태 손상은 fail-closed(deny) — throw로 exit 1 나면 Claude Code가 비차단 처리하므로 전체 catch.
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readStdin, findRoot, classifyCodex, canonicalRelPath, denyPreTool, allow } from "./lib.mjs"
+import { readStdin, findRoot, classifyCodex, canonicalRelPath, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, buildingUnboundTasks, recordPendingApproval } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex } from "../scripts/guards.mjs"
 
@@ -32,8 +32,11 @@ try {
       const d = decideWriteEdit({ relPath: rel, phase, track, slug })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, phase, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track })
-      d.deny ? denyPreTool(d.reason) : allow()
+      const d = decideBash({ command: input.command, phase, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, trustedNode: process.execPath })
+      // deny → 차단; sanctioned 4종 auto-allow → 프롬프트 skip(단 failClosed면 억제); 그 외 → 무의견(정상 권한 흐름).
+      if (d.deny) denyPreTool(d.reason)
+      else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal-verify) — active repo 바인딩·경로 containment 검증됨")
+      else allow()
     } else if (toolName === "Task" || toolName === "Agent") {
       const d = decideTask({ subagentType: input.subagent_type, phase })
       d.deny ? denyPreTool(d.reason) : allow()

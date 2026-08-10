@@ -90,6 +90,15 @@ export function denyPreTool(reason) {
 }
 export function allow() { process.exit(0) }
 
+// PreToolUse auto-allow emit(프롬프트 skip). 무의견 exit 0(allow())과 구분 — 이건 명시적 allow 결정.
+// user·project의 deny/ask 규칙은 여전히 우선하므로 사용자 통제는 유지된다.
+export function allowPreTool(reason) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: reason },
+  }) + "\n")
+  process.exit(0)
+}
+
 // Stop block emit.
 export function blockStop(reason) {
   process.stdout.write(JSON.stringify({ decision: "block", reason }) + "\n")
