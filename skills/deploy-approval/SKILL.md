@@ -32,6 +32,11 @@ The deployment gate considers **blocking problems only**: concerns at the **`iss
 3. **Check the quorum** using the count supplied by the caller. When approvals ≥ threshold, **recommend advancing workflow state**. Otherwise do not advance and wait for the next approver.
    - If the item is already at or beyond the target state, skip advancement for idempotency. If a direct transition to the target state is unavailable, hold advancement for manual verification.
 
+## Output Language
+
+- Write all human-readable approval judgments, hold reasons, issue summaries, quorum recommendations, and manual-verification guidance **in Korean**.
+- Preserve machine-readable status values, code identifiers, file paths, API names, and quoted source text in their original form.
+
 ## Output
 
 For each request, return `approve` (plus a workflow-advancement recommendation when quorum is met) | `hold (+ reason)`. The caller uses this judgment to record the approval signal, count the quorum, transition state, and send any manual-verification notification.

@@ -56,6 +56,11 @@ Recommend a revote only when a thread state actually changed in this run:
 
 Do **not vote** in merged context; it has no effect.
 
+## Output Language
+
+- Write all human-readable judgments, reasons, evidence summaries, follow-up question recommendations, and revote recommendations **in Korean**.
+- Preserve machine-readable status values, code identifiers, file paths, API names, and quoted source text in their original form.
+
 ## Output
 
 For each thread, return `resolve` | `keep open (+ reason)` | `no action`, plus a revote recommendation when the context is active. The caller uses this judgment to perform the actual resolution, follow-up reply, vote, and platform calls.
