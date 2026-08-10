@@ -2,7 +2,7 @@
 
 > **임시 허브 문서.** 일반화가 완성될 때까지 개발 세션에서 항상 로드된다(`CLAUDE.md`가 연결). 완성 시 이 문서와 `CLAUDE.md`를 제거한다.
 > 관련 문서는 아래 §5 인덱스로 두고 **필요할 때 on-demand로** 읽는다(전부 상시 로드하지 않음).
-> 최종 갱신: 2026-08-10 (C 구현 APPROVED·푸시 완료 + **B 스왑 full-loop E2E ✅ 통과** — §7 핸드오프 참조. 남은 것 = ⑦ 배포).
+> 최종 갱신: 2026-08-10 (`main`=`f01f8b5` push 완료 — B E2E·좁은 훅 auto-allow·marketplace.json·언어 미러. **남은 것 = ⑦ 인터랙티브 설치 세션 라이브 검증뿐** — §7 핸드오프 참조).
 >
 > **네이밍(2026-07-29):** 플러그인/repo = **harnie**(개발 하네스 + 스킬 허브, 확장형, 단일 브랜드). 빌드/리뷰 워크플로 = 커맨드 `/harnie:build`(라우터)·`/harnie:quick`·`/harnie:plan`, 스킬 `quick`·`plan`, 에이전트 `harnie-{scout,designer,builder}`. 방법론 스킬(`pr-review` 등)은 그대로. 상태 디렉터리 `.harnie/`, 툴 네임스페이스 `mcp__plugin_harnie_codex__*`. 로컬 폴더 = `Tradlinx/harnie`.
 > **프로바이더 대칭 스왑(2026-07-29, 결정 #8):** Claude=설계+코드리뷰 / Codex=설계리뷰+개발. 개발 빌더 = Codex(codex MCP `workspace-write`), 코드 리뷰어 = Claude. 루프 코어는 프로바이더 무관이라 코드 변경 없음.
@@ -120,15 +120,25 @@
 
 ## 7. 다음 세션 이어가기 (핸드오프, 2026-08-10)
 
-- **공개 완료**: `github.com:qnamy/harnie` `main` = `1342e9c`(= `9fcf719` C구현 + `1342e9c` 스킬 출력언어 섹션 docs 커밋, fast-forward push). 테스트 115/115 pass. C 구현 = Codex 크로스-모델 코드리뷰 12라운드 APPROVE(REJECT 11회 반영).
-- **WIP 마무리 완료**: `skills/comment-resolve`·`skills/deploy-approval` 영/한 출력언어 섹션 → 커밋 `1342e9c` → `main` push 완료.
-- **B (P0 게이트) 완료**: 스왑 full-loop E2E ✅ 통과(2026-08-10). §6 B 항목·`scratchpad/B-e2e-results.md` 참조. (테스트/상태파일은 throwaway repo에 있고 harnie repo 자체엔 커밋 산출물 없음 — E2E는 스킬/스크립트 계약의 라이브 검증이라 코드 변경 불요.)
-- **바로 다음 순서 = ⑦ 배포**:
-  1. `.claude-plugin/marketplace.json` 추가 → `/plugin marketplace add qnamy/harnie` → `/plugin install harnie@harnie`.
-  2. 플러그인 로드 상태에서 **훅 자동발화** 라이브 검증: `${CLAUDE_PLUGIN_ROOT}` 치환·`mcp__plugin_harnie_codex__*` 툴명·`hooks.json` matcher(PreToolUse codex 게이팅·PostToolUse threadId 등록·Stop) 실제 발화. (B는 엔트리 스크립트 직접구동으로 검증했으니, ⑦은 "Claude Code가 등록된 훅을 자동 호출하는가"만 확인.)
-  3. 이후 ②③(REVIEW.md 은퇴·루틴 rewire) → 포트폴리오 서사.
-  3. **⑦ 설치 라이브 검증**: `.claude-plugin/marketplace.json` 추가 → `/plugin marketplace add qnamy/harnie` → `/plugin install harnie@harnie` → 플러그인 로드 상태에서 `${CLAUDE_PLUGIN_ROOT}` 치환·`mcp__plugin_harnie_codex__*` 툴명·훅(`hooks.json` matcher) 실제 발화 확인.
-- **주의**: 커밋 author 이메일이 로컬 호스트명(`bakgyunam@…MacBookPro.local`)이라 GitHub 계정에 커밋이 연결 안 됨 — 필요 시 `git config user.email <github-email>` 후 amend + `git push --force-with-lease`.
+- **공개 완료**: `github.com:qnamy/harnie` `main` = `f01f8b5`(단일 통합 커밋 push 완료). 테스트 121/121 pass.
+- **완료(코드/문서 측 ⑦ 준비 끝)**:
+  - B(P0) 스왑 full-loop E2E ✅ 통과 — `scratchpad/B-e2e-results.md`.
+  - 좁은 훅 auto-allow ✅(sanctioned 4종 capture·delta·completion·seal-verify만 프롬프트 skip, Codex 코드리뷰 APPROVE) — ADR `docs/permission-prompt-reduction.md`.
+  - `.claude-plugin/marketplace.json` 추가 ✅ + `plugin.json` v0.0.2·commands/agents 명시 배열 ✅.
+  - 언어 미러 ✅: `agents/*-ko.md`(4)·`commands/*-ko.md`(3) + 영문 정본·AGENTS/CLAUDE/README·confluence-doc 동기화.
+
+- **남은 것 = ⑦ 배포 승인의 유일 조건 → 인터랙티브 설치 세션 라이브 검증**(비인터랙티브 세션 불가, `claude` 터미널에서):
+  0. **선행**: 로컬 `.claude/settings.local.json`의 harnie CLI allowlist를 임시 제거/이름변경(allowlist가 훅 동작을 가려 오탐 방지).
+  1. `/plugin marketplace add qnamy/harnie` → `/plugin install harnie@harnie`.
+  2. **auto-allow 발화**: sanctioned 4종(`capture`·`delta`·`completion`·`seal-verify`)이 **프롬프트 없이** 실행되는가.
+  3. **프롬프트 유지**: `apply`·`verify`(+상태변경 execution·workspace-write codex·Write/Task)는 여전히 프롬프트 뜨는가.
+  4. **사용자 통제 우선**: user/project `deny`·`ask` 규칙이 훅 `allow`보다 우선하는가(하나에 deny 걸어 확인).
+  5. **자동발화 배선**: `${CLAUDE_PLUGIN_ROOT}` 치환·`mcp__plugin_harnie_codex__*` 툴명·`hooks.json` matcher(PreToolUse codex 게이팅·PostToolUse threadId 등록·Stop)가 **Claude Code에 의해 자동 호출**되는가. (B는 엔트리 스크립트 직접구동으로 검증했으니 ⑦은 "등록된 훅 자동 호출"만 확인.)
+  → 5개 통과 시 ⑦ 배포 승인 충족. 이후 ②③(REVIEW.md 은퇴·루틴 rewire) → 포트폴리오 서사.
+
+- **열린 후속(별건)**: 승인-前 Bash 게이트 하드닝(DR-002 — `isReadOnlyBash`의 `rg --pre`·`git --ext-diff`·경로지정 실행파일 등). auto-allow와 독립. `docs/permission-prompt-reduction.md` §부수 발견.
+- **미커밋 잔여**: `github-profile-developer-cute.png`(참조 없는 stray, 의도 확인 후 처리).
+- **주의**: 커밋 author 이메일이 로컬 호스트명이면 GitHub 계정 미연결 — 필요 시 `git config user.email <github-email>` 후 amend + `git push --force-with-lease`.
 - **검증 명령**: `node --test scripts/*.test.mjs hooks/*.test.mjs`(현재 121 pass).
 
 **제외(v0 밖 과잉):** 전문 에이전트 로스터·adversarial lane·auto-continue·다중세션 retry.
