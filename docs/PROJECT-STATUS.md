@@ -2,7 +2,7 @@
 
 > **임시 허브 문서.** 일반화가 완성될 때까지 개발 세션에서 항상 로드된다(`CLAUDE.md`가 연결). 완성 시 이 문서와 `CLAUDE.md`를 제거한다.
 > 관련 문서는 아래 §5 인덱스로 두고 **필요할 때 on-demand로** 읽는다(전부 상시 로드하지 않음).
-> 최종 갱신: 2026-08-10 (`main`=`f01f8b5` push 완료 — B E2E·좁은 훅 auto-allow·marketplace.json·언어 미러. **남은 것 = ⑦ 인터랙티브 설치 세션 라이브 검증뿐** — §7 핸드오프 참조).
+> 최종 갱신: 2026-08-11 (⑦ 검증 대상 공개본=`ff3574a`. **⑦ 인터랙티브 설치 라이브 검증 5/5 PASS 완료** — 설치·auto-allow·프롬프트 유지·deny 우선·자동발화 배선 모두 확인. **단, ⑦ 검증 중 🔴 신규 최우선 발견 = 오케스트레이터 adherence 갭**(plan 실행에서 관찰: 메인이 `execution.mjs init` 등 필수 머신을 스킵 → 강제 dormant; 머신 자체는 지시 주입 시 정상). **다음 = 갭의 구조적 해결 설계(UserPromptExpansion+PreToolUse Skill 부트스트랩)** — §7 핸드오프 참조).
 >
 > **네이밍(2026-07-29):** 플러그인/repo = **harnie**(개발 하네스 + 스킬 허브, 확장형, 단일 브랜드). 빌드/리뷰 워크플로 = 커맨드 `/harnie:build`(라우터)·`/harnie:quick`·`/harnie:plan`, 스킬 `quick`·`plan`, 에이전트 `harnie-{scout,designer,builder}`. 방법론 스킬(`pr-review` 등)은 그대로. 상태 디렉터리 `.harnie/`, 툴 네임스페이스 `mcp__plugin_harnie_codex__*`. 로컬 폴더 = `Tradlinx/harnie`.
 > **프로바이더 대칭 스왑(2026-07-29, 결정 #8):** Claude=설계+코드리뷰 / Codex=설계리뷰+개발. 개발 빌더 = Codex(codex MCP `workspace-write`), 코드 리뷰어 = Claude. 루프 코어는 프로바이더 무관이라 코드 변경 없음.
@@ -118,24 +118,26 @@
 
 ---
 
-## 7. 다음 세션 이어가기 (핸드오프, 2026-08-10)
+## 7. 다음 세션 이어가기 (핸드오프, 2026-08-11)
 
-- **공개 완료**: `github.com:qnamy/harnie` `main` = `f01f8b5`(단일 통합 커밋 push 완료). 테스트 121/121 pass.
+- **공개 완료**: `github.com:qnamy/harnie` `main` = `ff3574a`. 테스트 121/121 pass.
 - **완료(코드/문서 측 ⑦ 준비 끝)**:
   - B(P0) 스왑 full-loop E2E ✅ 통과 — `scratchpad/B-e2e-results.md`.
   - 좁은 훅 auto-allow ✅(sanctioned 4종 capture·delta·completion·seal-verify만 프롬프트 skip, Codex 코드리뷰 APPROVE) — ADR `docs/permission-prompt-reduction.md`.
   - `.claude-plugin/marketplace.json` 추가 ✅ + `plugin.json` v0.0.2·commands/agents 명시 배열 ✅.
   - 언어 미러 ✅: `agents/*-ko.md`(4)·`commands/*-ko.md`(3) + 영문 정본·AGENTS/CLAUDE/README·confluence-doc 동기화.
 
-- **남은 것 = ⑦ 배포 승인의 유일 조건 → 인터랙티브 설치 세션 라이브 검증**(비인터랙티브 세션 불가, `claude` 터미널에서):
-  0. **선행**: 로컬 `.claude/settings.local.json`의 harnie CLI allowlist를 임시 제거/이름변경(allowlist가 훅 동작을 가려 오탐 방지).
-  1. `/plugin marketplace add qnamy/harnie` → `/plugin install harnie@harnie`.
-  2. **auto-allow 발화**: sanctioned 4종(`capture`·`delta`·`completion`·`seal-verify`)이 **프롬프트 없이** 실행되는가.
-  3. **프롬프트 유지**: `apply`·`verify`(+상태변경 execution·workspace-write codex·Write/Task)는 여전히 프롬프트 뜨는가.
-  4. **사용자 통제 우선**: user/project `deny`·`ask` 규칙이 훅 `allow`보다 우선하는가(하나에 deny 걸어 확인).
-  5. **자동발화 배선**: `${CLAUDE_PLUGIN_ROOT}` 치환·`mcp__plugin_harnie_codex__*` 툴명·`hooks.json` matcher(PreToolUse codex 게이팅·PostToolUse threadId 등록·Stop)가 **Claude Code에 의해 자동 호출**되는가. (B는 엔트리 스크립트 직접구동으로 검증했으니 ⑦은 "등록된 훅 자동 호출"만 확인.)
-  → 5개 통과 시 ⑦ 배포 승인 충족. 이후 ②③(REVIEW.md 은퇴·루틴 rewire) → 포트폴리오 서사.
+- **⑦ 인터랙티브 설치 라이브 검증 ✅ 5/5 PASS**(2026-08-11, 인터랙티브 `claude` + throwaway repo `/tmp/harnie-e2e`, plan 트랙 실행):
+  1. 설치 ✅ `/plugin marketplace add qnamy/harnie` → `/plugin install harnie@harnie`(user scope).
+  2. auto-allow ✅ `seal-verify`(sanctioned 4종) **무프롬프트** 실행.
+  3. 프롬프트 유지 ✅ `verify`(비-auto-allow, 같은 스크립트/다른 서브커맨드) 프롬프트 발생.
+  4. 사용자 통제 우선 ✅ `completion`에 project `deny` → **차단**(훅 auto-allow·`node:*` allow 모두 이김).
+  5. 자동발화 배선 ✅ `${CLAUDE_PLUGIN_ROOT}`→`plugins/marketplaces/harnie` 치환·`mcp__plugin_harnie_codex__codex`(12회)·`workspace-write` 빌더·builder/read-only threadId 등록·AskUserQuestion 승인 게이트·`.harnie` Bash 접근 **라이브 deny**·Stop 훅 `preventedContinuation:false`로 COMPLETE 허용(H2 만족). 실경로/툴명/훅 발화 모두 Claude Code 자동 호출로 확인.
+  → **⑦ 배포 승인의 유일 조건 충족.** 상세: 이 세션 트랜스크립트 + `.harnie/plan/multiply-divide/`.
 
+- **🔴 신규 최우선 발견 — 오케스트레이터 adherence 갭(⑦ 검증 중 노출):** **plan 자연 실행에서 관찰** — 메인 Claude 오케스트레이터가 스킬의 필수 결정적 단계(A0 `execution.mjs init`·A5 승인 게이트·B2 Codex 빌더·sanctioned CLI·B6 `HARNIE_STATUS` footer)를 **통째로 건너뛰고** harnie-* 서브에이전트로 서사만 재현함(첫 plan 실행에서 `.harnie/` 미생성·codex 0건·footer 없음). **quick도 동일한 지침-의존 구조**라 같은 스킵에 취약하나 실증은 별도. **머신·훅 자체는 정상**(위 5/5는 "문자 그대로 완주하라"고 **지시 주입**했을 때의 결과) — 문제는 **부트스트랩 갭**: H1/H2 훅은 `.harnie/active.json`(=`init`) 후에만 켜지는데, `init` 실행 자체가 지침 의존이라 over-eager 오케스트레이터가 스킵하면 강제가 통째로 dormant(설계 §0.1이 막으려던 실패가 부트스트랩에서 순환 발생). **채택 설계(구조적 해결):** ① `UserPromptExpansion` 훅으로 직접 입력한 `/harnie:plan`을 가로채 bootstrap + ② `PreToolUse` `Skill` matcher로 모델의 skill 호출 경로도 bootstrap(직접 slash는 `PreToolUse Skill` 우회 → 두 이벤트 모두 필요), ③ 공통 `hooks/bootstrap.mjs`가 stdin JSON(`command_name`/`command_args`/`command_source`) 파싱(raw 인자 셸 삽입 금지, slug는 내부 slugify+짧은 hash), ④ bootstrap 실패 시 **exit 2 fail-closed**(삼키지 않음), ⑤ `init` **rollover 계약**(같은 run reuse·다른 incomplete run 차단+재개 안내·이전 complete run은 dir 보존하고 active 포인터만 전환), ⑥ **quick은 별도 설계**(plan execution machine 재사용 금지 — `--track quick` 단순 추가 시 phase=planning 고정으로 실제 쓰기 차단). 임베디드 `!`bash는 `disableSkillShellExecution`로 무력화 가능해 **강제 경로에서 제외**(보조 표시용만). 다음 단계 = 설치-플러그인 훅 프로브로 이벤트 스키마 고정(P1 UserPromptExpansion·P2 PreToolUse Skill·P3 exit2 차단·P4 init lifecycle) → plan 전용 bootstrap 설계.
+
+- **부수 수정(별건, 완료):** 사용자 전역 `~/.claude/settings.json` PreToolUse Bash 훅이 **비복합 명령에 exit 1** 반환 → Claude Code가 non-blocking "PreToolUse:Bash hook error"로 표시하던 잠복 버그(harnie 무관, 모든 세션 노이즈). 파이프라인 말미 `|| true`로 수정됨.
 - **열린 후속(별건)**: 승인-前 Bash 게이트 하드닝(DR-002 — `isReadOnlyBash`의 `rg --pre`·`git --ext-diff`·경로지정 실행파일 등). auto-allow와 독립. `docs/permission-prompt-reduction.md` §부수 발견.
 - **미커밋 잔여**: `github-profile-developer-cute.png`(참조 없는 stray, 의도 확인 후 처리).
 - **주의**: 커밋 author 이메일이 로컬 호스트명이면 GitHub 계정 미연결 — 필요 시 `git config user.email <github-email>` 후 amend + `git push --force-with-lease`.
