@@ -1,0 +1,39 @@
+{
+  "_provenance": "Hook stdin payload SHAPES captured live from an isolated --plugin-dir probe on Claude Code 2.1.90 (2026-08-11). The probe plugin still used pre-rename skill names (plan/quick); the field shapes are identical, so the command/skill strings below are updated to the final dev-* entrypoints (dev router, dev-full/dev-quick skills). Volatile fields (session_id, transcript_path, cwd, tool_use_id) are redacted.",
+  "_findings": {
+    "UserPromptExpansion": "NOT a valid hooks key in 2.1.90 settings.json (Invalid key in record). The direct-slash path uses UserPromptSubmit.",
+    "directSlashPath": "A direct /harnie:dev-full (skill is the entrypoint, no wrapper command) fires UserPromptSubmit ONLY and does NOT invoke the Skill tool — so no PreToolUse Skill event. The skill body loads deterministically.",
+    "routerPath": "/harnie:dev (router command) or a natural-language request makes the model call the Skill tool -> PreToolUse Skill fires with the resolved skill (harnie:dev-full | harnie:dev-quick) and args.",
+    "exit2": "exit 2 from a hook on EITHER event blocks the invocation (fail-closed): UserPromptSubmit blocks the prompt; PreToolUse Skill blocks the Skill tool call.",
+    "bootstrapMatch": "bootstrap.mjs: UserPromptSubmit matches raw prompt ^/harnie:dev-full(?:\\s|$) -> bootstrap; ^/harnie:dev(?:\\s|$) -> write pending-route; dev-quick/non-harnie -> no-op. PreToolUse Skill keys off tool_input.skill === 'harnie:dev-full' -> bootstrap; 'harnie:dev-quick' -> clear pending-route."
+  },
+  "userPromptSubmit_devFull": {
+    "session_id": "<SESSION_ID>",
+    "transcript_path": "<TRANSCRIPT_PATH>",
+    "cwd": "<REPO_ROOT>",
+    "permission_mode": "default",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "/harnie:dev-full add a subtract function"
+  },
+  "userPromptSubmit_devRouter": {
+    "session_id": "<SESSION_ID>",
+    "transcript_path": "<TRANSCRIPT_PATH>",
+    "cwd": "<REPO_ROOT>",
+    "permission_mode": "default",
+    "hook_event_name": "UserPromptSubmit",
+    "prompt": "/harnie:dev add a subtract function"
+  },
+  "preToolUse_skill": {
+    "session_id": "<SESSION_ID>",
+    "transcript_path": "<TRANSCRIPT_PATH>",
+    "cwd": "<REPO_ROOT>",
+    "permission_mode": "default",
+    "hook_event_name": "PreToolUse",
+    "tool_name": "Skill",
+    "tool_input": {
+      "skill": "harnie:dev-quick",
+      "args": "add a subtract function"
+    },
+    "tool_use_id": "<TOOL_USE_ID>"
+  }
+}

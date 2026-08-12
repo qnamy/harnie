@@ -19,12 +19,15 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 - **빌더 격리 = lean (DR-013 결정, v0)**: v0에선 worktree 격리를 **defer**. 빌더(Codex workspace-write)는 **메인 트리(cwd=repo)** 에서 작업한다. 권위 상태(`.harnie/`)는 repo 안이라 빌더가 물리적으론 닿을 수 있지만, **실수-안전 가드**로 충분하다: ① **authority-state seal(DR-003)** — execution.mjs가 **빌더 호출 직전 권위 집합 전체의 canonical hash를 seal로 기록**한다. seal 입력 = `plan.md + manifest.json + 모든 review-unit의 ledger.json·state.json + 모든 verification/evidence receipt`(빌더 라운드 중 합법적으로 변하는 **advisory `active.json`·`execution.json`은 제외**). 빌더 산출 후 delta 귀속·ledger 적용 **전에 재해시 비교** → mismatch(빌더가 manifest·ledger·evidence 등 권위 파일을 건드림)면 **fail-closed**(그 라운드 무효·보고). delta 제외는 "숨기기"가 아니라 이 seal이 **독립 탐지**를 담당. ② loop.mjs가 ledger를 **fail-closed 구조 검증** ③ 빌더 프롬프트에 `.harnie/` 미접근 명시. **근거(§0.1)**: fallible 빌더가 *유효한 APPROVED ledger*를 실수로 위조할 확률은 무시가능 — 적대적 빌더 봉쇄는 비목표. **worktree lifecycle(생성·dirty seed·delta 승격·정리)은 구현 부담이 커 post-v0로 이연.**
 
 ## 3. Bootstrap·Active sentinel (DR-009 경계)
+
+> **교차참조:** 이 sentinel을 **누가/어떻게 생성**하는가(진입점 해석·자동 bootstrap 훅·run 수명주기·동시성·A0 계약)는 [`bootstrap-adherence.md`](bootstrap-adherence.md)가 **확장·우선**한다. 아래 sentinel-first·스키마는 유효하되, 최종 설계에서는 **스킬 A0의 자체 init 대신 bootstrap 훅이 sentinel을 결정적으로 생성**하고 `active.json`에 `base`/collision-free `slug`를 담는다.
+
 - **`.harnie/active.json`**(sentinel) = `{track, slug, planHash|null, readOnlyThreads:[…]}`. 훅은 이것만 본다. 부재=비활성 통과.
 - **sentinel-first 부트스트랩**: PHASE A 시작 시(아직 아무 코드도 생성 전) sentinel을 **먼저** atomic write → execution.json 생성. sentinel이 있는데 execution.json이 없거나 malformed·planHash 불일치면 **fail-closed(차단)**. → crash 창 없음.
 - 의도적 sentinel 삭제로 하는 우회는 §0.1 위협모델 밖(적대적). 실수-안전엔 sentinel-first로 충분.
 
 ## 4. manifest·planHash (DR-011)
-- **승인 바인딩 (DR-014)**: planning→executing은 **실제 사용자 승인 응답**에만 근거한다. `/harnie:plan` A5는 Plan mode 진입 미보장이라 `ExitPlanMode` 전제 없이 **`AskUserQuestion`("이 계획을 승인/거절?")** 을 쓰고, 성공 여부가 아니라 **선택지·planHash까지 바인딩**한다:
+- **승인 바인딩 (DR-014)**: planning→executing은 **실제 사용자 승인 응답**에만 근거한다. `/harnie:dev-full`(구 `/harnie:plan`) A5는 Plan mode 진입 미보장이라 `ExitPlanMode` 전제 없이 **`AskUserQuestion`("이 계획을 승인/거절?")** 을 쓰고, 성공 여부가 아니라 **선택지·planHash까지 바인딩**한다:
   - **PreToolUse(AskUserQuestion)**: pending receipt `{tool_use_id, planHash(현재 plan.md 해시), 승인 질문·옵션}` 기록.
   - **PostToolUse(AskUserQuestion)**: **같은 `tool_use_id`의 실제 답이 "승인"이며 현재 planHash가 pending과 동일**할 때만 `execution.mjs`가 manifest 파생·planHash 확정·phase=executing 전이. **거절·질문 불일치·질문 이후 plan 변경(hash 불일치)** 은 **awaiting-approval 유지(fail-closed)**.
   → 사용자가 실제로 "승인"을 누르고, 그 시점 plan이 승인받은 그대로일 때만 실행이 열린다(over-eager main의 self-승인·승인 후 몰래 변경 차단). (Plan mode 배선 시 `ExitPlanMode` PostToolUse도 동일 패턴.)

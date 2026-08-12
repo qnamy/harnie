@@ -1,16 +1,17 @@
 // execution.mjs 테스트 — 순수 권위 함수 + fail-closed IO 경로(init/approve/seal/verify/completion).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
+import { execFileSync, execFile } from "node:child_process"
 import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
-import { fileURLToPath } from "node:url"
+import { fileURLToPath, pathToFileURL } from "node:url"
 import {
   stableStringify, computePlanHash, validateSlug, assertContainedRel,
   extractManifestBlock, validateManifest, canonicalManifest,
   deriveCompletion, sealHashOf, parseStatusFooter, FailClosed, authorityApproved,
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
+  bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState, markRouteFailed,
 } from "./execution.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -432,4 +433,198 @@ test("register(함수): threadId 등록·재등록 금지(훅 전용, CLI 아님
   assert.equal(registerBuilderThread(root, "feat-x", "T1", "th-b").threadId, "th-b")
   assert.throws(() => registerBuilderThread(root, "feat-x", "T1", "th-other"), FailClosed) // 다른 threadId 재등록 금지
   assert.ok(registerReadonlyThread(root, "plan", "feat-x", "th-r").readOnlyThreads.includes("th-r"))
+})
+
+// ── bootstrap (진입점 훅 소유, docs/bootstrap-adherence.md) ─────────────────
+function readSentinel(root) { return JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")) }
+// genuinelyComplete run 구성: init→approve→모든 task/gate ledger·state·receipt 채움(completion=true).
+function makeCompleteRun(root, slug) {
+  const dir = writePlan(root, slug)
+  run(["init", "--root", root, "--slug", slug])
+  approveFlow(root, slug)
+  const postSHA = JSON.parse(execFileSync("node", [join(HERE, "loop.mjs"), "capture", root], { encoding: "utf8" })).baselineSHA
+  for (const [unit, task] of [["task-a", "T1"], ["task-b", "T2"]]) {
+    const ud = join(dir, "review", unit); mkdirSync(ud, { recursive: true })
+    writeFileSync(join(ud, "ledger.json"), "{}")
+    writeFileSync(join(ud, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: postSHA }))
+    run(["verify", "--root", root, "--slug", slug, "--task", task])
+  }
+  for (const g of ["final-coverage", "final-quality", "final-runtime", "final-scope"]) {
+    const gd = join(dir, "review", g); mkdirSync(gd, { recursive: true })
+    writeFileSync(join(gd, "ledger.json"), "{}")
+    writeFileSync(join(gd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: postSHA }))
+  }
+  return dir
+}
+
+test("slugify: prefix-hash·결정적·한국어 지원·동일prefix 구분(P1-1)", () => {
+  const s1 = slugify("Add a Subtract Function")
+  assert.match(s1, /^add-a-subtract-function-[0-9a-f]{8}$/)
+  assert.equal(slugify("Add a Subtract Function"), s1) // 결정적
+  assert.match(slugify("a b c d e f g h"), /^a-b-c-d-e-f-[0-9a-f]{8}$/) // prefix 최대 6토큰 + hash
+  // 앞 6토큰 동일·전체는 다른 작업 → hash로 구분(오인 resume 방지)
+  assert.notEqual(slugify("add a new payment flow for tenant alpha"), slugify("add a new payment flow for tenant beta"))
+  // 한국어(비-ASCII) → prefix 없이 hash만, 유효 slug
+  const ko = slugify("로그인 버그 수정")
+  assert.match(ko, /^[0-9a-f]{8}$/)
+  assert.doesNotThrow(() => validateSlug(ko))
+  assert.notEqual(slugify("로그인 버그 수정"), slugify("결제 버그 수정")) // 다른 한국어 작업 구분
+  // 공백 정규화 → 같은 작업 = 같은 slug
+  assert.equal(slugify("fix  the   bug"), slugify("fix the bug"))
+  assert.equal(slugify(""), "") // 빈 작업 → 호출자 exit 2
+  assert.equal(slugify("   "), "")
+})
+
+test("bootstrapRun: 신규(sentinel 없음) → run 생성·active.json base+slug·lock 정리", () => {
+  const root = gitRepo()
+  const r = bootstrapRun(root, { base: "feat-x" })
+  assert.equal(r.slug, "feat-x")
+  assert.equal(r.reused, false)
+  const s = readSentinel(root)
+  assert.equal(s.slug, "feat-x")
+  assert.equal(s.base, "feat-x")
+  assert.equal(s.track, "plan")
+  assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x", "execution.json")))
+  assert.ok(!existsSync(join(root, ".harnie", "bootstrap.lock")))
+})
+
+test("bootstrapRun: 빈 base → fail-closed(lock 미생성)", () => {
+  const root = gitRepo()
+  assert.throws(() => bootstrapRun(root, { base: "" }), FailClosed)
+  assert.ok(!existsSync(join(root, ".harnie", "bootstrap.lock")))
+})
+
+test("bootstrapRun: track!=plan → fail-closed(quick 이연)", () => {
+  const root = gitRepo()
+  assert.throws(() => bootstrapRun(root, { base: "feat-x", track: "quick" }), FailClosed)
+})
+
+test("bootstrapRun: collision-free(base dir 선점) → base-2", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, ".harnie", "plan", "feat-x"), { recursive: true })
+  assert.equal(bootstrapRun(root, { base: "feat-x" }).slug, "feat-x-2")
+})
+
+test("bootstrapRun: 같은 base·미완료 active → resume(reuse)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x" })
+  const r = bootstrapRun(root, { base: "feat-x" })
+  assert.equal(r.reused, true)
+  assert.equal(r.slug, "feat-x")
+})
+
+test("bootstrapRun: 다른 base·미완료 active → block(fail-closed)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x" })
+  assert.throws(() => bootstrapRun(root, { base: "feat-y" }), (e) => e instanceof FailClosed && /미완료 run/.test(e.message))
+  assert.ok(!existsSync(join(root, ".harnie", "bootstrap.lock")))
+})
+
+test("bootstrapRun: 완료 run·같은 base → 새 run base-2(old 보존·포인터 전환)", () => {
+  const root = gitRepo()
+  makeCompleteRun(root, "feat-x")
+  const r = bootstrapRun(root, { base: "feat-x" })
+  assert.equal(r.reused, false)
+  assert.equal(r.slug, "feat-x-2")
+  assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x", "manifest.json")))
+  assert.equal(readSentinel(root).slug, "feat-x-2")
+})
+
+test("bootstrapRun: 완료 run·다른 base → 새 run(전환·old 보존)", () => {
+  const root = gitRepo()
+  makeCompleteRun(root, "feat-x")
+  const r = bootstrapRun(root, { base: "feat-z" })
+  assert.equal(r.slug, "feat-z")
+  assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x", "manifest.json")))
+  assert.equal(readSentinel(root).slug, "feat-z")
+})
+
+test("bootstrapRun: resume 시 execution.json JSON 손상 → fail-closed(P2-5)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x" })
+  writeFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "{ not json")
+  assert.throws(() => bootstrapRun(root, { base: "feat-x" }), FailClosed)
+})
+
+test("bootstrapRun: resume 시 execution.json이 sentinel과 불일치 → fail-closed(P2-5)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x" })
+  writeFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), JSON.stringify({ track: "plan", slug: "other", phase: "planning", tasks: {} }))
+  assert.throws(() => bootstrapRun(root, { base: "feat-x" }), FailClosed)
+})
+
+test("withStateLock: fn 실행 + lock 파일 정리(P1-3)", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, ".harnie"), { recursive: true })
+  assert.equal(withStateLock(root, () => 42), 42)
+  assert.ok(!existsSync(join(root, ".harnie", "state.lock")))
+})
+
+test("pending-route: session-scoped + state(pending/failed) + 세션 격리(P1-1/P1-3)", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, ".harnie"), { recursive: true })
+  assert.equal(getRouteState(root, "a"), null)
+  writePendingRoute(root, "a")
+  assert.equal(getRouteState(root, "a"), "pending")
+  assert.equal(getRouteState(root, "b"), null) // 세션 격리
+  markRouteFailed(root, "a", "미완료 run 충돌")
+  assert.equal(getRouteState(root, "a"), "failed") // 실패 상태로 전환
+  markRouteFailed(root, "b", "no entry") // 없는 세션 → no-op(직접 진입 실패는 latch 안 함)
+  assert.equal(getRouteState(root, "b"), null)
+  clearPendingRoute(root, "b") // b가 해제해도 a는 유지
+  assert.equal(getRouteState(root, "a"), "failed")
+  clearPendingRoute(root, "a")
+  assert.equal(getRouteState(root, "a"), null)
+  assert.equal(hasPendingRoute(root, "a"), false)
+  assert.throws(() => writePendingRoute(root, null), FailClosed) // session_id 필수
+})
+
+test("getRouteState: 유효 JSON이지만 알 수 없는 state는 fail-closed(P1 — Stop 우회 차단)", () => {
+  const root = gitRepo()
+  const dir = join(root, ".harnie", "pending-route")
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "corrupt.json"), JSON.stringify({ state: "unexpected", at: "x" }))
+  // hasPendingRoute(pretooluse)는 막지만 Stop이 pending/failed 분기 미매치로 통과하던 fail-open → 이제 throw로 양쪽 fail-closed.
+  assert.throws(() => getRouteState(root, "corrupt"), FailClosed)
+  writeFileSync(join(dir, "noState.json"), JSON.stringify({ at: "x" })) // state 필드 자체 부재
+  assert.throws(() => getRouteState(root, "noState"), FailClosed)
+  writeFileSync(join(dir, "notObj.json"), JSON.stringify(["pending"])) // 배열(비 plain object)
+  assert.throws(() => getRouteState(root, "notObj"), FailClosed)
+})
+
+test("bootstrapRun 동시성: 서로 다른 base 8개 동시 실행 → 정확히 1개만 새 run·나머지 block·active.json 일관(P1-5)", async () => {
+  const root = gitRepo()
+  const childPath = join(mkdtempSync(join(tmpdir(), "harnie-child-")), "child.mjs")
+  writeFileSync(childPath, `const {bootstrapRun}=await import(process.argv[2]);try{const r=bootstrapRun(process.argv[3],{base:process.argv[4]});process.stdout.write("OK "+r.slug+(r.reused?" reused":" new"))}catch(e){process.stderr.write(String(e&&e.message||e));process.exit(2)}`)
+  const execUrl = pathToFileURL(CLI).href
+  const runChild = (base) => new Promise((res) => execFile("node", [childPath, execUrl, root, base], (err, stdout) => res({ code: err ? (err.code || 1) : 0, stdout: String(stdout || "") })))
+  const results = await Promise.all(["a", "b", "c", "d", "e", "f", "g", "h"].map(runChild))
+  assert.equal(results.filter((r) => r.code === 0 && / new$/.test(r.stdout)).length, 1, "정확히 1개만 새 run 생성(lock 상호배제)")
+  assert.equal(results.filter((r) => r.code === 2).length, 7, "나머지 7개는 block(다른 base·미완료)")
+  const s = readSentinel(root) // 손상 없이 읽히고 일관
+  assert.ok(s.slug && s.track === "plan")
+  assert.ok(!existsSync(join(root, ".harnie", "state.lock"))) // lock 정리됨
+})
+
+test("state lock: 남은 lock은 자동 회수 없이 fail-closed(P1-2, 수동 복구)", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, ".harnie"), { recursive: true })
+  writeFileSync(join(root, ".harnie", "state.lock"), "999999999-1-deadbeef") // 남아있는 lock
+  assert.throws(() => withStateLock(root, () => 7), FailClosed) // 회수하지 않고 차단(회수 경합이 상호배제를 깨므로)
+  assert.ok(existsSync(join(root, ".harnie", "state.lock"))) // 자동 삭제 안 함(수동 rm 대상)
+})
+
+test("markRouteFailed는 state.lock 경합과 무관(per-session 파일 → lock 없음, P1-1)", () => {
+  const root = gitRepo()
+  writePendingRoute(root, "s1")
+  writeFileSync(join(root, ".harnie", "state.lock"), `${process.pid}-${Date.now()}-live`) // lock 점유 중
+  markRouteFailed(root, "s1", "충돌") // lock 안 잡고 동작해야
+  assert.equal(getRouteState(root, "s1"), "failed")
+})
+
+test("clearPendingRoute는 strict — 삭제 실패면 throw(부재 재확인, P1-3)", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, ".harnie", "pending-route"), { recursive: true })
+  mkdirSync(join(root, ".harnie", "pending-route", "s1.json")) // 파일 자리에 디렉터리 → rmSync(force, non-recursive)가 throw
+  assert.throws(() => clearPendingRoute(root, "s1")) // 삼키지 않고 throw(성공 오보 방지)
 })

@@ -1,6 +1,6 @@
 ---
-name: quick
-description: Orchestrate small tasks such as incidents, localized bug fixes, and minor changes through a lightweight inline flow without skipping stage-by-stage cross-model review (design = Claude production → Codex review; development = Codex production → Claude review). Recommend plan when new components, boundary/contract changes, or architecture decisions are required. Invoked by `/harnie:quick` or the `/harnie:build` router.
+name: dev-quick
+description: Orchestrate small tasks such as incidents, localized bug fixes, and minor changes through a lightweight inline flow without skipping stage-by-stage cross-model review (design = Claude production → Codex review; development = Codex production → Claude review). Recommend the full track when new components, boundary/contract changes, or architecture decisions are required. Invoked by `/harnie:dev-quick` or the `/harnie:dev` router.
 ---
 
 # quick Orchestrator (Class A: Incidents and Small Changes)
@@ -31,7 +31,7 @@ Use `.harnie/quick/<slug>/` as the task root. Store **intermediate artifacts** a
 
 ### 1. Intent and Size
 
-Restate the task in one line. Confirm it is **truly small**: no new component, boundary or contract change, or architecture decision. If it is larger, stop and recommend `/harnie:plan`.
+Restate the task in one line. Confirm it is **truly small**: no new component, boundary or contract change, or architecture decision. If it is larger, stop and recommend `/harnie:dev-full`.
 
 ### 2. Read (When Needed)
 
@@ -39,7 +39,7 @@ For unfamiliar code, spawn `harnie-scout` (haiku) in parallel to locate the rele
 
 ### 3. Optional Lightweight Detailed Design + Design Review
 
-For non-obvious work, produce a **lightweight detailed design** with producer = Claude `harnie-designer`. The authoring contract is the lightweight profile in `design-authoring-detail.md`, loaded in Step 0. Main can write it for small work; delegate non-obvious work to `harnie-designer`. When delegating, **inline the profile contents in the prompt** and signal `detailed design, lightweight`, because subagents do not automatically receive the profile. Quick supports only the **DETAIL altitude** by construction; if the task requires a new component, boundary change, or architecture decision, it should already have been routed to `/harnie:plan` in Step 1. Do not ask for "formal" design; lightweight is the default, and depth should converge to a few lines for small changes.
+For non-obvious work, produce a **lightweight detailed design** with producer = Claude `harnie-designer`. The authoring contract is the lightweight profile in `design-authoring-detail.md`, loaded in Step 0. Main can write it for small work; delegate non-obvious work to `harnie-designer`. When delegating, **inline the profile contents in the prompt** and signal `detailed design, lightweight`, because subagents do not automatically receive the profile. Quick supports only the **DETAIL altitude** by construction; if the task requires a new component, boundary change, or architecture decision, it should already have been routed to `/harnie:dev-full` in Step 1. Do not ask for "formal" design; lightweight is the default, and depth should converge to a few lines for small changes.
 
 **Save the design to `.harnie/quick/<slug>/review/design/design.md`** as the single source read by Step 4 development and review. Then run the **design review loop** to APPROVE following `review-loop-driver.md`: reviewer = Codex; criteria = `design-review.md`; detailed-altitude lens; ID namespace `DR`; `<dir>` = `.harnie/quick/<slug>/review/design/`. Do **not** use the R1 git delta because `design.md` is under excluded `.harnie/` and its delta would always be empty. Instead put the `design.md` content directly in the reviewer prompt—full design for the first review, revised design for rereview—and run R2–R5. Skip all of Step 3 when the task is obvious.
 

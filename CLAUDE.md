@@ -1,6 +1,6 @@
 # harnie — 개발 진행 중 (STATUS 상시 로드)
 
-> 플러그인/repo 이름 = **harnie**(AI 서브에이전트 개발 하네스 + 스킬 허브). 크로스-모델 빌드/리뷰 루프 = 커맨드 `/harnie:build`(라우터)·`/harnie:quick`·`/harnie:plan`, 스킬 `quick`·`plan`, 에이전트 `harnie-scout`·`harnie-designer`·`harnie-builder`. 상태 디렉터리 = `.harnie/`.
+> 플러그인/repo 이름 = **harnie**(AI 서브에이전트 개발 하네스 + 스킬 허브). 크로스-모델 빌드/리뷰 루프 = 커맨드 `/harnie:dev`(라우터), 트랙 스킬 `dev-full`·`dev-quick`(직접 진입 `/harnie:dev-full`·`/harnie:dev-quick`), 에이전트 `harnie-scout`·`harnie-designer`·`harnie-builder`. 상태 디렉터리 = `.harnie/`.
 
 이 repo는 아직 완성 전이다. harnie에서 작업하는 모든 세션은 **아래 진행 상황·요구사항 문서를 항상 먼저 참조**한다. 문서 안의 "관련 문서 인덱스"(§5)는 필요할 때 on-demand로 읽는다(전부 상시 로드하지 않는다).
 

@@ -15,6 +15,8 @@ const CONTROL_BASENAMES = new Set([
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/").toLowerCase()
   if (!p.startsWith(".harnie/")) return false
+  if (p.startsWith(".harnie/pending-route/")) return true // per-session route 파일 보호(다른 세션의 raw 변경/삭제 차단, P1-3)
+  if (p === ".harnie/state.lock") return true             // state lock 보호
   return CONTROL_BASENAMES.has(p.split("/").pop())
 }
 
@@ -43,6 +45,10 @@ export function decideWriteEdit({ relPath, phase, track, slug }) {
 const SHELL_HARD = /[;&`\n\r]|\$\(|<\(|>\(|[<>]/ // read-only에서 즉시 거부(파이프 제외)
 const SHELL_ANY = /[;|&`\n\r]|\$\(|<\(|>\(|[<>]/ // sanctioned CLI는 파이프 포함 어떤 메타도 불가
 const HARNIE_REF = /\.harnie\b/i                 // 비-sanctioned Bash의 .harnie 접근 차단(case-insensitive FS의 .HARNIE 포함)
+// 셸 quote/백슬래시로 `.har""nie`처럼 쪼개 literal 매칭을 우회하는 것을 막기 위해 **quote·백슬래시 제거 후** 매칭(P1-2).
+// (echo ".harnie" 같은 텍스트도 걸리지만 .harnie 참조를 막는 쪽이 안전 — fail-safe.)
+function stripQuoting(cmd) { return String(cmd || "").replace(/['"\\]/g, "") }
+export function referencesHarnie(cmd) { return HARNIE_REF.test(stripQuoting(cmd)) } // baseline .harnie Bash 보호용(active 무관, P1-3)
 // 승인 前 허용하는 read-only 명령. 쓰기 옵션 있는 명령(find/sort/yq)은 제외하고 WRITE_FLAG 토큰도 거부.
 const RO_CMDS = new Set([
   "ls", "cat", "head", "tail", "wc", "grep", "egrep", "fgrep", "rg", "pwd", "echo", "which", "type",
@@ -138,8 +144,8 @@ export function decideBash({ command, phase, trustedClis = new Set(), activeRoot
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) } // sanctioned은 통과; 그 중 4종·유효바인딩만 auto-allow
   }
-  // 비-sanctioned Bash의 .harnie 접근은 phase 무관 전면 차단(승인 후 find .harnie -delete·git clean·node -e 등 포함).
-  if (HARNIE_REF.test(cmd))
+  // 비-sanctioned Bash의 .harnie 접근은 phase 무관 전면 차단(quote 우회 포함 — referencesHarnie가 quote 제거 후 매칭, P1-2).
+  if (referencesHarnie(cmd))
     return { deny: true, reason: `Bash로 .harnie 접근 금지 — 상태는 loop.mjs·execution.mjs(신뢰 CLI)로만` }
   if (PLANNING_PHASES.has(phase)) {
     if (isReadOnlyBash(cmd)) return { deny: false, autoAllow: false } // read-only는 허용하되 auto-allow 범위 확대 안 함(프롬프트 유지)
@@ -152,8 +158,13 @@ export function decideBash({ command, phase, trustedClis = new Set(), activeRoot
 // 승인 前엔 write 가능 서브에이전트 위임 금지(read-only만).
 // designer(Read/Grep/Glob/WebFetch/WebSearch)는 read-only — 설계 산출물은 텍스트로 반환하고 파일은 main이 쓴다.
 const READONLY_AGENTS = new Set(["harnie-scout", "harnie-reviewer", "harnie-designer", "Explore", "Plan"])
+// 설치본에선 서브에이전트 타입이 plugin-namespaced로 온다(예: `harnie:harnie-scout`) → `harnie:` 접두어 정규화 후 대조.
+// (미정규화 시 read-only scout/designer가 승인 前 조사에서 오차단돼 Explore 폴백 — 라이브 검증서 노출된 버그.)
+function normalizeAgentType(t) {
+  return typeof t === "string" && t.startsWith("harnie:") ? t.slice("harnie:".length) : t
+}
 export function decideTask({ subagentType, phase }) {
-  if (PLANNING_PHASES.has(phase) && !READONLY_AGENTS.has(subagentType))
+  if (PLANNING_PHASES.has(phase) && !READONLY_AGENTS.has(normalizeAgentType(subagentType)))
     return { deny: true, reason: `승인 前(${phase})엔 read-only 서브에이전트만 위임 가능(${subagentType} 차단) — 코드 작성은 승인 후` }
   return { deny: false }
 }

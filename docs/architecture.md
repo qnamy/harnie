@@ -71,7 +71,7 @@
 인라인 경량 + 엄격 실행 + 크로스-모델 리뷰. 인터뷰·승인 게이트·플랜 파일·오케스트레이션은 없지만 **리뷰는 축약하지 않는다**.
 
 ```
-1. Intent & size — 한 줄로 재진술 + 진짜 작은지 확인. 크면 /harnie:plan 권함.
+1. Intent & size — 한 줄로 재진술 + 진짜 작은지 확인. 크면 /harnie:dev-full 권함.
 2. Read (필요시) — 낯설면 harnie-scout 병렬 스폰. 자명하면 skip.
 3. (옵션) 상세 설계(경량) + 설계 리뷰(Codex) — 비자명하면. 자명하면 skip.
 4. Write — Codex 빌더(workspace-write) 위임. surgical, 기존 스타일.
@@ -88,11 +88,11 @@
 
 ### PHASE A — PLAN
 ```
-A0. 부트스트랩 — execution.mjs init(sentinel-first). 이후 강제 훅이 활성.
-A1. Classify + Ground — harnie-scout 병렬로 코드베이스 파악.
-A2. Route CLEAR/UNCLEAR (announce) —
-     CLEAR: two-filter, owner-decision만 WHY와 함께 질문.
-     UNCLEAR: 최대 리서치, best-practice 기본값 adopt + announce.
+A0. 활성 run 채택 — bootstrap 훅이 만든 sentinel/execution.json을 읽어 slug 사용(자체 init 금지). 이후 강제 훅 활성.
+A1. 범위비례 그라운딩 — harnie-scout 병렬로 조사(호출경로·테스트·설정/env·데이터/마이그레이션·연동/API·문서·유사구현 중 관련 있는 것만 깊이).
+A2. 근거 기반 질문 결정(CLEAR/UNCLEAR 폐기) —
+     확인·추론 가능한 건 안 묻는다. 사용자만 정할 제품·정책 의도/해석 분기/재작업·호환성/외부 컨텍스트만, 근거·선택지·권장안 제시 후 최대 3개.
+     안 묻는 가정은 plan.md `## Assumptions`에 기록.
 A3. 아키텍처 설계(정식) + 리뷰 루프 — **조건부**(경계·소유권·기술선택이 바뀔 때만).
 A4. 상세 설계(정식) + 리뷰 루프 — A3와 독립 루프. 설계 오류를 구현 前에 잡는다.
 A5. 승인 게이트(1회) — plan.md를 제시하고 AskUserQuestion으로 명시적 승인. 승인이 실행을 연다.
@@ -113,17 +113,19 @@ B6. Report + 완료 재도출 — manifest 순회로 완료 판정 + 완료 상�
 
 ---
 
-## 6. `/harnie:build` 라우터
+## 6. `/harnie:dev` 라우터 + 트랙 스킬
+
+진입점 = **커맨드 `/harnie:dev`(라우터) 1개 + 트랙 스킬 `dev-full`·`dev-quick`(직접 진입) 2개.** 겹치던 command↔skill 이름·역할을 분리하고, 트랙을 스킬 직접 진입으로 두어 본문이 결정적으로 로드된다(부트스트랩 갭 방지 — [bootstrap-adherence.md](bootstrap-adherence.md)).
 
 ```
-/harnie:build "<작업>" → 크기 분류(작은 수정 vs 신규·구조변경)
+/harnie:dev "<작업>"       → 크기 분류(작은 수정 vs 신규·구조변경)
               → 트랙 announce + 사용자 override 가능
-              → 해당 트랙 스킬(quick / plan) 로드
-/harnie:quick "<작업>" → quick 강제
-/harnie:plan  "<작업>" → plan 강제
+              → 해당 트랙 스킬(dev-quick / dev-full) 호출
+/harnie:dev-quick "<작업>" → quick 트랙 스킬 직접 진입
+/harnie:dev-full  "<작업>" → plan 트랙 스킬 직접 진입
 ```
 
-분류는 순수 프롬프트 로직. announce + override로 오라우팅을 상쇄한다.
+분류는 순수 프롬프트 로직. announce + override로 오라우팅을 상쇄한다. (내부 track 값은 그대로 `quick`/`plan`.)
 
 ---
 

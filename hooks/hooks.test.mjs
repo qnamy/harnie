@@ -2,7 +2,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync } from "node:fs"
+import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, existsSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -278,4 +278,100 @@ test("Stop: 승인 후 plan.md 변조 + closed 위조 → approvalEvidence로 ph
   const ex = JSON.parse(readFileSync(exPath, "utf8")); ex.phase = "closed"; writeFileSync(exPath, JSON.stringify(ex))
   const r = hook(STOP, { cwd: root, stop_hook_active: false, last_assistant_message: "끝" })
   assert.equal(r.decision, "block") // approved=false + approvalEvidence → 변조 의심 block
+})
+
+// ── pending-route 게이트(§3.9): per-session 파일, active 무관, Bash 전면 차단, control-path 보호, honesty(P1-1/2/3/4) ──
+function routeFilePath(root, sid) { return join(root, ".harnie", "pending-route", sid + ".json") }
+function pendingRepo(sid, entry = { state: "pending", at: new Date().toISOString() }) {
+  const root = mkdtempSync(join(tmpdir(), "harnie-hooks-"))
+  execFileSync("git", ["-C", root, "init", "-q"])
+  mkdirSync(join(root, ".harnie", "pending-route"), { recursive: true })
+  writeFileSync(routeFilePath(root, sid), JSON.stringify(entry))
+  return root
+}
+test("pending-route 게이트: 라우팅 미완료 시 작업 도구·Bash 전면 차단, 다른 세션은 미적용", () => {
+  const SID = "s1"
+  const root = pendingRepo(SID)
+  const pl = (o) => ({ ...o, cwd: root, session_id: SID })
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Write", tool_input: { file_path: join(root, "src", "x.js") } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rm -rf x" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "ls -la" } })))) // Bash 전면 차단(P1-4: rg --pre 등 우회 방지)
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Task", tool_input: { subagent_type: "harnie-builder" } }))))
+  // 다른 세션(SID 불일치, pending 없음)은 일반 작업 미적용
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "x.js") }, cwd: root, session_id: "other" }), null)
+})
+
+test("baseline: control/route 파일 raw 변경 차단 — Write(견고)·literal/quote Bash(best-effort)", () => {
+  const root = pendingRepo("s1")
+  // Write는 canonical containment로 견고하게 차단(active 없어도)
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: routeFilePath(root, "s1") }, cwd: root, session_id: "other" })))
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "active.json") }, cwd: root, session_id: "other" })))
+  // Bash는 literal/quote까지 best-effort 차단(§0.1 실수 방지). glob/변수 셸 우회는 적대적이라 비목표.
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm " + routeFilePath(root, "s1") }, cwd: root, session_id: "other" })))
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: 'rm .har""nie/pending-route/s1.json' }, cwd: root, session_id: "other" }))) // quote 우회 차단
+})
+
+test("라우팅 세션 자신의 Bash는 pending 게이트가 막음(자기 route 파일 self-tamper 불가, P1)", () => {
+  const root = pendingRepo("s1")
+  // s1은 pending이 있으므로 자기 Bash(glob 포함)가 전면 차단 → 자기 gate를 Bash로 우회 불가
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm .har?ie/pending-route/s1.json" }, cwd: root, session_id: "s1" })))
+})
+
+test("pending-route 게이트: 활성 run이 있어도 pending이면 차단(active 무관 우선, P1-2)", () => {
+  const { root } = setupRepo() // active run 존재
+  mkdirSync(join(root, ".harnie", "pending-route"), { recursive: true })
+  writeFileSync(routeFilePath(root, "s2"), JSON.stringify({ state: "pending", at: new Date().toISOString() }))
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root, session_id: "s2" })))
+})
+
+test("Stop: 이 세션 pending-route(pending)면 종료 차단(P1-1)", () => {
+  const root = pendingRepo("s3")
+  const r = hook(STOP, { cwd: root, session_id: "s3", stop_hook_active: false, last_assistant_message: "done" })
+  assert.equal(r.decision, "block")
+})
+
+test("Stop: failed + 첫 Stop은 차단(정직 보고 유도, P1-4)", () => {
+  const root = pendingRepo("s4a", { state: "failed", reason: "x", at: new Date().toISOString() })
+  const r = hook(STOP, { cwd: root, session_id: "s4a", stop_hook_active: false, last_assistant_message: "라우팅 실패" })
+  assert.equal(r.decision, "block")
+  assert.ok(existsSync(routeFilePath(root, "s4a"))) // 아직 미정리
+})
+
+test("Stop: failed + 재호출 + 정직한 INCOMPLETE 보고 → 정리 후 통과(P1-1/P1-4)", () => {
+  const root = pendingRepo("s4", { state: "failed", reason: "미완료 run 충돌", at: new Date().toISOString() })
+  const r = hook(STOP, { cwd: root, session_id: "s4", stop_hook_active: true, last_assistant_message: "라우팅 실패.\nHARNIE_STATUS: INCOMPLETE — B 시작 못함" })
+  assert.equal(r, null) // 통과
+  assert.equal(existsSync(routeFilePath(root, "s4")), false) // 정리됨
+})
+
+test("Stop: failed + 재호출인데 거짓 COMPLETE 보고 → 계속 차단·미정리(P1-4)", () => {
+  const root = pendingRepo("s5", { state: "failed", reason: "x", at: new Date().toISOString() })
+  const r = hook(STOP, { cwd: root, session_id: "s5", stop_hook_active: true, last_assistant_message: "끝.\nHARNIE_STATUS: COMPLETE" })
+  assert.equal(r.decision, "block") // 거짓 완료 주장 → 차단
+  assert.ok(existsSync(routeFilePath(root, "s5"))) // latch 유지(미정리)
+})
+
+test("Stop: failed + INCOMPLETE인데 blocker 없음 → 계속 차단·미정리(P2)", () => {
+  const root = pendingRepo("s6", { state: "failed", reason: "x", at: new Date().toISOString() })
+  const r = hook(STOP, { cwd: root, session_id: "s6", stop_hook_active: true, last_assistant_message: "HARNIE_STATUS: INCOMPLETE" })
+  assert.equal(r.decision, "block") // blocker 미명시 → 차단(빈 INCOMPLETE 우회 방지)
+  assert.ok(existsSync(routeFilePath(root, "s6"))) // 미정리
+})
+
+test("Stop: 손상된 route(알 수 없는 state)면 fail-closed 차단(P1 — 우회 방지)", () => {
+  // 유효 JSON이지만 state가 pending/failed가 아님 → 예전엔 Stop이 두 분기 모두 건너뛰고 통과(fail-open). 이제 차단.
+  const root = pendingRepo("s7", { state: "unexpected", at: new Date().toISOString() })
+  const r = hook(STOP, { cwd: root, session_id: "s7", stop_hook_active: false, last_assistant_message: "done" })
+  assert.equal(r.decision, "block")
+})
+
+test("PreToolUse: 손상된 route(알 수 없는 state)면 작업 도구 fail-closed deny(P1)", () => {
+  const root = pendingRepo("s8", { state: "unexpected", at: new Date().toISOString() })
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "x.js") }, cwd: root, session_id: "s8" })))
+})
+
+test("pending-route 없으면 active run 없을 때 통과(게이트 미적용)", () => {
+  const root = mkdtempSync(join(tmpdir(), "harnie-hooks-"))
+  execFileSync("git", ["-C", root, "init", "-q"])
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "x.js") }, cwd: root }), null)
 })

@@ -2,7 +2,7 @@
 // H2 Stop — 미완료-확정 방지(설계 §5.2). 권위 재도출로 완료 판정, 재호출은 HARNIE_STATUS footer 계약으로.
 // 오류·상태 손상은 **fail-closed**: block한다(throw로 exit 1 나면 Claude Code가 비차단 처리 → fail-open이 되므로 전체 catch).
 import { readStdin, findRoot, blockStop, allow } from "./lib.mjs"
-import { loadContext, computeCompletion, parseStatusFooter } from "../scripts/execution.mjs"
+import { loadContext, computeCompletion, parseStatusFooter, getRouteState, clearPendingRoute } from "../scripts/execution.mjs"
 import { decideStop } from "../scripts/guards.mjs"
 
 const p = await readStdin()
@@ -16,6 +16,19 @@ const failClosed = (blockers) => {
 
 try {
   const root = findRoot(p.cwd)
+  // pending-route(P1-1): 라우팅 상태에 따라 — `pending`(Skill 미호출)이면 종료 차단(강제 우회 방지),
+  // `failed`(라우팅 시도했으나 bootstrap 실패)이면 **정리 후 통과**(정직한 실패 보고 허용; 활성 run이 있으면 아래 완료 판정이 다시 막는다).
+  const routeState = getRouteState(root, p.session_id)
+  if (routeState === "pending") blockStop("라우팅 미완료(pending-route) — track 스킬(dev-full/dev-quick)을 호출해 라우팅을 완료한 뒤 종료하세요")
+  if (routeState === "failed") {
+    // **정직한 실패 보고 확인(P1-4)**: footer가 거짓 COMPLETE거나 없으면 계속 차단, 정직 INCOMPLETE 보고면 정리 후 통과.
+    const d = decideStop({ complete: false, blockers: ["라우팅 실패(bootstrap 미완) — 정직한 `HARNIE_STATUS: INCOMPLETE — <이유>` 보고 필요"], footer, stopHookActive })
+    if (d.block) blockStop(d.reason)
+    // INCOMPLETE에 **실제 blocker 이유가 있어야** 정리(빈 `INCOMPLETE`만으로 latch 우회 방지, P2). 구분자만 있고 내용 없으면 차단.
+    const blocker = String((footer && footer.detail) || "").replace(/^[—\-:\s]+/, "").trim()
+    if (!blocker) blockStop("`HARNIE_STATUS: INCOMPLETE — <라우팅 실패 이유>` 형태로 남은 이유를 명시하세요")
+    clearPendingRoute(root, p.session_id)
+  }
   const ctx = loadContext(root)
   if (!ctx.active) allow()
   else if (ctx.failClosed) failClosed([`상태 손상: ${ctx.reason}`])

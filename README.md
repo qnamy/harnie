@@ -17,11 +17,11 @@
 
 ## 빌드/리뷰 루프
 
-| 커맨드 | 동작 |
+| 진입점 | 동작 |
 |---|---|
-| `/harnie:build "<작업>"` | 라우터 — 크기를 분류해 quick/plan으로 자동 라우팅(announce + 사용자 override) |
-| `/harnie:quick "<작업>"` | 작은 작업(장애·수정): 인라인 경량 + 실행 + 단계별 크로스-모델 리뷰 |
-| `/harnie:plan "<작업>"` | 큰 작업(신규·구조변경): 계획 → 설계 리뷰 → 승인 게이트 → 오케스트레이션 → 코드 리뷰 → 최종 웨이브(Coverage·Quality·Runtime·Scope) |
+| `/harnie:dev "<작업>"` | 라우터 **커맨드** — 크기를 분류해 dev-quick/dev-full로 자동 라우팅(announce + 사용자 override) |
+| `/harnie:dev-quick "<작업>"` | 작은 작업(장애·수정) **스킬**(직접 진입): 인라인 경량 + 실행 + 단계별 크로스-모델 리뷰 |
+| `/harnie:dev-full "<작업>"` | 큰 작업(신규·구조변경) **스킬**(직접 진입): 계획 → 설계 리뷰 → 승인 게이트 → 오케스트레이션 → 코드 리뷰 → 최종 웨이브(Coverage·Quality·Runtime·Scope) |
 
 - 루프 코어(`scripts/loop.mjs`·`ledger.mjs`·`delta.mjs`)는 **프로바이더 무관** — 상태머신·ledger 정합·델타 캡처만 결정적으로 처리하므로 스왑에 코드 변경이 없다.
 - **plan 트랙 강제 훅**: 두 불변식을 기계화한다 — ① 승인 게이트 전 소스 쓰기 금지 ② 미승인·미완료를 done으로 확정 금지. 권위 = `planHash`로 고정된 immutable manifest + 리뷰 ledger + verification receipt(자세히는 [docs/execution-state.md](docs/execution-state.md)).
@@ -60,8 +60,8 @@ claude --plugin-dir ./harnie
 harnie/
 ├── .claude-plugin/plugin.json   # 플러그인 정체성(name: harnie)
 ├── .mcp.json                    # codex MCP 서버 선언
-├── commands/                    # /harnie:build · quick · plan (영문 정본 + *-ko.md 미러)
-├── skills/                      # quick·plan 오케스트레이터 + 방법론 스킬
+├── commands/                    # /harnie:dev 라우터 (영문 정본 + *-ko.md 미러)
+├── skills/                      # dev-full·dev-quick 오케스트레이터(직접 진입) + 방법론 스킬
 ├── agents/                      # harnie-scout · designer · builder · reviewer (영문 정본 + *-ko.md 미러)
 ├── instructions/                # canonical 런타임 계약(영문 실행 정본). *-ko.md는 한국어 미러
 ├── scripts/                     # loop / ledger / delta / execution / guards (루프·상태 코어)

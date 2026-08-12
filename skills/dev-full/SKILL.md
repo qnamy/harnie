@@ -1,6 +1,6 @@
 ---
-name: plan
-description: Orchestrate large work such as new features, modules, and structural changes through the full lifecycle—planning (grounding + routing) → design → cross-model design review before code → approval gate → orchestrated execution → cross-model code review → final wave (Coverage, Quality, Runtime, Scope). Use symmetric cross-model review where design = Claude production → Codex review and development = Codex production → Claude review. Invoked by `/harnie:plan` or the `/harnie:build` router.
+name: dev-full
+description: Orchestrate large work such as new features, modules, and structural changes through the full lifecycle—planning (grounding + routing) → design → cross-model design review before code → approval gate → orchestrated execution → cross-model code review → final wave (Coverage, Quality, Runtime, Scope). Use symmetric cross-model review where design = Claude production → Codex review and development = Codex production → Claude review. Invoked by `/harnie:dev-full` or the `/harnie:dev` router. (Internal track value stays `plan`.)
 ---
 
 # plan Orchestrator (Class B: New or Large Changes)
@@ -40,7 +40,7 @@ When a new user message arrives, do **not** automatically carry forward the curr
 
 The plan track uses **durable execution state plus minimal mandatory hooks** to mechanize two invariants: **① no source writes before approval, and ② no declaration of done while unapproved or incomplete.** Authority comes from the immutable, planHash-bound `manifest.json`, each review unit's ledger and state, and verification receipts. `execution.json` is only an advisory cache and must not be trusted; hooks evaluate approval from manifest + planHash rather than an advisory phase. In the steps below, `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}` and `<repo>` = the absolute path of the working repository. **Every `execution.mjs` and `loop.mjs` invocation requires `--root <repo>`** and exits immediately without it. Manipulate state **only through `execution.mjs`**; hooks block direct Edit/Write/Bash writes.
 
-- **Bootstrap (start PHASE A, before generating code):** `node <ROOT>/scripts/execution.mjs init --root <repo> --track plan --slug <slug>` — Create the sentinel (`.harnie/active.json`) first, then `execution.json`. Hooks use the sentinel to detect the active run.
+- **Active run is created by the bootstrap hook — never by this skill.** The `/harnie:dev-full` (or `/harnie:dev` router → `Skill(harnie:dev-full)`) invocation already ran the bootstrap hook, which created the sentinel (`.harnie/active.json`) and `execution.json`. **Read `.harnie/active.json`, confirm `track === "plan"`, and use its `slug` (`<slug>`) for every CLI below. Do NOT run `execution.mjs init`.** If `active.json` is absent or malformed, STOP and report that the bootstrap hook failed — do not self-initialize (that would reopen the bootstrap-adherence gap; see `bootstrap-adherence.md`).
 - **Bind approval (A5):** `plan.md` must contain a machine-parsable `harnie-manifest` block. Immediately before asking for approval, run `execution.mjs arm-approval --root <repo> --slug <slug> --question "<question>" --approve-option "Approve"` to arm only that question and option, then receive approval through the actual `AskUserQuestion` tool. PreToolUse matches the question/options and records the tool_use_id and current planHash as pending; PostToolUse observes an exact selection match. **Approval and threadId registration are not exposed through the CLI**—hooks perform them only in process, preventing self-approval through sanctioned Bash.
 - **Builder gate (B2):** Immediately before delegation, run `set-task --root <repo> --slug <slug> --task <id> --run-status building`, then `seal --root <repo> --slug <slug>` to snapshot authority. After the builder returns and before attributing its delta, run `seal-verify --root <repo> --slug <slug>`. If the builder altered authority files, fail closed with exit 3.
 - **Verification (B4):** `verify --root <repo> --slug <slug> --task <id>` — Execute the manifest's `verification[]` argv without a shell and record a receipt bound to the reviewedPostSHA scopeHash.
@@ -62,14 +62,27 @@ Record **only reusable knowledge**: newly discovered constraints, approved decis
 
 ## PHASE A — PLAN (Planning Phase)
 
-**A0. Bootstrap (sentinel first).** Before creating any code, run `execution.mjs init` to create the sentinel and then `execution.json`; phase is now `planning`, and mandatory hooks block pre-approval source writes, write-capable subagents, and `workspace-write` Codex calls.
+**A0. Adopt the active run (do not self-init).** The bootstrap hook already created the sentinel and `execution.json` for this invocation (phase `planning`). Read `.harnie/active.json`, confirm `track === "plan"`, and use its `slug` throughout. If it is absent or malformed, STOP and report the bootstrap failure — never run `execution.mjs init` to recover. With the sentinel present, mandatory hooks block pre-approval source writes, write-capable subagents, and `workspace-write` Codex calls.
 
-**A1. Classify and ground.** Spawn `harnie-scout` (haiku) **in parallel** to learn the codebase, going deeper for architectural work. Ground decisions in actual files, interfaces, dependencies, and conventions before making assumptions.
+**A1. Ground with a scope-proportional investigation.** Spawn `harnie-scout` (haiku) **in parallel** to investigate. For each dimension below, first confirm whether it **exists and is relevant** to this task, then trace only the relevant ones deeply — forcing deep investigation of unrelated areas is scope inflation:
 
-**A2. Route CLEAR/UNCLEAR and announce it.**
+- the affected code and its **call paths** (callers and callees),
+- existing **tests** covering the area,
+- **configuration and environment variables**,
+- **data/schema and migrations**,
+- **external integrations and APIs**,
+- relevant **docs/ADRs and repo guidance** (`AGENTS.md`, `CLAUDE.md`, `README`, and team conventions),
+- **similar existing implementations** whose conventions to mirror.
 
-- **CLEAR** (requirements are clear): Apply only the two-filter rule; ask only **owner decisions** and include the WHY. Do not ask other questions.
-- **UNCLEAR** (requirements are ambiguous): Research as much as possible, **adopt and announce** best-practice defaults, and do not ask questions.
+Ground every decision in actual files, interfaces, dependencies, and conventions before assuming.
+
+**A2. Decide questions by evidence — not by a CLEAR/UNCLEAR label.**
+
+- **Do not ask** what you can confirm or reasonably infer from code, tests, config, or docs. Investigate first (A1).
+- **Ask only** when the answer is not derivable and a wrong guess is costly, limited to: (a) **product or policy intent that only the user can decide** (behavior, UX, or tradeoffs encoded nowhere); (b) an ambiguous requirement with **materially different valid interpretations**; (c) a decision that would cause **significant rework or a compatibility break** if guessed wrong; (d) **external context you cannot infer** — a credential **source/configuration**, target, or account (ask for the source/config only; never request secret values).
+- **Before asking**, present the evidence you gathered, **the parts you could not confirm**, the options with **each option's impact**, and your **recommended default with the WHY**.
+- **Batch limit**: at most **3 questions in a single design-discovery round**; no omnibus/compound questions. (The A5 approval question is separate and not counted here.)
+- For each **unresolved but non-blocking** uncertainty (not every non-asked detail), adopt a best-practice default and **record it in a `## Assumptions` section of `plan.md`** — not just announce it — so the design review and approval gate can see it.
 
 **A3. Formal architecture design + review loop (conditional).** Ask `harnie-designer` (opus/max) for a **formal architecture design**. Inline the **formal section contract** from `design-authoring-arch.md` into the delegation prompt and signal `architecture, formal`, because subagents do not automatically load the profile. Focus on system boundaries, data ownership, technology choices, and SPOFs; do not descend into classes or SQL. Main records the result in the architecture section of `plan.md`.
 

@@ -14,8 +14,8 @@ You are the harnie router. Classify the task's **size and risk** and select a tr
 
 ## Actions
 1. Restate the task in one line and announce **the selected track and why**.
-2. Explain the override path: "To force a different track, use `/harnie:quick` or `/harnie:plan`."
+2. Explain the override path: "To force a different track, use `/harnie:dev-quick` or `/harnie:dev-full`."
 3. Without waiting for a user response, immediately invoke the selected track skill:
-   - quick → `quick` skill
-   - plan → `plan` skill
+   - quick → `dev-quick` skill
+   - plan → `dev-full` skill
    Pass the task argument through unchanged so the skill can orchestrate it.

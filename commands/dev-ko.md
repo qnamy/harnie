@@ -14,8 +14,8 @@ argument-hint: "<작업 설명>"
 
 ## 행동
 1. 한 줄로 작업을 재진술하고 **어느 트랙인지 + 왜**를 announce 한다.
-2. "다른 트랙을 원하면 `/harnie:quick` 또는 `/harnie:plan`으로 강제하세요"라고 override 경로를 알린다.
+2. "다른 트랙을 원하면 `/harnie:dev-quick` 또는 `/harnie:dev-full`으로 강제하세요"라고 override 경로를 알린다.
 3. 사용자 응답을 기다리지 말고 곧바로 선택한 트랙 스킬을 invoke 한다:
-   - quick → `quick` 스킬
-   - plan → `plan` 스킬
+   - quick → `dev-quick` 스킬
+   - plan → `dev-full` 스킬
    그 스킬이 이 작업 인자를 그대로 이어받아 오케스트레이션한다.

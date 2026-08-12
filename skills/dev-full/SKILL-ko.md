@@ -1,6 +1,6 @@
 ---
-name: plan
-description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이프사이클로 처리하는 오케스트레이터 — 계획(그라운딩+라우팅)→설계→크로스-모델 설계 리뷰(코드 前)→승인 게이트→오케스트레이션 실행→크로스-모델 코드 리뷰→최종 웨이브(Coverage·Quality·Runtime·Scope). 대칭 크로스-모델 방식으로 설계는 Claude→Codex 리뷰, 개발은 Codex→Claude 리뷰를 적용한다. `/harnie:plan` 또는 라우터 `/harnie:build`가 호출한다.
+name: dev-full
+description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이프사이클로 처리하는 오케스트레이터 — 계획(그라운딩+라우팅)→설계→크로스-모델 설계 리뷰(코드 前)→승인 게이트→오케스트레이션 실행→크로스-모델 코드 리뷰→최종 웨이브(Coverage·Quality·Runtime·Scope). 대칭 크로스-모델 방식으로 설계는 Claude→Codex 리뷰, 개발은 Codex→Claude 리뷰를 적용한다. `/harnie:dev-full` 또는 라우터 `/harnie:dev`가 호출한다. (내부 track 값은 그대로 `plan`.)
 ---
 
 # plan 오케스트레이터 (class B: 신규·큰 변경)
@@ -33,7 +33,7 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 
 ## 실행 상태 + 강제 훅 (plan 전용 하네스 — `scripts/execution.mjs`)
 plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 immutable `manifest.json` + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다 — 훅은 manifest+planHash로 승인을 판정하지 advisory phase를 믿지 않는다). 아래 스텝에서 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`, `<repo>` = 작업 repo 절대경로. **모든 `execution.mjs`·`loop.mjs` 호출은 `--root <repo>` 필수**(없으면 즉시 종료). 상태 조작은 **반드시 `execution.mjs`로만**(직접 Edit/Write/Bash-write는 훅이 차단):
-- **부트스트랩(PHASE A 시작, 코드 생성 前)**: `node <ROOT>/scripts/execution.mjs init --root <repo> --track plan --slug <slug>` — sentinel(`.harnie/active.json`) 먼저 → `execution.json`. 이후 훅이 이 sentinel을 보고 활성 판단.
+- **활성 run은 bootstrap 훅이 만든다 — 스킬이 직접 만들지 않는다.** `/harnie:dev-full`(또는 라우터 `/harnie:dev` → `Skill(harnie:dev-full)`) 호출 시 bootstrap 훅이 이미 sentinel(`.harnie/active.json`)과 `execution.json`을 만들었다. **`.harnie/active.json`을 읽어 `track === "plan"`을 확인하고 그 `slug`(`<slug>`)를 아래 모든 CLI에 쓴다. `execution.mjs init`을 직접 실행하지 않는다.** active.json이 없거나 손상이면 **중단하고 bootstrap 훅 실패를 보고**한다 — 자체 init으로 복구하지 않는다(부트스트랩 갭 재발; `bootstrap-adherence.md` 참조).
 - **승인 바인딩(A5)**: plan.md에 기계 파싱 `harnie-manifest` 블록이 있어야 한다. 승인 질문 직전 `execution.mjs arm-approval --root <repo> --slug <slug> --question "<질문>" --approve-option "승인"`(이 질문·옵션만 승인 후보로 arm)를 부르고, 승인은 실제 `AskUserQuestion`으로 받는다(PreToolUse가 질문/옵션 대조 후 pending, PostToolUse가 선택값 정확일치 관찰; §PHASE A A5). **승인·threadId 등록은 CLI로 노출되지 않는다** — 훅이 실제 툴 호출을 관찰해 in-process로만 수행(sanctioned Bash로 self-승인 불가).
 - **빌더 게이트(B2)**: 작업 위임 직전 `set-task --root <repo> --slug <slug> --task <id> --run-status building` + `seal --root <repo> --slug <slug>`(권위 스냅샷) → 빌더 산출 후 delta 귀속 前 `seal-verify --root <repo> --slug <slug>`(빌더가 권위 파일 훼손 시 fail-closed, exit 3).
 - **검증(B4)**: `verify --root <repo> --slug <slug> --task <id>` — manifest의 `verification[]` argv를 shell 없이 실행해 receipt 기록(reviewedPostSHA 기준 scopeHash).
@@ -53,13 +53,27 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 
 ## PHASE A — PLAN (계획 단계)
 
-**A0. 부트스트랩(sentinel-first).** 아무 코드도 만들기 전에 `execution.mjs init`으로 sentinel→execution.json을 만든다(위 §실행 상태). 이 시점 phase=planning이라 강제 훅이 승인 前 소스 쓰기·write 서브에이전트·workspace-write codex를 차단한다.
+**A0. 활성 run 채택(자체 init 금지).** bootstrap 훅이 이미 이 호출의 sentinel과 `execution.json`을 만들었다(phase=planning). `.harnie/active.json`을 읽어 `track === "plan"` 확인 후 그 `slug`를 전 구간에 쓴다. 없거나 손상이면 **중단하고 bootstrap 실패 보고** — 절대 `execution.mjs init`으로 복구하지 않는다. sentinel이 있으므로 강제 훅이 승인 前 소스 쓰기·write 서브에이전트·workspace-write codex를 차단한다.
 
-**A1. Classify + Ground.** `harnie-scout`(haiku)를 **병렬**로 스폰해 코드베이스를 파악한다(아키텍처면 더 깊이). 추정 전에 실제 파일·인터페이스·의존성·컨벤션을 근거로 잡는다.
+**A1. 범위비례 조사로 그라운딩.** `harnie-scout`(haiku)를 **병렬**로 스폰해 조사한다. 아래 각 항목에 대해 먼저 **존재·관련성**을 확인하고, **관련 있는 것만 충분히 깊게** 추적한다(무관한 영역까지 깊게 파는 건 scope inflation):
 
-**A2. Route CLEAR/UNCLEAR (announce).**
-- **CLEAR**(요구가 명확): two-filter만 적용, **owner-decision만 WHY와 함께** 질문(그 외는 묻지 않음).
-- **UNCLEAR**(요구가 모호): 최대 리서치, best-practice 기본값을 **adopt + announce**, 질문하지 않는다.
+- 영향 코드와 그 **호출 경로**(caller·callee),
+- 그 영역을 덮는 기존 **테스트**,
+- **설정·환경 변수**,
+- **데이터/스키마·마이그레이션**,
+- **외부 연동·API**,
+- 관련 **문서/ADR·저장소 지침**(`AGENTS.md`·`CLAUDE.md`·`README`·팀 컨벤션),
+- 컨벤션을 따를 **유사 기존 구현**.
+
+추정 전에 실제 파일·인터페이스·의존성·컨벤션을 근거로 잡는다.
+
+**A2. 질문은 CLEAR/UNCLEAR 라벨이 아니라 근거로 결정한다.**
+
+- 코드·테스트·설정·문서에서 **확인·추론 가능한 것은 묻지 않는다**(먼저 A1로 조사).
+- **다음일 때만 질문한다**(도출 불가 + 오추정 비용이 큰 것에 한정): (a) **사용자만 정할 수 있는 제품·정책 의도**(어디에도 안 적힌 동작·UX·트레이드오프), (b) **유효한 해석이 실질적으로 갈리는** 모호한 요구, (c) 오추정 시 **상당한 재작업·호환성 파괴**를 부르는 결정, (d) 추론 불가한 **외부 컨텍스트** — 자격증명의 **소스/설정**·타깃·계정(소스/설정만 묻고 비밀값은 절대 요청하지 않는다).
+- **질문 전에** 조사한 근거·**확인 못 한 부분**·**선택지별 영향**·권장 기본값(WHY)을 제시한다.
+- **묶음 한도**: 설계 발견 라운드 **한 번에 최대 3개**, 포괄·복합 질문 금지. (A5 승인 질문은 별개이며 여기 셈에 안 든다.)
+- **해소되지 않았지만 진행을 막지 않는 불확실성**(모든 비질문 항목이 아니라)만 기본값과 함께 `plan.md`의 `## Assumptions` 섹션에 기록한다 — announce만 하지 않는다 — 설계 리뷰·승인 게이트가 볼 수 있게.
 
 **A3. 아키텍처 설계(정식) + 리뷰 루프 (조건부).** `harnie-designer`(opus/max)에게 **아키텍처 설계를 "정식으로"** 요청한다 — 위임 프롬프트에 `design-authoring-arch.md`의 **정식 섹션 계약을 인라인 주입**하고 `architecture, formal`을 신호한다(서브에이전트는 프로필이 자동 로드되지 않음). 시스템 경계·데이터 소유권·기술선택·SPOF에 집중, 클래스·SQL로 안 내려감. main이 `plan.md`의 아키텍처 섹션에 기록한다.
 - **조건부**: 경계/데이터 소유권/기술 선택이 실제로 **바뀔 때만** 이 단계를 수행한다. 기존 아키텍처가 그대로면(그 안의 큰 상세 작업) skip하고 A4로 간다 — 근거 없는 정식 아키 단계는 scope inflation.

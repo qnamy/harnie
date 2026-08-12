@@ -181,6 +181,13 @@ test("decideTask: designer는 read-only라 planning 허용, builder deny", () =>
   assert.equal(decideTask({ subagentType: "harnie-builder", phase: "executing" }).deny, false)
 })
 
+test("decideTask: plugin-namespaced read-only 에이전트도 planning 허용(설치본 `harnie:` 접두어, 라이브 버그)", () => {
+  assert.equal(decideTask({ subagentType: "harnie:harnie-scout", phase: "planning" }).deny, false)
+  assert.equal(decideTask({ subagentType: "harnie:harnie-designer", phase: "planning" }).deny, false)
+  assert.equal(decideTask({ subagentType: "harnie:harnie-reviewer", phase: "awaiting-approval" }).deny, false)
+  assert.equal(decideTask({ subagentType: "harnie:harnie-builder", phase: "planning" }).deny, true) // 빌더는 여전히 차단
+})
+
 test("decideCodex: executing 빌더는 정확히 workspace-write + cwd=root만", () => {
   // danger-full-access 차단
   assert.equal(decideCodex({ isReply: false, sandbox: "danger-full-access", phase: "executing", hasBuildingUnbound: true }).deny, true)
