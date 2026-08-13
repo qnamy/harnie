@@ -17,6 +17,7 @@ ISSUES:
 - **ID**: 라운드 간 동일 이슈는 동일 stable ID. namespace는 리뷰 종류별(각 criteria 파일이 명시).
 - **location**: 리뷰 종류별 형식(각 criteria 파일이 명시).
 - **status**: 이번 응답에서 확인한 open|resolved.
+- **severity는 ID 수명 동안 고정한다.** `resolved`로 보고할 때도 **원래 심각도로 emit**한다 — 같은 ID의 `blocking` ↔ `non-blocking` 전환은 병합에서 거부된다. 심각도 판단 자체가 바뀌었으면 그 ID를 `resolved`로 닫고 **새 ID를 새 심각도로** 연다.
 - code/design-review는 이 스키마를 복제하지 않고 ID namespace·location 형식만 둔다.
 
 ## Aggregate issue ledger (승인 게이트의 근거)
