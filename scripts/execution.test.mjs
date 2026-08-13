@@ -12,6 +12,7 @@ import {
   deriveCompletion, sealHashOf, parseStatusFooter, FailClosed, authorityApproved,
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState, markRouteFailed,
+  loadContext,
 } from "./execution.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -511,6 +512,36 @@ test("bootstrapRun: 같은 base·미완료 active → resume(reuse)", () => {
   const r = bootstrapRun(root, { base: "feat-x" })
   assert.equal(r.reused, true)
   assert.equal(r.slug, "feat-x")
+})
+
+test("bootstrapRun: 소유 세션을 sentinel에 기록(owner 스코프 권위)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  assert.equal(readSentinel(root).sessionId, "sid-a")
+  assert.equal(loadContext(root).sessionId, "sid-a") // 훅이 파일 재독 없이 쓰는 경로
+})
+
+test("bootstrapRun: resume 시 소유권을 재개 세션으로 갱신(기록만 하면 fail-open)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
+  assert.equal(r.reused, true)
+  assert.equal(readSentinel(root).sessionId, "sid-b")
+})
+
+test("bootstrapRun: 세션 식별자 없이 resume하면 소유자를 비운다(전역 적용 폴백)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  bootstrapRun(root, { base: "feat-x" }) // sessionId 없음 → 기존 소유자 유지 시 재개 세션이 비-owner가 됨
+  assert.equal(readSentinel(root).sessionId, null)
+})
+
+test("bootstrapRun: rollover(완료 run → 새 run)도 소유자를 새 세션으로 기록", () => {
+  const root = gitRepo()
+  makeCompleteRun(root, "feat-x")
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-new" })
+  assert.equal(r.reused, false)
+  assert.equal(readSentinel(root).sessionId, "sid-new")
 })
 
 test("bootstrapRun: 다른 base·미완료 active → block(fail-closed)", () => {

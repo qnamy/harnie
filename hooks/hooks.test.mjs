@@ -424,6 +424,32 @@ test("bootstrap: git root면 정상 생성(회귀 방지)", () => {
   assert.ok(existsSync(join(root, ".harnie", "active.json")))
 })
 
+// owner 스코프 활성화 e2e: bootstrap이 sentinel에 소유자를 기록하므로 owner/비-owner 분리가 실제로 발동한다.
+// (기록이 없던 동안 isOwnerSession은 항상 true를 반환해 스코프가 inert였다 — 아래 두 단정이 그 회귀 감시.)
+test("owner 스코프 e2e: bootstrap 세션은 승인 前 게이트 적용, 무관한 세션은 미적용", () => {
+  const root = gitRepo("harnie-owner-e2e-")
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full 합계 함수 추가", cwd: root, session_id: "owner-s" }).status, 0)
+  const src = join(root, "src.js")
+  // owner 세션: planning phase 게이트 적용 → 소스 Write deny
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "owner-s" })))
+  // 무관한 세션: run 단위 게이트 미적용 → 통과(실측 피해였던 PR 리뷰 루틴 케이스)
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "unrelated-s" }), null)
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "git fetch origin" }, cwd: root, session_id: "unrelated-s" }), null)
+  // 비-owner여도 권위 파일 보호·.harnie 변형 차단은 유지
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "active.json") }, cwd: root, session_id: "unrelated-s" })))
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie" }, cwd: root, session_id: "unrelated-s" })))
+})
+
+test("owner 스코프 e2e: 재개 세션이 소유권을 이어받아 게이트가 꺼지지 않는다(fail-open 회귀)", () => {
+  const root = gitRepo("harnie-owner-resume-")
+  const prompt = "/harnie:dev-full 합계 함수 추가"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-a" }).status, 0)
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0) // resume
+  const src = join(root, "src.js")
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-b" }))) // 새 owner에 강제 적용
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-a" }), null) // 이전 세션은 비-owner
+})
+
 test("bootstrap 라우터: 비-git에서 /harnie:dev는 exit 2 + pending-route 미생성(latch 방지)", () => {
   const root = mkdtempSync(join(tmpdir(), "harnie-nogit-"))
   const r = bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev 합계 함수 추가", cwd: root, session_id: "s1" })

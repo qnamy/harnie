@@ -331,7 +331,8 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
+  // sessionId = run의 소유 세션(hooks/lib.mjs isOwnerSession이 우선 사용). 미기록이면 null → 훅이 repo 전역 적용으로 폴백.
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionId: s.sessionId || null, readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -346,7 +347,7 @@ export function loadContext(root) {
   const rawPhase = ex.phase
   // effectivePhase: 승인 전이면 executing/final-wave 주장을 awaiting-approval로 강등(쓰기 게이트 닫음).
   const effectivePhase = approved ? rawPhase : (rawPhase === "executing" || rawPhase === "final-wave" ? "awaiting-approval" : rawPhase)
-  return { active: true, root, track: s.track, slug: s.slug, phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
+  return { active: true, root, track: s.track, slug: s.slug, sessionId: s.sessionId || null, phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
 }
 
 // 완료 재도출(§4) — manifest 순회. manifest 부재(승인 前)면 완료 강제 없음(noManifest).
@@ -454,19 +455,27 @@ function genuinelyComplete(root, track, slug) {
   const comp = computeCompletion(root, track, slug)
   return comp.complete === true && comp.noManifest !== true
 }
+// run의 **소유 세션**(hooks/lib.mjs isOwnerSession의 권위). 빈 값·비문자열은 null로 정규화 —
+// 소유자 미기록은 훅에서 "repo 전역 적용"(하위호환·보수적)으로 폴백하므로 fail-closed 방향이다.
+function ownerSessionId(sessionId) { return typeof sessionId === "string" && sessionId !== "" ? sessionId : null }
 // 새 run 생성: execution.json 먼저, active.json(포인터) 마지막 원자 전환(§3.5). old dir은 건드리지 않음(보존).
-function createRun(root, track, base) {
+function createRun(root, track, base, sessionId) {
   const slug = collisionFreeSlug(root, track, base)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", tasks: {} })
-  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [] })
+  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [], sessionId: ownerSessionId(sessionId) })
   return { slug, reused: false }
 }
 // resume: execution.json **strict read + sentinel 일치 검증**(P2-5, cmdInit 수준). 존재 확인만으론 손상 통과.
-function resumeRun(root, s) {
+// 소유권은 **재개하는 세션으로 갱신**한다. 생성 시 기록만 하고 여기서 갱신하지 않으면, 재개 세션이 비-owner로
+// 판정돼 run 단위 강제(H1 phase·H2 완료·PostToolUse 관찰)가 통째로 꺼지는 fail-open이 된다 — 두 변경은 한 쌍이다.
+function resumeRun(root, s, sessionId) {
   const execPath = join(planDir(root, s.track, s.slug), "execution.json")
   if (!existsSync(execPath)) throw new FailClosed("sentinel 존재하나 execution.json 부재 — 손상, fail-closed")
   const ex = readJSONStrict(execPath) // JSON 손상이면 throw
   if (ex.track !== s.track || ex.slug !== s.slug) throw new FailClosed("execution.json이 sentinel과 불일치 — 손상, fail-closed")
+  const owner = ownerSessionId(sessionId)
+  // 세션 식별자가 없으면 소유자를 **비운다**(전역 적용). 기존 소유자를 남기면 재개 세션이 비-owner가 되어 fail-open.
+  if (s.sessionId !== owner) { s.sessionId = owner; writeJSONAtomic(sentinelPath(root), s) } // 호출자(bootstrapRun)의 state lock 하에서 RMW
   return { slug: s.slug, reused: true, resumed: true }
 }
 // 진입점 훅이 호출. base=slugify(작업인자). 결정표(§3.4)로 resume/new/block. **state lock으로 직렬화**(P1-3). 성공 시 이 세션의 pending-route 해소.
@@ -477,10 +486,10 @@ export function bootstrapRun(root, { base, track = "plan", sessionId = null } = 
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base)
+    if (!s) result = createRun(root, track, base, sessionId)
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base) // 완료 → 새 run(포인터 전환·old 보존)
-    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s) // 같은 작업(구버전 sentinel은 slug=base) → resume
+    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId) // 완료 → 새 run(포인터 전환·old 보존)
+    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 재개하여 완료해야 새 작업을 시작할 수 있습니다.`)
     clearPendingRoute(root, sessionId) // 부트스트랩 성공 = 이 세션 라우팅 해소(§3.9, per-session 파일이라 lock-free)
     return result
