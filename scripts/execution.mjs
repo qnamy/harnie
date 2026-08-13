@@ -457,10 +457,11 @@ function genuinelyComplete(root, track, slug) {
   return comp.complete === true && comp.noManifest !== true
 }
 // run에 **명시적으로 진입·재개한 세션들의 집합**(hooks/lib.mjs isOwnerSession의 권위).
-// 단일 소유자를 교체하면 안 된다: 이전 소유 세션이 아직 살아 있는데 다른 세션이 resume하는 순간 그 세션이
-// 비-owner가 되어 H1 승인-前 쓰기·H2 Stop·PostToolUse 관찰 보호가 전부 풀린다(두 세션 동시 활성은 정상 시나리오이고,
-// 종료를 확인할 증거가 없다). 그래서 owner 판정은 **membership**이고 resume은 집합에 **추가**만 한다.
-// 집합에서 빼는 유일한 경우는 "세션 식별자 없는 resume" — 그때는 비우고 훅이 repo 전역 적용(보수적)으로 폴백한다.
+// 불변식: **식별 가능한 상태로 참여한 세션은 run이 끝날 때까지 계속 owner다.** 세션 종료를 확인할 증거가 없으므로
+// 집합에서 빼지 않는다 — 빼는 순간 아직 작업 중인 그 세션의 H1 승인-前 쓰기·H2 Stop·PostToolUse 관찰 보호가
+// 전부 풀린다(두 세션 동시 활성은 정상 시나리오다). 그래서 owner 판정은 **membership**이고 resume은 **union**만 한다.
+// 식별자 없는 resume도 집합을 건드리지 않는다: isOwnerSession은 payload에 session_id가 없으면 이미 owner로
+// 취급하므로 지울 이유가 없고, 지우면 그 뒤 식별 가능한 resume이 집합을 다시 좁혀(=[새 세션]) 이전 참여자가 빠진다.
 function ownerSessionId(sessionId) { return typeof sessionId === "string" && sessionId !== "" ? sessionId : null }
 // sentinel의 소유자 표현을 배열로 정규화(레거시 스칼라 sessionId도 1개 집합으로 취급).
 export function normalizeOwnerSessions(s) {
@@ -478,8 +479,8 @@ function createRun(root, track, base, sessionId) {
   return { slug, reused: false }
 }
 // resume: execution.json **strict read + sentinel 일치 검증**(P2-5, cmdInit 수준). 존재 확인만으론 손상 통과.
-// 재개 세션을 소유자 집합에 **추가**한다. 추가하지 않으면 재개 세션이 비-owner로 판정돼 강제가 통째로 꺼지고
-// (fail-open), 교체하면 아직 작업 중인 이전 소유 세션의 보호가 풀린다 — 둘 다 막으려면 union이어야 한다.
+// 재개 세션을 소유자 집합에 **추가**한다(monotonic union). 추가하지 않으면 재개 세션이 비-owner로 판정돼 강제가
+// 통째로 꺼지고(fail-open), 교체하거나 비우면 아직 작업 중인 이전 참여 세션의 보호가 풀린다.
 function resumeRun(root, s, sessionId) {
   const execPath = join(planDir(root, s.track, s.slug), "execution.json")
   if (!existsSync(execPath)) throw new FailClosed("sentinel 존재하나 execution.json 부재 — 손상, fail-closed")
@@ -487,7 +488,9 @@ function resumeRun(root, s, sessionId) {
   if (ex.track !== s.track || ex.slug !== s.slug) throw new FailClosed("execution.json이 sentinel과 불일치 — 손상, fail-closed")
   const owner = ownerSessionId(sessionId)
   const prev = normalizeOwnerSessions(s)
-  const next = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : []
+  // 식별자가 없으면 **그대로 보존**(비우지 않는다 — 그 세션은 isOwnerSession에서 이미 owner이고, 비우면 다음
+  // 식별 가능한 resume이 집합을 [새 세션]으로 좁혀 이전 참여자가 빠진다).
+  const next = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : prev
   // 레거시 스칼라 표현도 이 기회에 배열로 이관. 호출자(bootstrapRun)의 state lock 하에서 RMW.
   if (stableStringify(next) !== stableStringify(prev) || s.sessionId !== undefined || !Array.isArray(s.sessionIds)) {
     s.sessionIds = next

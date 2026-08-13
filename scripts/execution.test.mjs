@@ -531,11 +531,21 @@ test("bootstrapRun: resume은 소유자를 **추가**한다 — 이전 소유자
   assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
 })
 
-test("bootstrapRun: 세션 식별자 없이 resume하면 소유자 집합을 비운다(전역 적용 폴백)", () => {
+test("bootstrapRun: 세션 식별자 없는 resume은 집합을 보존한다 — 비우면 다음 resume이 다시 좁힌다(리뷰 P1)", () => {
   const root = gitRepo()
   bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  bootstrapRun(root, { base: "feat-x" }) // sessionId 없음 → 남기면 재개 세션이 비-owner가 됨
-  assert.deepEqual(readSentinel(root).sessionIds, [])
+  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 이 세션은 isOwnerSession에서 이미 owner라 지울 이유가 없다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" }) // 비웠다면 여기서 ["sid-b"]가 되어 sid-a가 빠졌다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+})
+
+test("bootstrapRun: 소유자 집합은 monotonic — 어떤 resume 순서에서도 참여 세션이 빠지지 않는다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  for (const sessionId of [undefined, "sid-b", undefined, "sid-a", "sid-c", undefined])
+    bootstrapRun(root, { base: "feat-x", sessionId })
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b", "sid-c"])
 })
 
 test("bootstrapRun: 레거시 스칼라 sessionId 센티넬은 resume에서 배열로 이관(기존 소유자 보존)", () => {
