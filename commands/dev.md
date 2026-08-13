@@ -31,7 +31,7 @@ You are the harnie router. Classify the task's **size and risk** and select a tr
 Every `dev-full` (plan track) run gets its own dedicated git worktree — this is what lets several runs proceed concurrently in the same repo. `dev-quick` does not use a dedicated worktree; the rest of this section applies to `dev-full` only.
 
 When the `dev-full` bootstrap succeeds, the bootstrap hook reports the run's absolute **workroot** — a dedicated worktree path, not the directory you started in — through the hook's context message. From that point on:
-- Use the reported workroot as `--root` for every `execution.mjs`/`loop.mjs` call in this run, and as `cwd` for every Codex builder call. Writing source files at the directory you started in (instead of the workroot) will not be gated by the pre-approval write guard and is not part of this run.
+- Use the reported workroot as `--root` for every `execution.mjs`/`loop.mjs` call in this run, and as `cwd` for every Codex builder call. During planning, writing source files at the directory you started in instead of the workroot is still denied by the pre-approval write guard, just like a misplaced write inside the workroot. Only a genuinely outside-the-repo absolute path, such as a scratchpad note, is ungated.
 - If that message becomes unavailable later in the conversation, recover the path by reading the `workroot` field from `<repo>/.harnie/sessions/<this session's id>.json`.
 - **One session = one run** (v1, fixed): this session stays bound to exactly one run's workroot for its lifetime. If this same session later asks to bootstrap a genuinely different task, bootstrap rejects it with guidance to start a new session — don't retry it in a loop.
 

@@ -7,6 +7,7 @@ import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { createWorktree, mergeWorktree, removeWorktree, ensureExcludeEntries, worktreeDirFor, sanitizeBranchForDir } from "./worktree.mjs"
+import { captureTree } from "./delta.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CLI = join(HERE, "worktree.mjs")
@@ -41,7 +42,12 @@ test("create: 신규 worktree 생성 + exclude 등록", () => {
   assert.ok(existsSync(join(r.worktreePath, "README.md"))) // from(HEAD) 내용 반영
   const exclude = readFileSync(join(repo, ".git", "info", "exclude"), "utf8")
   assert.match(exclude, /\.harnie-wt\//)
-  assert.match(exclude, /\.harnie\//)
+  assert.doesNotMatch(exclude, /^\.harnie\/$/m)
+  // `.harnie/` must remain unignored: captureTree excludes it with an explicit pathspec, which fails if it is ignored.
+  mkdirSync(join(r.worktreePath, ".harnie"), { recursive: true })
+  writeFileSync(join(r.worktreePath, ".harnie", "active.json"), "{}\n")
+  assert.match(captureTree(r.worktreePath), /^[0-9a-f]{40}$/)
+  assert.match(captureTree(repo), /^[0-9a-f]{40}$/) // nested worktree container itself is ignored
 })
 
 test("create: 이미 존재하는 worktree는 attach(created:false, 멱등)", () => {
@@ -61,11 +67,15 @@ test("create: 다른 브랜치가 이미 그 경로를 쓰면 충돌 에러", ()
 
 test("create: exclude 등록은 멱등(중복 라인 없음)", () => {
   const repo = gitRepo()
+  const excludePath = join(repo, ".git", "info", "exclude")
+  writeFileSync(excludePath, readFileSync(excludePath, "utf8") + "custom-entry\n.harnie/\n")
   ensureExcludeEntries(repo)
   ensureExcludeEntries(repo)
-  const exclude = readFileSync(join(repo, ".git", "info", "exclude"), "utf8")
+  const exclude = readFileSync(excludePath, "utf8")
   const wtLines = exclude.split("\n").filter((l) => l === ".harnie-wt/")
   assert.equal(wtLines.length, 1)
+  assert.doesNotMatch(exclude, /^\.harnie\/$/m)
+  assert.match(exclude, /^custom-entry$/m) // unrelated user entry preserved
 })
 
 test("create: --from 지정 시 그 ref에서 분기", () => {
@@ -131,6 +141,15 @@ test("remove: --delete-branch면 브랜치도 함께 삭제", () => {
   createWorktree({ repo, branch: "harnie/remove-me" })
   removeWorktree({ repo, branch: "harnie/remove-me", deleteBranch: true })
   assert.equal(execFileSync("git", ["-C", repo, "branch", "--list", "harnie/remove-me"], { encoding: "utf8" }).trim(), "")
+})
+
+test("remove: untracked .harnie 상태가 있는 live worktree는 --force 없이 제거 거부(CR-005 안전망)", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/live-state" }).worktreePath
+  mkdirSync(join(wt, ".harnie"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "active.json"), "{}\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/live-state" }), /git worktree remove 실패/)
+  assert.ok(existsSync(wt))
 })
 
 // ── CLI e2e ──────────────────────────────────────────────────────────────

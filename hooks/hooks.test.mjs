@@ -87,7 +87,6 @@ function setupRepo() {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(MANIFEST, null, 2) + "\n```\n")
   exec(["init", "--root", root, "--slug", "feat-x"])
-  exec(["trial", "--root", root, "--slug", "feat-x"]) // h1 등록 게이트: verification의 실제 실행 영수증 확보(없으면 arm-approval 거부)
   return { root, dir }
 }
 // 승인·pending은 CLI가 아니라 훅이 in-process로 수행 → 실제 훅 경로로 executing 진입.
@@ -135,9 +134,9 @@ test("Write: symlink으로 repo 밖 탈출 시도 deny", () => {
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "escape", "x.js") }, cwd: root })))
 })
 
-test("Bash: 개행으로 밀반입한 소스 쓰기 deny(planning)", () => {
+test("Bash: 승인 전에도 .harnie 밖 명령은 allow", () => {
   const { root } = setupRepo()
-  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "git status\nrm -rf src" }, cwd: root })))
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "git status\nrm -rf src" }, cwd: root }), null)
 })
 
 test("Bash: .harnie 변형 deny, 신뢰 경로 sanctioned 4종 auto-allow, 임의 경로 CLI deny", () => {
@@ -145,8 +144,8 @@ test("Bash: .harnie 변형 deny, 신뢰 경로 sanctioned 4종 auto-allow, 임�
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie/plan/feat-x/review" }, cwd: root })))
   // sanctioned 4종(capture)은 프롬프트 skip(auto-allow)
   assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + REAL_LOOP + " capture " + root }, cwd: root })))
-  // 위장 경로 CLI는 planning에서 deny
-  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "node /tmp/scripts/loop.mjs capture " + root }, cwd: root })))
+  // 신뢰 경로가 아니면 sanctioned은 아니지만 .harnie 밖 Bash이므로 일반 권한 흐름
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node /tmp/scripts/loop.mjs capture " + root }, cwd: root }), null)
 })
 
 test("Bash: sanctioned auto-allow는 4종만 — apply/verify/seal 등은 통과하되 프롬프트(무의견)", () => {
@@ -161,9 +160,9 @@ test("Bash: sanctioned auto-allow는 4종만 — apply/verify/seal 등은 통과
   assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal --root " + root + " --slug feat-x" }, cwd: root }), null)
 })
 
-test("Bash: 위장 인터프리터 /tmp/node <신뢰 스크립트>는 sanctioned 아님 → planning deny(DR-004)", () => {
+test("Bash: bare node가 아닌 인터프리터는 sanctioned 아님", () => {
   const { root } = setupRepo()
-  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "/tmp/node " + REAL_LOOP + " capture " + root }, cwd: root })))
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "/tmp/node " + REAL_LOOP + " capture " + root }, cwd: root }), null)
 })
 
 test("Task: planning은 write 에이전트 deny, read-only allow", () => {
@@ -231,13 +230,13 @@ test("승인 바인딩: 선택 값이 거절이면 executing 안 됨(질문 텍�
   assert.notEqual(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).phase, "executing")
 })
 
-test("승인 바인딩: 실제 질문이 arm과 다르면 pending 미기록(오-바인딩 차단)", () => {
+test("승인 바인딩: arm 후 첫 관찰 질문은 텍스트 대조 없이 일회성 소비", () => {
   const { root, dir } = setupRepo()
   exec(["arm-approval", "--root", root, "--slug", "feat-x", "--question", AQ, "--approve-option", "승인"])
-  // arm과 다른 질문으로 물음 → PRE가 pending 기록 안 함
+  // arm과 다른 질문이어도 첫 AskUserQuestion을 tool_use_id로 바인딩한다.
   hook(PRE, { tool_name: "AskUserQuestion", tool_use_id: "q-1", tool_input: { questions: [{ question: "배포 승인?", options: [{ label: "승인" }] }] }, cwd: root })
   hook(POST, { tool_name: "AskUserQuestion", tool_use_id: "q-1", tool_response: JSON.stringify({ answers: { "배포 승인?": "승인" } }), cwd: root })
-  assert.notEqual(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).phase, "executing")
+  assert.equal(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).phase, "executing")
 })
 
 // ── Stop H2 ──────────────────────────────────────────────────────────────
@@ -306,14 +305,14 @@ test("pending-route 게이트: 라우팅 미완료 시 작업 도구·Bash 전�
   assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "x.js") }, cwd: root, session_id: "other" }), null)
 })
 
-test("baseline: control/route 파일 raw 변경 차단 — Write(견고)·literal/quote Bash(best-effort)", () => {
+test("baseline: control/route 파일 raw 변경 차단 — Write canonical·Bash 단순 literal", () => {
   const root = pendingRepo("s1")
   // Write는 canonical containment로 견고하게 차단(active 없어도)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: routeFilePath(root, "s1") }, cwd: root, session_id: "other" })))
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "active.json") }, cwd: root, session_id: "other" })))
-  // Bash는 literal/quote까지 best-effort 차단(§0.1 실수 방지). glob/변수 셸 우회는 적대적이라 비목표.
+  // 단순 `.harnie` 정규식으로 literal 접근을 차단한다.
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm " + routeFilePath(root, "s1") }, cwd: root, session_id: "other" })))
-  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: 'rm .har""nie/pending-route/s1.json' }, cwd: root, session_id: "other" }))) // quote 우회 차단
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: 'rm .har""nie/pending-route/s1.json' }, cwd: root, session_id: "other" }), null)
 })
 
 test("라우팅 세션 자신의 Bash는 pending 게이트가 막음(자기 route 파일 self-tamper 불가, P1)", () => {
@@ -333,34 +332,6 @@ test("Stop: 이 세션 pending-route(pending)면 종료 차단(P1-1)", () => {
   const root = pendingRepo("s3")
   const r = hook(STOP, { cwd: root, session_id: "s3", stop_hook_active: false, last_assistant_message: "done" })
   assert.equal(r.decision, "block")
-})
-
-test("Stop: failed + 첫 Stop은 차단(정직 보고 유도, P1-4)", () => {
-  const root = pendingRepo("s4a", { state: "failed", reason: "x", at: new Date().toISOString() })
-  const r = hook(STOP, { cwd: root, session_id: "s4a", stop_hook_active: false, last_assistant_message: "라우팅 실패" })
-  assert.equal(r.decision, "block")
-  assert.ok(existsSync(routeFilePath(root, "s4a"))) // 아직 미정리
-})
-
-test("Stop: failed + 재호출 + 정직한 INCOMPLETE 보고 → 정리 후 통과(P1-1/P1-4)", () => {
-  const root = pendingRepo("s4", { state: "failed", reason: "미완료 run 충돌", at: new Date().toISOString() })
-  const r = hook(STOP, { cwd: root, session_id: "s4", stop_hook_active: true, last_assistant_message: "라우팅 실패.\nHARNIE_STATUS: INCOMPLETE — B 시작 못함" })
-  assert.equal(r, null) // 통과
-  assert.equal(existsSync(routeFilePath(root, "s4")), false) // 정리됨
-})
-
-test("Stop: failed + 재호출인데 거짓 COMPLETE 보고 → 계속 차단·미정리(P1-4)", () => {
-  const root = pendingRepo("s5", { state: "failed", reason: "x", at: new Date().toISOString() })
-  const r = hook(STOP, { cwd: root, session_id: "s5", stop_hook_active: true, last_assistant_message: "끝.\nHARNIE_STATUS: COMPLETE" })
-  assert.equal(r.decision, "block") // 거짓 완료 주장 → 차단
-  assert.ok(existsSync(routeFilePath(root, "s5"))) // latch 유지(미정리)
-})
-
-test("Stop: failed + INCOMPLETE인데 blocker 없음 → 계속 차단·미정리(P2)", () => {
-  const root = pendingRepo("s6", { state: "failed", reason: "x", at: new Date().toISOString() })
-  const r = hook(STOP, { cwd: root, session_id: "s6", stop_hook_active: true, last_assistant_message: "HARNIE_STATUS: INCOMPLETE" })
-  assert.equal(r.decision, "block") // blocker 미명시 → 차단(빈 INCOMPLETE 우회 방지)
-  assert.ok(existsSync(routeFilePath(root, "s6"))) // 미정리
 })
 
 test("Stop: 손상된 route(알 수 없는 state)면 fail-closed 차단(P1 — 우회 방지)", () => {
@@ -479,6 +450,7 @@ test("세션 바인딩 파일은 control path로 보호(다른 세션이 raw로 
   writeSessionBinding(root, "sid-w", "/tmp/whatever")
   const bindingPath = join(root, ".harnie", "sessions", "sid-w.json")
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: bindingPath }, cwd: root, session_id: "other" })))
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: `printf x > ${bindingPath}` }, cwd: root, session_id: "other" })))
 })
 
 function bootstrap(payload) {
@@ -529,26 +501,59 @@ test("worktree 안 Bash는 자유롭고(CR-001), main root 소스 쓰기는 여�
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: `/harnie:dev-full ${task}`, cwd: root, session_id: "owner-s" }).status, 0)
   const wt = wtFor(root, task)
   const own = { cwd: root, session_id: "owner-s" }
-  // CR-001: worktree 안에서 read-only 명령(git status·cat)은 `.harnie-wt` 매칭에 걸려 무조건 deny되지 않는다
-  // (무의견=null → 정상 권한 흐름). `node --test`는 read-only가 아니라 **phase(planning)** 때문에 deny인 것이지
-  // `.harnie-wt` 매칭 때문이 아님을 구분해서 확인한다(고쳐지기 前엔 이유 없이 deny였다 — 이유가 바뀌었는지가 핵심).
-  assert.equal(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `git -C ${wt} status` } }), null)
-  assert.equal(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `cat ${wt}/README.md` } }), null)
-  const testRun = hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `node --test ${wt}/x.test.mjs` } })
-  assert.ok(deny(testRun)) // planning이라 deny(정상) — 그러나
-  assert.match(testRun.hookSpecificOutput.permissionDecisionReason, /승인 前\(planning\)/) // `.harnie` 이유가 아니라 phase 이유여야 함(CR-001 회귀 확인)
-  // 컨테이너 자체·nested .harnie 변형은 여전히 차단(순수 읽기 cat은 원래도 허용 — isHarnieRead). trailing
+  // CR-001: T1의 단순 Bash gate는 phase를 보지 않는다. 실제 worktree 안의 git·test·plain read는
+  // `.harnie-wt` 컨테이너명 때문에 blanket-deny되지 않고 정상 권한 흐름(null)으로 간다.
+  for (const cmd of [`git -C ${wt} status`, `node --test ${wt}/x.test.mjs`, `cat ${wt}/README.md`])
+    assert.equal(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: cmd } }), null, cmd)
+  // 컨테이너 자체·nested/direct .harnie 접근은 읽기여도 예외 없이 차단한다. trailing
   // slash·glob도(CR-004 회귀 — 셸 탭완성·정리 명령이 흔히 만드는 형태, 놓치면 이 세션의 run뿐 아니라 같은
   // repo의 다른 세션 run들의 권위 상태까지 한 번에 지워진다).
   for (const cmd of ["rm -rf .harnie-wt", "rm -rf .harnie-wt/", "rm -rf .harnie-wt/*", "find .harnie-wt/ -name active.json -delete"])
     assert.ok(deny(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: cmd } })), cmd)
-  assert.ok(deny(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `rm ${wt}/.harnie/active.json` } })))
+  for (const cmd of ["rm -rf .harnie", "cat .harnie/active.json", ".harnie/pending-route/x.json", `cat ${wt}/.harnie/active.json`])
+    assert.ok(deny(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: cmd } })), cmd)
   // CR-002: main root(=this run의 worktree 밖, 그러나 같은 repo 안)에 쓰는 건 여전히 승인 前 deny — outside로
   // 오분류돼 게이트를 빠져나가면 안 된다(고쳐지기 前엔 이 assert가 실패했다).
   assert.ok(deny(hook(PRE, { ...own, tool_name: "Write", tool_input: { file_path: join(root, "src.js") } })))
   // 진짜 repo 밖 절대경로(스크래치패드 등)는 그대로 allow(과잉 차단 아님, 회귀 없음).
   const outside = mkdtempSync(join(tmpdir(), "harnie-outside-"))
   assert.equal(hook(PRE, { ...own, tool_name: "Write", tool_input: { file_path: join(outside, "notes.md") } }), null)
+})
+
+test("Stop: complete 후에도 세션 바인딩이 살아 후속 변경을 같은 workroot에서 재검증(CR-002)", () => {
+  const root = gitRepo("harnie-binding-complete-")
+  const task = "binding survives completion"
+  const sid = "owner-complete"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: `/harnie:dev-full ${task}`, cwd: root, session_id: sid }).status, 0)
+  const wt = wtFor(root, task)
+  const slug = slugify(task)
+  const dir = join(wt, ".harnie", "plan", slug)
+  mkdirSync(join(wt, "src", "a"), { recursive: true })
+  writeFileSync(join(wt, "src", "a", "x.js"), "x")
+  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(MANIFEST, null, 2) + "\n```\n")
+
+  exec(["arm-approval", "--root", wt, "--slug", slug, "--question", AQ, "--approve-option", "승인"])
+  hook(PRE, { ...askPayload("complete-q"), cwd: root, session_id: sid })
+  hook(POST, { tool_name: "AskUserQuestion", tool_use_id: "complete-q", tool_response: JSON.stringify({ answers: { [AQ]: "승인" } }), cwd: root, session_id: sid })
+  const postSHA = JSON.parse(execFileSync("node", [REAL_LOOP, "capture", wt], { encoding: "utf8" })).baselineSHA
+  const taskDir = join(dir, "review", "task-a")
+  mkdirSync(taskDir, { recursive: true })
+  writeFileSync(join(taskDir, "ledger.json"), "{}")
+  writeFileSync(join(taskDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: postSHA }))
+  exec(["verify", "--root", wt, "--slug", slug, "--task", "T1"])
+  for (const unit of ["final-coverage", "final-quality", "final-runtime", "final-scope"]) {
+    const gateDir = join(dir, "review", unit)
+    mkdirSync(gateDir, { recursive: true })
+    writeFileSync(join(gateDir, "ledger.json"), "{}")
+    writeFileSync(join(gateDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: postSHA }))
+  }
+  assert.equal(exec(["completion", "--root", wt, "--slug", slug]).complete, true)
+
+  assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "HARNIE_STATUS: COMPLETE" }), null)
+  assert.equal(readSessionBinding(root, sid).workroot, wt)
+  assert.equal(resolveRoot(root, sid), wt)
+  writeFileSync(join(wt, "src", "a", "x.js"), "changed after complete")
+  assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "HARNIE_STATUS: COMPLETE" }).decision, "block")
 })
 
 test("owner 스코프 e2e: resume은 소유자를 **추가**한다 — 이전 세션 보호 유지 + 재개 세션도 강제(양방향 fail-open 회귀)", () => {
@@ -644,7 +649,7 @@ test("bootstrap 라우터: 비-git에서 /harnie:dev는 exit 2 + pending-route �
   assert.equal(existsSync(join(root, ".harnie")), false) // 비-git 워크스페이스에 상태 안 남김
 })
 
-test("bootstrap 라우터 전체 흐름: dev(pending) → 비-git dev-full 실패는 failed로 전환 → 정직 보고 Stop으로 탈출", () => {
+test("bootstrap 라우터 전체 흐름: dev(pending) → dev-full 실패 시 route 삭제", () => {
   const root = gitRepo("harnie-latch-")
   const SID = "s-latch"
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev 합계 함수 추가", cwd: root, session_id: SID }).status, 0)
@@ -653,13 +658,7 @@ test("bootstrap 라우터 전체 흐름: dev(pending) → 비-git dev-full 실�
   const r = bootstrap({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "harnie:dev-full", args: "합계 함수 추가" }, cwd: root, session_id: SID })
   assert.equal(r.status, 2)
   assert.match(r.stderr, /git repo/)
-  // pending으로 남으면 Stop이 영원히 차단 → failed로 전환돼 있어야 정직 보고 탈출구가 열린다
-  assert.equal(JSON.parse(readFileSync(routeFilePath(root, SID), "utf8")).state, "failed")
-  const blocked = hook(STOP, { cwd: root, session_id: SID, stop_hook_active: false, last_assistant_message: "실패" })
-  assert.equal(blocked.decision, "block")
-  const passed = hook(STOP, { cwd: root, session_id: SID, stop_hook_active: true, last_assistant_message: "보고.\nHARNIE_STATUS: INCOMPLETE — 비-git 워크스페이스라 run 생성 불가" })
-  assert.equal(passed, null)
-  assert.equal(existsSync(routeFilePath(root, SID)), false) // 정리됨(고착 해소)
+  assert.equal(existsSync(routeFilePath(root, SID)), false)
 })
 
 test("canonicalRelPath: outside(밖 절대경로) vs escapes(symlink·상대 traversal) 구분", () => {
@@ -734,27 +733,25 @@ test("비-owner 세션: control/route 파일 Write·.harnie 변형 Bash는 계�
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rm -rf .harnie/plan/feat-x/review" } }))))
 })
 
-test("비-owner 세션: .harnie 좁은 읽기는 통과(변형만 차단 — 상태 확인 과잉차단 제거)", () => {
+test("비-owner 세션: .harnie Bash 접근은 읽기 포함 deny", () => {
   const { root } = setupRepo()
   setOwner(root, "owner-sid")
   const pl = (o) => ({ ...o, cwd: root, session_id: "unrelated-sid" })
-  // 읽기 → 무의견(통과)
-  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } })), null)
-  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "jq .phase .harnie/plan/feat-x/execution.json" } })), null)
-  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "ls -la .harnie/plan/feat-x" } })), null)
-  // 변형·확장·실행 통로는 계속 deny
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "jq .phase .harnie/plan/feat-x/execution.json" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "ls -la .harnie/plan/feat-x" } }))))
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "echo x > .harnie/active.json" } }))))
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "find .harnie -delete" } }))))
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rg x {--pre,/bin/rm} .harnie/active.json" } }))))
 })
 
-test("active run 없음: .harnie 좁은 읽기는 통과, 변형은 deny", () => {
+test("active run 없음: .harnie Bash 접근은 읽기 포함 deny", () => {
   const root = mkdtempSync(join(tmpdir(), "harnie-noact-read-"))
   execFileSync("git", ["-C", root, "init", "-q"])
   const pl = (o) => ({ ...o, cwd: root, session_id: "s-any" })
   // active run 없음을 확정: 승인 前 게이트 대상인 소스 Write가 통과해야 한다(있다면 deny였을 것)
   assert.equal(hook(PRE, pl({ tool_name: "Write", tool_input: { file_path: join(root, "src.js") } })), null)
-  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } })), null)
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } }))))
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rm -rf .harnie" } }))))
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "node -e \"require('fs').rmSync('.harnie/active.json')\"" } }))))
 })

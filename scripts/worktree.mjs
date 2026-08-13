@@ -2,7 +2,7 @@
 // harnie worktree 엔진(T2, DEC-001) — run별 git worktree 생성·병합·제거.
 // 위협모델 §0.1: 실수하는 오케스트레이터의 실수 방지가 목적. execution.mjs 수준의 방어 계층은 두지 않고
 // 단순 인자 검증 + git 종료코드 전파만 한다(과설계 지양, T2 프롬프트 §1).
-import { existsSync, mkdirSync, readFileSync, appendFileSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs"
 import { join, dirname, resolve, isAbsolute } from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -27,18 +27,25 @@ function gitCommonDir(repo) {
   return isAbsolute(raw) ? raw : resolve(repo, raw)
 }
 
-// `.harnie-wt/`·`.harnie/`를 info/exclude에 멱등 등록(커밋 불필요·.gitignore 비침습).
+// `.harnie-wt/`만 info/exclude에 멱등 등록한다(커밋 불필요·.gitignore 비침습). main root의 tree 캡처가
+// nested worktree를 embedded content로 걷지 않게 하는 데 필요한 항목이다. `.harnie/`는 delta.mjs의
+// captureTree pathspec이 이미 제외하며, gitignore-style exclude에도 넣으면 그 명시 pathspec의 `git add`가
+// ignored-path 오류로 실패하므로 여기에 추가하면 안 된다.
 export function ensureExcludeEntries(repo) {
   const excludePath = join(gitCommonDir(repo), "info", "exclude")
   mkdirSync(dirname(excludePath), { recursive: true })
   const existing = existsSync(excludePath) ? readFileSync(excludePath, "utf8") : ""
-  const lines = existing.split("\n")
-  const need = [".harnie-wt/", ".harnie/"].filter((e) => !lines.includes(e))
+  const rawLines = existing.split("\n")
+  const removed = rawLines.includes(".harnie/")
+  const lines = rawLines.filter((line) => line !== ".harnie/") // pre-fix durable entry migration
+  const need = [".harnie-wt/"].filter((e) => !lines.includes(e))
+  let next = lines.join("\n")
   if (need.length) {
-    const sep = existing.length && !existing.endsWith("\n") ? "\n" : ""
-    appendFileSync(excludePath, sep + need.join("\n") + "\n")
+    const sep = next.length && !next.endsWith("\n") ? "\n" : ""
+    next += sep + need.join("\n") + "\n"
   }
-  return { excludePath, added: need }
+  if (next !== existing) writeFileSync(excludePath, next)
+  return { excludePath, added: need, removed: removed ? [".harnie/"] : [] }
 }
 
 function branchExists(repo, branch) {
