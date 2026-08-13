@@ -85,6 +85,7 @@ function setupRepo() {
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(MANIFEST, null, 2) + "\n```\n")
   exec(["init", "--root", root, "--slug", "feat-x"])
+  exec(["trial", "--root", root, "--slug", "feat-x"]) // h1 등록 게이트: verification의 실제 실행 영수증 확보(없으면 arm-approval 거부)
   return { root, dir }
 }
 // 승인·pending은 CLI가 아니라 훅이 in-process로 수행 → 실제 훅 경로로 executing 진입.
