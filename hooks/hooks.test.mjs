@@ -522,6 +522,31 @@ test("비-owner 세션: control/route 파일 Write·.harnie 변형 Bash는 계�
   assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rm -rf .harnie/plan/feat-x/review" } }))))
 })
 
+test("비-owner 세션: .harnie 좁은 읽기는 통과(변형만 차단 — 상태 확인 과잉차단 제거)", () => {
+  const { root } = setupRepo()
+  setOwner(root, "owner-sid")
+  const pl = (o) => ({ ...o, cwd: root, session_id: "unrelated-sid" })
+  // 읽기 → 무의견(통과)
+  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } })), null)
+  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "jq .phase .harnie/plan/feat-x/execution.json" } })), null)
+  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "ls -la .harnie/plan/feat-x" } })), null)
+  // 변형·확장·실행 통로는 계속 deny
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "echo x > .harnie/active.json" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "find .harnie -delete" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rg x {--pre,/bin/rm} .harnie/active.json" } }))))
+})
+
+test("active run 없음: .harnie 좁은 읽기는 통과, 변형은 deny", () => {
+  const root = mkdtempSync(join(tmpdir(), "harnie-noact-read-"))
+  execFileSync("git", ["-C", root, "init", "-q"])
+  const pl = (o) => ({ ...o, cwd: root, session_id: "s-any" })
+  // active run 없음을 확정: 승인 前 게이트 대상인 소스 Write가 통과해야 한다(있다면 deny였을 것)
+  assert.equal(hook(PRE, pl({ tool_name: "Write", tool_input: { file_path: join(root, "src.js") } })), null)
+  assert.equal(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "cat .harnie/active.json" } })), null)
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "rm -rf .harnie" } }))))
+  assert.ok(deny(hook(PRE, pl({ tool_name: "Bash", tool_input: { command: "node -e \"require('fs').rmSync('.harnie/active.json')\"" } }))))
+})
+
 test("비-owner 세션이라도 자기 pending-route가 있으면 차단(게이트 독립, P1-2)", () => {
   const { root } = setupRepo()
   setOwner(root, "owner-sid")
