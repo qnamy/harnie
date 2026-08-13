@@ -6,7 +6,9 @@ import { mkdtempSync, writeFileSync, mkdirSync, readFileSync, symlinkSync, exist
 import { tmpdir } from "node:os"
 import { join, dirname, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { findRoot, canonicalRelPath } from "./lib.mjs"
+import { findRoot, canonicalRelPath, resolveRoot, readSessionBinding, writeSessionBinding, clearSessionBinding } from "./lib.mjs"
+import { slugify } from "../scripts/execution.mjs"
+import { worktreeDirFor, createWorktree } from "../scripts/worktree.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REAL_LOOP = resolve(HERE, "..", "scripts", "loop.mjs") // 훅이 신뢰하는 실제 CLI 경로
@@ -380,8 +382,20 @@ test("pending-route 없으면 active run 없을 때 통과(게이트 미적용)"
 })
 
 // ── 과잉 차단(overreach) 제거: root 탐색 경계·비-git bootstrap·repo 밖 쓰기·owner 스코프 ──
-const gitRepo = (prefix) => { const d = mkdtempSync(join(tmpdir(), prefix)); execFileSync("git", ["-C", d, "init", "-q"]); return d }
+// worktree add(T2)가 HEAD를 요구하므로(unborn HEAD면 실패) 최초 커밋을 남긴다.
+const gitRepo = (prefix) => {
+  const d = mkdtempSync(join(tmpdir(), prefix))
+  execFileSync("git", ["-C", d, "init", "-q"])
+  execFileSync("git", ["-C", d, "config", "user.email", "t@t"])
+  execFileSync("git", ["-C", d, "config", "user.name", "t"])
+  writeFileSync(join(d, "README.md"), "x\n")
+  execFileSync("git", ["-C", d, "add", "."])
+  execFileSync("git", ["-C", d, "commit", "-q", "-m", "init"])
+  return d
+}
 const real = (p) => realpathSync(p)
+// dev-full의 run 상태는 root가 아니라 그 worktree 안에 있다(T2 DEC-001) — task 텍스트로 결정적 경로 계산.
+const wtFor = (root, task) => worktreeDirFor(root, `harnie/${slugify(task)}`)
 
 test("findRoot: 부모에만 .harnie/active.json이 있어도 현재 git repo가 root(상향 탈출 차단)", () => {
   const parent = mkdtempSync(join(tmpdir(), "harnie-parent-")) // 비-git 부모 워크스페이스
@@ -406,6 +420,67 @@ test("findRoot: 중첩 git repo는 부모 repo의 active run에 바인딩되지 
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })))
 })
 
+// ── worktree-per-run(T2): findRoot이 worktree의 nested `.git` 파일에서 올바로 멈추는지, resolveRoot·세션
+// 바인딩 해석 순서(①cwd 상향 findRoot ②세션 바인딩)가 계약대로 동작하는지 ──
+test("findRoot: worktree 안에서 시작한 세션은 그 worktree가 root(중첩 .git 파일 케이스)", () => {
+  const repo = gitRepo("harnie-wt-findroot-")
+  const wt = createWorktree({ repo, branch: "harnie/wt-root-test" }).worktreePath
+  assert.ok(existsSync(join(wt, ".git"))) // worktree의 .git은 디렉터리가 아니라 gitdir 파일
+  assert.equal(real(findRoot(wt)), real(wt))                      // worktree 자신의 .git(파일)에서 중단
+  assert.equal(real(findRoot(join(wt, "src", "deep"))), real(wt)) // 미존재 하위 경로도 동일
+  assert.equal(real(findRoot(repo)), real(repo))                  // main repo에서 시작하면 여전히 main repo
+})
+
+test("resolveRoot: 세션 바인딩 없으면 findRoot과 동일(하위호환)", () => {
+  const root = gitRepo("harnie-resolve-1-")
+  assert.equal(resolveRoot(root, "any-sid"), findRoot(root))
+  assert.equal(resolveRoot(root, null), findRoot(root))
+})
+
+test("resolveRoot: 세션 바인딩이 cwdRoot 자신의 (무관한) active.json보다 항상 우선(CR-003 회귀)", () => {
+  const { root } = setupRepo() // root 자신에 이 세션과 무관한 run의 active.json 존재(예: 다른 세션·quick 잔재)
+  const wt = mkdtempSync(join(tmpdir(), "harnie-real-wt-"))
+  execFileSync("git", ["-C", wt, "init", "-q"])
+  writeSessionBinding(root, "sid-x", wt)
+  // 바인딩된 세션은 root 자신의 active.json에 가려지지 않고 자기 worktree로 해석된다.
+  assert.equal(resolveRoot(join(root, "src"), "sid-x"), wt)
+  // 바인딩 없는(무관한) 세션은 여전히 root 자신의 active.json으로(하위호환).
+  assert.equal(resolveRoot(join(root, "src"), "other-sid"), root)
+})
+
+test("resolveRoot: 세션이 이미 worktree 안에서 시작했으면(cwd 자체가 그 worktree) findRoot이 그대로 자기 root를 준다", () => {
+  const repo = gitRepo("harnie-resolve-startin-")
+  const wt = createWorktree({ repo, branch: "harnie/start-in-wt" }).worktreePath
+  // 이 세션의 바인딩은 main repo(=repo)에 없다 — 그래도 cwd가 이미 그 worktree 안이면 findRoot이 그 .git에서 멈춘다.
+  assert.equal(resolveRoot(join(wt, "src"), "no-binding-sid"), wt)
+})
+
+test("세션 바인딩: write/read/resolveRoot가 그걸 따라가고, clear 후엔 findRoot로 폴백(②)", () => {
+  const root = gitRepo("harnie-resolve-2-")
+  const wt = mkdtempSync(join(tmpdir(), "harnie-fake-wt-"))
+  execFileSync("git", ["-C", wt, "init", "-q"])
+  writeSessionBinding(root, "sid-y", wt)
+  assert.deepEqual(readSessionBinding(root, "sid-y"), { workroot: wt })
+  assert.equal(resolveRoot(root, "sid-y"), wt)
+  assert.equal(resolveRoot(root, "other-sid"), root) // 다른 세션은 미적용
+  clearSessionBinding(root, "sid-y")
+  assert.equal(readSessionBinding(root, "sid-y"), null)
+  assert.equal(resolveRoot(root, "sid-y"), root) // 정리 후엔 findRoot로 폴백
+})
+
+test("세션 바인딩: workroot가 사라졌으면(정리·이동 등) resolveRoot가 findRoot로 폴백", () => {
+  const root = gitRepo("harnie-resolve-3-")
+  writeSessionBinding(root, "sid-z", join(root, "nonexistent-wt"))
+  assert.equal(resolveRoot(root, "sid-z"), root)
+})
+
+test("세션 바인딩 파일은 control path로 보호(다른 세션이 raw로 못 지움·못 씀)", () => {
+  const root = gitRepo("harnie-resolve-4-")
+  writeSessionBinding(root, "sid-w", "/tmp/whatever")
+  const bindingPath = join(root, ".harnie", "sessions", "sid-w.json")
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: bindingPath }, cwd: root, session_id: "other" })))
+})
+
 function bootstrap(payload) {
   const r = spawnSync("node", [BOOT], { input: JSON.stringify(payload), encoding: "utf8" })
   return { status: r.status, stderr: r.stderr }
@@ -418,42 +493,79 @@ test("bootstrap: 비-git root면 exit 2 + 상태 미생성(verify/completion이 
   assert.equal(existsSync(join(root, ".harnie")), false)
 })
 
-test("bootstrap: git root면 정상 생성(회귀 방지)", () => {
+test("bootstrap: git root면 정상 생성(worktree 안에, 회귀 방지)", () => {
   const root = gitRepo("harnie-boot-")
   const r = bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full 합계 함수 추가", cwd: root, session_id: "s1" })
   assert.equal(r.status, 0, r.stderr)
-  assert.ok(existsSync(join(root, ".harnie", "active.json")))
+  assert.ok(existsSync(join(wtFor(root, "합계 함수 추가"), ".harnie", "active.json")))
+  assert.equal(existsSync(join(root, ".harnie", "active.json")), false) // main root에는 run 상태를 두지 않음(T2)
 })
 
 // owner 스코프 활성화 e2e: bootstrap이 sentinel에 소유자를 기록하므로 owner/비-owner 분리가 실제로 발동한다.
 // (기록이 없던 동안 isOwnerSession은 항상 true를 반환해 스코프가 inert였다 — 아래 두 단정이 그 회귀 감시.)
+// 세션 cwd는 계속 main root(worktree 밖)이지만, 게이트 대상 파일은 그 run의 worktree 안이어야 한다(T2) —
+// main root 자신의 다른 파일은 이제 이 run 기준으로 "밖"이라 phase 게이트 대상이 아니다(§outside 규칙 그대로).
 test("owner 스코프 e2e: bootstrap 세션은 승인 前 게이트 적용, 무관한 세션은 미적용", () => {
   const root = gitRepo("harnie-owner-e2e-")
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full 합계 함수 추가", cwd: root, session_id: "owner-s" }).status, 0)
-  const src = join(root, "src.js")
-  // owner 세션: planning phase 게이트 적용 → 소스 Write deny
+  const wt = wtFor(root, "합계 함수 추가")
+  const src = join(wt, "src.js")
+  // owner 세션: planning phase 게이트 적용 → worktree 안 소스 Write deny(cwd는 main root 그대로)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "owner-s" })))
   // 무관한 세션: run 단위 게이트 미적용 → 통과(실측 피해였던 PR 리뷰 루틴 케이스)
   assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "unrelated-s" }), null)
   assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "git fetch origin" }, cwd: root, session_id: "unrelated-s" }), null)
-  // 비-owner여도 권위 파일 보호·.harnie 변형 차단은 유지
-  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "active.json") }, cwd: root, session_id: "unrelated-s" })))
+  // 비-owner여도 권위 파일 보호·.harnie 변형 차단은 유지 — main root 자신의 .harnie(세션 바인딩)와
+  // worktree(nested) 안의 .harnie 둘 다(worktree는 root 트리 안에 있으므로 이 fix가 핵심 회귀 감시).
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(wt, ".harnie", "active.json") }, cwd: root, session_id: "unrelated-s" })))
   assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie" }, cwd: root, session_id: "unrelated-s" })))
+})
+
+// CR-001/CR-002 회귀(Opus 리뷰): worktree 안에서 Bash 빌드/테스트/git이 실제로 되는지 + main root 쓰기는
+// 여전히 승인 前 게이트 대상인지, 둘 다 실제 bootstrap+PRE 훅으로.
+test("worktree 안 Bash는 자유롭고(CR-001), main root 소스 쓰기는 여전히 승인 前 게이트 대상(CR-002)", () => {
+  const root = gitRepo("harnie-cr001-002-")
+  const task = "합계 함수 추가"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: `/harnie:dev-full ${task}`, cwd: root, session_id: "owner-s" }).status, 0)
+  const wt = wtFor(root, task)
+  const own = { cwd: root, session_id: "owner-s" }
+  // CR-001: worktree 안에서 read-only 명령(git status·cat)은 `.harnie-wt` 매칭에 걸려 무조건 deny되지 않는다
+  // (무의견=null → 정상 권한 흐름). `node --test`는 read-only가 아니라 **phase(planning)** 때문에 deny인 것이지
+  // `.harnie-wt` 매칭 때문이 아님을 구분해서 확인한다(고쳐지기 前엔 이유 없이 deny였다 — 이유가 바뀌었는지가 핵심).
+  assert.equal(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `git -C ${wt} status` } }), null)
+  assert.equal(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `cat ${wt}/README.md` } }), null)
+  const testRun = hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `node --test ${wt}/x.test.mjs` } })
+  assert.ok(deny(testRun)) // planning이라 deny(정상) — 그러나
+  assert.match(testRun.hookSpecificOutput.permissionDecisionReason, /승인 前\(planning\)/) // `.harnie` 이유가 아니라 phase 이유여야 함(CR-001 회귀 확인)
+  // 컨테이너 자체·nested .harnie 변형은 여전히 차단(순수 읽기 cat은 원래도 허용 — isHarnieRead). trailing
+  // slash·glob도(CR-004 회귀 — 셸 탭완성·정리 명령이 흔히 만드는 형태, 놓치면 이 세션의 run뿐 아니라 같은
+  // repo의 다른 세션 run들의 권위 상태까지 한 번에 지워진다).
+  for (const cmd of ["rm -rf .harnie-wt", "rm -rf .harnie-wt/", "rm -rf .harnie-wt/*", "find .harnie-wt/ -name active.json -delete"])
+    assert.ok(deny(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: cmd } })), cmd)
+  assert.ok(deny(hook(PRE, { ...own, tool_name: "Bash", tool_input: { command: `rm ${wt}/.harnie/active.json` } })))
+  // CR-002: main root(=this run의 worktree 밖, 그러나 같은 repo 안)에 쓰는 건 여전히 승인 前 deny — outside로
+  // 오분류돼 게이트를 빠져나가면 안 된다(고쳐지기 前엔 이 assert가 실패했다).
+  assert.ok(deny(hook(PRE, { ...own, tool_name: "Write", tool_input: { file_path: join(root, "src.js") } })))
+  // 진짜 repo 밖 절대경로(스크래치패드 등)는 그대로 allow(과잉 차단 아님, 회귀 없음).
+  const outside = mkdtempSync(join(tmpdir(), "harnie-outside-"))
+  assert.equal(hook(PRE, { ...own, tool_name: "Write", tool_input: { file_path: join(outside, "notes.md") } }), null)
 })
 
 test("owner 스코프 e2e: resume은 소유자를 **추가**한다 — 이전 세션 보호 유지 + 재개 세션도 강제(양방향 fail-open 회귀)", () => {
   const root = gitRepo("harnie-owner-resume-")
-  const prompt = "/harnie:dev-full 합계 함수 추가"
+  const task = "합계 함수 추가"
+  const prompt = `/harnie:dev-full ${task}`
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-a" }).status, 0)
-  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0) // resume
-  const src = join(root, "src.js")
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0) // resume(같은 worktree에 attach)
+  const wt = wtFor(root, task)
+  const src = join(wt, "src.js")
   // 재개 세션에 강제 적용(추가 안 하면 fail-open)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-b" })))
   // **아직 작업 중인 이전 소유 세션도 계속 보호**(교체하면 여기가 뚫린다 — 리뷰 P1)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-a" })))
   // 진입하지 않은 무관한 세션은 여전히 미적용
   assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "never-entered" }), null)
-  const s = JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8"))
+  const s = JSON.parse(readFileSync(join(wt, ".harnie", "active.json"), "utf8"))
   assert.deepEqual(s.sessionIds, ["sid-a", "sid-b"])
 })
 
@@ -485,12 +597,14 @@ test("owner 스코프: 동시 활성 이전 소유자도 H1·H2·PostToolUse 보
 
 test("owner 스코프 e2e: sid-a → 식별자 없는 resume → sid-b resume 순서에서도 sid-a 보호 유지(리뷰 P1 회귀)", () => {
   const root = gitRepo("harnie-owner-noid-")
-  const prompt = "/harnie:dev-full 합계 함수 추가"
+  const task = "합계 함수 추가"
+  const prompt = `/harnie:dev-full ${task}`
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-a" }).status, 0)
-  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root }).status, 0)                    // session_id 없는 resume
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root }).status, 0)                    // session_id 없는 resume(바인딩 기록 불가·no-op)
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0)
-  assert.deepEqual(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).sessionIds, ["sid-a", "sid-b"])
-  const src = join(root, "src.js")
+  const wt = wtFor(root, task)
+  assert.deepEqual(JSON.parse(readFileSync(join(wt, ".harnie", "active.json"), "utf8")).sessionIds, ["sid-a", "sid-b"])
+  const src = join(wt, "src.js")
   // H1: 두 참여 세션 모두 승인 前 Write deny(비웠다면 sid-a가 통과했다)
   for (const sid of ["sid-a", "sid-b"])
     assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: sid })), sid)

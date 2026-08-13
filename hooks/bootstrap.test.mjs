@@ -1,21 +1,30 @@
 // bootstrap.mjs 훅 통합 테스트 — stdin 이벤트로 구동, exit code(0=ok/no-op, 2=fail-closed)와 sentinel 효과 검증.
-// 설계: docs/bootstrap-adherence.md. bootstrap은 stdout JSON이 아니라 exit code로 invocation을 통과/차단한다.
+// 설계: docs/bootstrap-adherence.md + T2(worktree-per-run, docs/plans/parallel-dev/design.md DEC-001).
+// bootstrap은 stdout JSON이 아니라 exit code로 invocation을 통과/차단한다. dev-full의 run 상태는 이제 main
+// root가 아니라 `<root>/.harnie-wt/harnie-<slug>` worktree 안에 산다 — active()는 그 경로를 봐야 한다.
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, existsSync, readFileSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
 import { slugify, hasPendingRoute, getRouteState } from "../scripts/execution.mjs"
+import { worktreeDirFor } from "../scripts/worktree.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const BOOTSTRAP = join(HERE, "bootstrap.mjs")
 
+// worktree add가 HEAD를 필요로 하므로(unborn HEAD면 실패) 최초 커밋을 남긴다.
 function gitRepo() {
   const root = mkdtempSync(join(tmpdir(), "harnie-bootstrap-"))
   execFileSync("git", ["-C", root, "init", "-q"])
+  execFileSync("git", ["-C", root, "config", "user.email", "t@t"])
+  execFileSync("git", ["-C", root, "config", "user.name", "t"])
+  writeFileSync(join(root, "README.md"), "x\n")
+  execFileSync("git", ["-C", root, "add", "."])
+  execFileSync("git", ["-C", root, "commit", "-q", "-m", "init"])
   return root
 }
 // stdin payload로 bootstrap 구동. 반환 {code, stderr}.
@@ -40,15 +49,19 @@ const SID = "sess-test"
 const pending = (root, sid = SID) => hasPendingRoute(root, sid)
 const ups = (prompt, cwd, sid = SID) => ({ hook_event_name: "UserPromptSubmit", prompt, cwd, session_id: sid })
 const skill = (name, args, cwd, sid = SID) => ({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: name, args }, cwd, session_id: sid })
-const active = (root) => existsSync(join(root, ".harnie", "active.json")) ? JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")) : null
+// dev-full의 run 상태는 root가 아니라 그 worktree 안에 있다(T2 DEC-001) — task 텍스트로 결정적 경로를 계산.
+const wtFor = (root, task) => worktreeDirFor(root, `harnie/${slugify(task)}`)
+const active = (dir) => existsSync(join(dir, ".harnie", "active.json")) ? JSON.parse(readFileSync(join(dir, ".harnie", "active.json"), "utf8")) : null
 
-test("UserPromptSubmit /harnie:dev-full <작업> → bootstrap(run 생성·exit 0)", () => {
+test("UserPromptSubmit /harnie:dev-full <작업> → worktree 생성 + bootstrap(run 생성·exit 0)", () => {
   const root = gitRepo()
   assert.equal(run(ups("/harnie:dev-full add a subtract function", root)).code, 0)
-  const s = active(root)
+  const wt = wtFor(root, "add a subtract function")
+  const s = active(wt)
   assert.ok(s)
   assert.equal(s.track, "plan")
   assert.equal(s.slug, slugify("add a subtract function"))
+  assert.equal(active(root), null) // main root에는 run 상태를 두지 않음(T2)
 })
 
 test("UserPromptSubmit /harnie:dev-full (인자 없음) → exit 2·run 미생성", () => {
@@ -82,10 +95,10 @@ test("UserPromptSubmit 비-harnie prompt → no-op exit 0", () => {
   assert.equal(active(root), null)
 })
 
-test("PreToolUse Skill harnie:dev-full → bootstrap(run 생성·exit 0)", () => {
+test("PreToolUse Skill harnie:dev-full → worktree 생성 + bootstrap(run 생성·exit 0)", () => {
   const root = gitRepo()
   assert.equal(run(skill("harnie:dev-full", "add a subtract function", root)).code, 0)
-  assert.equal(active(root).slug, slugify("add a subtract function"))
+  assert.equal(active(wtFor(root, "add a subtract function")).slug, slugify("add a subtract function"))
 })
 
 test("PreToolUse Skill harnie:dev-quick → no-op exit 0(quick 이연)", () => {
@@ -100,20 +113,33 @@ test("PreToolUse Skill 기타 skill → no-op exit 0", () => {
   assert.equal(active(root), null)
 })
 
-test("다른 base·미완료 active에서 새 작업 → exit 2(block, 재개 안내)", () => {
+// worktree-per-run의 핵심 목표(FR-001): 같은 세션이 아니면 다른 base도 동시 활성 가능 — 예전 "미완료 run 충돌" block은
+// 없다(그건 repo당 run 1개 싱글턴 시절의 제약). 대신 **같은 세션**이 다른 작업을 요청하면 한 세션=한 run(v1)으로 막는다.
+test("다른 세션·다른 base는 동시에 각자 worktree run(동시성, DEC-001)", () => {
   const root = gitRepo()
-  assert.equal(run(ups("/harnie:dev-full task one", root)).code, 0)
-  const r = run(ups("/harnie:dev-full task two", root))
-  assert.equal(r.code, 2)
-  assert.ok(/미완료 run/.test(r.stderr))
+  assert.equal(run(ups("/harnie:dev-full task one", root, "sessA")).code, 0)
+  assert.equal(run(ups("/harnie:dev-full task two", root, "sessB")).code, 0)
+  assert.ok(active(wtFor(root, "task one")))
+  assert.ok(active(wtFor(root, "task two")))
+  assert.notEqual(wtFor(root, "task one"), wtFor(root, "task two"))
 })
 
-test("같은 작업 재호출 → resume(exit 0·같은 slug)", () => {
+test("같은 세션이 이미 바인딩된 상태에서 다른 작업 요청 → exit 2(한 세션=한 run, 재개 안내)", () => {
+  const root = gitRepo()
+  assert.equal(run(ups("/harnie:dev-full task one", root, "sessA")).code, 0)
+  const r = run(ups("/harnie:dev-full task two", root, "sessA"))
+  assert.equal(r.code, 2)
+  assert.match(r.stderr, /한 세션 = 한 run/)
+  assert.equal(active(wtFor(root, "task two")), null) // 두 번째 worktree는 만들어지지 않음
+})
+
+test("같은 작업 재호출 → resume(exit 0·같은 worktree·같은 slug)", () => {
   const root = gitRepo()
   run(ups("/harnie:dev-full same task", root))
-  const before = active(root).slug
+  const wt = wtFor(root, "same task")
+  const before = active(wt).slug
   assert.equal(run(ups("/harnie:dev-full same task", root)).code, 0)
-  assert.equal(active(root).slug, before)
+  assert.equal(active(wt).slug, before)
 })
 
 test("malformed stdin(비-JSON) → exit 2(fail-closed, P2-4)", () => {
@@ -155,12 +181,12 @@ test("UserPromptSubmit /harnie:dev(빈 인자) → exit 2·pending 미생성(P1-
   assert.equal(pending(root), false)
 })
 
-test("라우터 실패 흐름: 미완료 run 있을 때 Skill(dev-full) 실패 → pending을 failed로 전환(latch 방지, P1-1)", () => {
+test("라우터 실패 흐름: 이미 다른 run에 바인딩된 세션이 라우팅 시도 → pending을 failed로 전환(latch 방지, P1-1)", () => {
   const root = gitRepo()
-  run(ups("/harnie:dev-full task A", root, "sessA"))     // task A active(미완료)
-  run(ups("/harnie:dev task B", root, "sessB"))          // 세션 B 라우터 → pending
+  run(ups("/harnie:dev-full task A", root, "sessB"))     // sessB가 이미 task A run에 바인딩
+  run(ups("/harnie:dev task B", root, "sessB"))          // 같은 세션이 다른 작업으로 라우터 진입 → pending
   assert.equal(getRouteState(root, "sessB"), "pending")
-  const r = run(skill("harnie:dev-full", "task B", root, "sessB")) // 라우팅 시도 → A 미완료라 block
+  const r = run(skill("harnie:dev-full", "task B", root, "sessB")) // 라우팅 시도 → 이미 다른 run에 바인딩돼 block
   assert.equal(r.code, 2)
   assert.equal(getRouteState(root, "sessB"), "failed")   // pending → failed(영구 latch 아님)
 })

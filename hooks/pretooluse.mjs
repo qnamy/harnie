@@ -3,7 +3,7 @@
 // 오류·상태 손상은 fail-closed(deny) — throw로 exit 1 나면 Claude Code가 비차단 처리하므로 전체 catch.
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readStdin, findRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
+import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex, isControlPath, referencesHarnie, isHarnieRead } from "../scripts/guards.mjs"
 
@@ -16,21 +16,27 @@ const toolName = p.tool_name || ""
 const input = p.tool_input || {}
 
 try {
-  const root = findRoot(p.cwd)
+  // worktree-per-run(T2): 세션 cwd는 main 작업트리에 남아 있으므로, 이 세션이 바인딩된 run이 있으면 그 worktree를
+  // root로 쓴다(①세션 바인딩 파일 ②없으면 findRoot 그대로). mainRoot(plain findRoot)은 "밖" 판정 보정에 쓴다(아래).
+  const root = resolveRoot(p.cwd, p.session_id)
+  const mainRoot = findRoot(p.cwd)
   // baseline(active/pending 무관, P1-3): control·route·lock 파일 직접 쓰기 차단 — 다른 세션이 raw로 route/권위 파일을 바꾸지 못하게.
   if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" || toolName === "NotebookEdit") {
-    const { rel, abs, escapes, outside } = canonicalRelPath(root, input.file_path || input.notebook_path)
+    const { rel, abs, escapes } = canonicalRelPath(root, input.file_path || input.notebook_path)
     if (escapes) denyPreTool(`쓰기 대상이 repo 밖(symlink/traversal): ${input.file_path || input.notebook_path}`)
     if (isControlPath(rel)) denyPreTool(`control/route 파일 직접 쓰기 금지(${rel}) — 훅/CLI만`)
-    // repo 밖 절대경로는 허용하지만, **다른 harnie run의 control 파일**이면 여기서도 차단(권위 보호는 repo 경계와 무관).
-    if (outside) {
-      const foreign = harnieControlSuffix(abs)
-      if (foreign && isControlPath(foreign)) denyPreTool(`다른 harnie run의 control 파일 직접 쓰기 금지(${abs}) — 훅/CLI만`)
-    }
+    // **다른 harnie run의 control 파일**이면 outside 여부와 무관하게 차단(권위 보호는 repo 경계와 무관) — 별개 repo로
+    // 밖을 가리키는 절대경로뿐 아니라, worktree-per-run(T2)에서 root(main) 트리 **안쪽**에 nested된 다른 run의
+    // worktree(`<root>/.harnie-wt/<slug>/.harnie/…`)도 여기 걸린다(그 경로는 rel이 `.harnie/`로 시작하지 않아
+    // 위 isControlPath(rel)만으론 못 잡는다).
+    const foreign = harnieControlSuffix(abs)
+    if (foreign && isControlPath(foreign)) denyPreTool(`다른 harnie run의 control 파일 직접 쓰기 금지(${abs}) — 훅/CLI만`)
   }
   // pending-route 게이트(§3.9, P1-2/P1-4): 이 세션의 `/harnie:dev` 라우팅이 미완료면 **active 여부와 무관하게** 작업 도구를 차단
   // (기존 run 권한으로 우회 방지). **Bash는 전면 차단**(read-only 판정에 `rg --pre` 등 실행 우회 여지) — 비-Bash read-only(Read/Grep/Glob)만 허용.
-  if (hasPendingRoute(root, p.session_id)) {
+  // route 파일은 항상 mainRoot(세션 cwd)에 있다(Stop과 동일 기준) — resolveRoot로 worktree에 바인딩된 뒤에는
+  // root≠mainRoot가 되어 여기서 찾아야 늘 존재하지 않는 경로를 보게 되므로 게이트가 무력해진다(non-blocking 발견, 일관성 수정).
+  if (hasPendingRoute(mainRoot, p.session_id)) {
     const gated = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "Bash"].includes(toolName) || classifyCodex(toolName).isCodex
     if (gated) denyPreTool("라우팅 미완료(pending-route) — 먼저 track 스킬(dev-full/dev-quick)을 호출하거나 `/harnie:dev-full`로 직접 진입하세요")
   }
@@ -55,8 +61,14 @@ try {
     if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" || toolName === "NotebookEdit") {
       // symlink·traversal 해소한 canonical 상대경로로 판정. repo 안 경로가 밖을 가리키면(symlink 우회) deny.
       // 입력이 애초에 repo 밖 절대경로면 outside=true로 넘겨 phase 게이트 대상에서 제외(run의 소스가 아님).
-      const { rel, escapes, outside } = canonicalRelPath(root, input.file_path || input.notebook_path)
-      if (escapes) denyPreTool(`쓰기 대상이 repo 밖(symlink/traversal): ${input.file_path || input.notebook_path}`)
+      const target = input.file_path || input.notebook_path
+      const { rel, escapes, outside: outsideRun } = canonicalRelPath(root, target)
+      if (escapes) denyPreTool(`쓰기 대상이 repo 밖(symlink/traversal): ${target}`)
+      // worktree-per-run(T2): root(=이 run의 worktree)가 main repo 자체가 아닐 때, "밖"은 원래 "이 repo·이 run과
+      // 무관"을 뜻했다. main 트리 안(이 run의 worktree 밖)은 여전히 같은 repo 안이므로 outside로 보지 않는다 —
+      // 그래야 승인 前 게이트가 "main root에 잘못 쓴" 실수를 계속 막는다(진짜 repo 밖 절대경로는 그대로 outside 유지).
+      let outside = outsideRun
+      if (outside && root !== mainRoot && !canonicalRelPath(mainRoot, target).outside) outside = false
       const d = decideWriteEdit({ relPath: rel, phase, track, slug, outside })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {

@@ -1,6 +1,6 @@
 // harnie 훅 엔트리 공용 헬퍼 — stdin 파싱 + repo root 탐색 + 결정 emit.
 // 실제 결정 로직은 scripts/guards.mjs·execution.mjs(순수/테스트됨)에 있고, 여기선 배선만 한다.
-import { existsSync, realpathSync, readFileSync } from "node:fs"
+import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs"
 import { join, dirname, resolve, basename, relative, sep, isAbsolute } from "node:path"
 
 const isOutsideRel = (rel) => rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)
@@ -63,6 +63,52 @@ export function findRoot(startCwd) {
     dir = parent
   }
   return resolve(startCwd || process.cwd())
+}
+
+// ── 세션→run 바인딩(worktree-per-run, T2 DEC-001) ───────────────────────────
+// main repo의 `.harnie/sessions/<session_id>.json` = {"workroot": "<worktree 절대경로>"}. bootstrap이 dev-full
+// worktree 생성 후 기록하고, run 종료(completion) 시 정리한다. 세션의 cwd는 계속 main 작업트리이므로,
+// 훅이 자기 run(=worktree)을 찾으려면 이 바인딩을 거쳐야 한다(resolveRoot).
+const SESSION_NAME_RE = /^[A-Za-z0-9._-]+$/
+function sessionBindingPath(root, sessionId) {
+  if (typeof sessionId !== "string" || !SESSION_NAME_RE.test(sessionId) || sessionId === "." || sessionId === "..") return null
+  return join(root, ".harnie", "sessions", sessionId + ".json")
+}
+export function readSessionBinding(root, sessionId) {
+  const p = sessionBindingPath(root, sessionId)
+  if (!p || !existsSync(p)) return null
+  try {
+    const b = JSON.parse(readFileSync(p, "utf8"))
+    // workroot는 절대경로여야 한다 — 상대경로(예: ".")면 resolveRoot가 그걸 cwd 기준으로 해석해 의도와 다른
+    // 곳을 활성 root로 오인할 수 있다.
+    return b && typeof b.workroot === "string" && isAbsolute(b.workroot) ? b : null
+  } catch { return null }
+}
+export function writeSessionBinding(root, sessionId, workroot) {
+  const p = sessionBindingPath(root, sessionId)
+  if (!p) throw new Error(`session binding: 부적합 session_id ${JSON.stringify(sessionId)}`)
+  if (typeof workroot !== "string" || !isAbsolute(workroot)) throw new Error(`session binding: workroot는 절대경로 필요 (${JSON.stringify(workroot)})`)
+  mkdirSync(dirname(p), { recursive: true })
+  const tmp = p + ".tmp"
+  writeFileSync(tmp, JSON.stringify({ workroot }, null, 2) + "\n")
+  renameSync(tmp, p)
+}
+export function clearSessionBinding(root, sessionId) {
+  const p = sessionBindingPath(root, sessionId)
+  if (!p) return
+  try { unlinkSync(p) } catch { /* 이미 없음 */ }
+}
+// H1(PreToolUse)·H2(Stop)·PostToolUse가 활성 run의 root를 찾는 해석 순서:
+// ① 이 세션의 바인딩 파일이 있고 그 workroot가 아직 존재하면 그걸 쓴다 — 세션 cwd가 main 작업트리에 그대로
+//    있는(흔한) 경우. **이게 항상 먼저다**: cwdRoot 자신에 (이 세션과 무관한) active.json이 남아 있다고 해서
+//    (예: 다른 세션의 quick 트랙 잔재, pre-T2 run, 완료 후 정리 전 상태) 그걸 이 세션의 run으로 오인해선 안
+//    된다 — 그러면 이 세션 자신의 worktree run이 H1·H2 보호 없이 통째로 무방비가 된다(CR-003).
+// ② 바인딩이 없거나 workroot가 사라졌으면(정리됨 등) findRoot 그대로 — 여기엔 "세션이 이미 worktree 안에서
+//    시작"(findRoot이 그 `.git`에서 멈춤)과 "비-worktree run(quick 트랙 등)·비활성" 둘 다 하위호환으로 흡수된다.
+export function resolveRoot(cwd, sessionId) {
+  const cwdRoot = findRoot(cwd)
+  const b = sessionId ? readSessionBinding(cwdRoot, sessionId) : null
+  return b && existsSync(b.workroot) ? b.workroot : cwdRoot
 }
 
 // active run에 **진입·재개한 소유 세션 집합**을 sentinel에서 직접 읽는다(기록이 없으면 []).

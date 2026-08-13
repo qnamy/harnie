@@ -16,6 +16,7 @@ export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/").toLowerCase()
   if (!p.startsWith(".harnie/")) return false
   if (p.startsWith(".harnie/pending-route/")) return true // per-session route 파일 보호(다른 세션의 raw 변경/삭제 차단, P1-3)
+  if (p.startsWith(".harnie/sessions/")) return true       // 세션→run(worktree) 바인딩 보호(T2 DEC-001, 위와 같은 취지)
   if (p === ".harnie/state.lock") return true             // state lock 보호
   return CONTROL_BASENAMES.has(p.split("/").pop())
 }
@@ -45,7 +46,17 @@ export function decideWriteEdit({ relPath, phase, track, slug, outside = false }
 // read-only 명령·sanctioned CLI만 allow**(§5.1 allowlist, git apply·npm·인터프리터·리다이렉트 등 쓰기·부작용 fail-closed).
 // 셸 메타 — 연쇄·서브셸·리다이렉트·**프로세스 치환·개행**까지. read-only 판정은 lexSegments가 인용을 인식해 처리한다.
 const SHELL_ANY = /[;|&`\n\r]|\$\(|<\(|>\(|[<>]/ // sanctioned CLI는 파이프 포함 어떤 메타도 불가
-const HARNIE_REF = /\.harnie\b/i                 // 비-sanctioned Bash의 .harnie 접근 차단(case-insensitive FS의 .HARNIE 포함)
+// 비-sanctioned Bash의 `.harnie`(및 그 worktree 컨테이너 `.harnie-wt`, T2) 접근 차단(case-insensitive FS의 .HARNIE 포함).
+// 첫 대안은 nested `.harnie/`(권위 상태, 어디에 있든) 참조 — `\b`가 아니라 `(?![\w-])`를 써서 `.harnie-wt`의 `-`를
+// 경계로 잘못 인식하지 않게 한다(옛 `\.harnie\b`는 `.harnie-wt`도 매치해 worktree-per-run의 소스 트리 전체가
+// Bash로 접근 불가능해지는 회귀가 있었다 — CR-001). 둘째 대안은 `.harnie-wt` **컨테이너 자체**(뒤에 `/`로 이어지는
+// 특정 worktree 참조가 아닌 형태, 예: `rm -rf .harnie-wt`) — 모든 run의 상태를 한 번에 지우는 실수를 막는다.
+// `.harnie-wt/<slug>/…`처럼 특정 worktree **안의 평범한 파일**(그 안에 nested된 `.harnie/`가 없는 한)은 매치하지
+// 않아 그 worktree에서 build·test·git 등을 자유롭게 쓸 수 있다.
+// (?!\/) 단독이 아니라 (?!\/[\w.-])를 쓰는 이유: 셸 탭완성·정리 명령이 흔히 만드는 trailing slash
+// (.harnie-wt/)나 glob(.harnie-wt/*)엔 뒤에 실제 경로 세그먼트가 없어 여전히 "컨테이너 전체"를 뜻하는데,
+// 단순 (?!\/)는 이 형태들을 놓쳤다(CR-004: rm -rf .harnie-wt/ 등이 통과).
+const HARNIE_REF = /\.harnie(?![\w-])|\.harnie-wt(?!\/[\w.-])/i
 // 셸 quote/백슬래시로 `.har""nie`처럼 쪼개 literal 매칭을 우회하는 것을 막기 위해 **quote·백슬래시 제거 후** 매칭(P1-2).
 // (echo ".harnie" 같은 텍스트도 걸리지만 .harnie 참조를 막는 쪽이 안전 — fail-safe.)
 function stripQuoting(cmd) { return String(cmd || "").replace(/['"\\]/g, "") }

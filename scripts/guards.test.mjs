@@ -1,7 +1,7 @@
 // guards.mjs 테스트 — 강제 훅 순수 결정 함수(H1 Write/Bash/Task/Codex, H2 Stop).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, referencesHarnie } from "./guards.mjs"
 
 test("isControlPath: 권위(authority) 파일만 control — receipt·round·delta는 구분", () => {
   // 권위 JSON → control(직접 쓰기 금지)
@@ -20,6 +20,29 @@ test("isControlPath: 권위(authority) 파일만 control — receipt·round·del
   assert.equal(isControlPath(".harnie/plan/x/plan.md"), false)
   assert.equal(isControlPath(".harnie/plan/x/notepad.md"), false)
   assert.equal(isControlPath("src/foo.ts"), false)
+})
+
+test("isControlPath: 세션 바인딩 디렉터리도 control(T2)", () => {
+  assert.equal(isControlPath(".harnie/sessions/abc-123.json"), true)
+})
+
+// CR-001 회귀: worktree-per-run(T2)의 컨테이너 `.harnie-wt`가 `.harnie` 매칭에 걸려 그 안의 평범한 파일까지
+// Bash로 접근 불가능해지던 버그. `.harnie-wt/<slug>/…`(nested `.harnie/` 없는 평범한 파일)은 매치되지 않아야 하고,
+// 컨테이너 자체 참조·nested `.harnie/` 참조는 계속 매치돼야 한다.
+test("referencesHarnie: .harnie-wt 컨테이너 안의 평범한 파일은 매치 안 됨(CR-001), 컨테이너 자체·nested .harnie는 매치", () => {
+  assert.equal(referencesHarnie("git -C .harnie-wt/harnie-foo status"), false)
+  assert.equal(referencesHarnie("node --test .harnie-wt/harnie-foo/x.test.mjs"), false)
+  assert.equal(referencesHarnie("npm --prefix .harnie-wt/harnie-foo test"), false)
+  assert.equal(referencesHarnie("cat .harnie-wt/harnie-foo/README.md"), false)
+  assert.equal(referencesHarnie("rm -rf .harnie-wt"), true)                          // 컨테이너 자체(모든 run 삭제)
+  assert.equal(referencesHarnie("ls .harnie-wt/harnie-foo/.harnie/active.json"), true) // nested 권위 상태
+  assert.equal(referencesHarnie("rm -rf .harnie"), true)                             // 기존 단일 .harnie 보호 유지
+  assert.equal(referencesHarnie("cat .harnie/pending-route/x.json"), true)
+  // CR-004 회귀: trailing slash·glob도 "컨테이너 전체"를 뜻하므로 매치돼야 한다(셸 탭완성·정리 명령의 흔한 형태).
+  assert.equal(referencesHarnie("rm -rf .harnie-wt/"), true)
+  assert.equal(referencesHarnie("rm -rf .harnie-wt/*"), true)
+  assert.equal(referencesHarnie("rm -rf ./.harnie-wt/"), true)
+  assert.equal(referencesHarnie("find .harnie-wt/ -name active.json -delete"), true)
 })
 
 test("decideWriteEdit: control 직접 쓰기 phase 무관 deny", () => {
