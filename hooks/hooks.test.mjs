@@ -424,6 +424,103 @@ test("bootstrap: git root면 정상 생성(회귀 방지)", () => {
   assert.ok(existsSync(join(root, ".harnie", "active.json")))
 })
 
+// owner 스코프 활성화 e2e: bootstrap이 sentinel에 소유자를 기록하므로 owner/비-owner 분리가 실제로 발동한다.
+// (기록이 없던 동안 isOwnerSession은 항상 true를 반환해 스코프가 inert였다 — 아래 두 단정이 그 회귀 감시.)
+test("owner 스코프 e2e: bootstrap 세션은 승인 前 게이트 적용, 무관한 세션은 미적용", () => {
+  const root = gitRepo("harnie-owner-e2e-")
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full 합계 함수 추가", cwd: root, session_id: "owner-s" }).status, 0)
+  const src = join(root, "src.js")
+  // owner 세션: planning phase 게이트 적용 → 소스 Write deny
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "owner-s" })))
+  // 무관한 세션: run 단위 게이트 미적용 → 통과(실측 피해였던 PR 리뷰 루틴 케이스)
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "unrelated-s" }), null)
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "git fetch origin" }, cwd: root, session_id: "unrelated-s" }), null)
+  // 비-owner여도 권위 파일 보호·.harnie 변형 차단은 유지
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "active.json") }, cwd: root, session_id: "unrelated-s" })))
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie" }, cwd: root, session_id: "unrelated-s" })))
+})
+
+test("owner 스코프 e2e: resume은 소유자를 **추가**한다 — 이전 세션 보호 유지 + 재개 세션도 강제(양방향 fail-open 회귀)", () => {
+  const root = gitRepo("harnie-owner-resume-")
+  const prompt = "/harnie:dev-full 합계 함수 추가"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-a" }).status, 0)
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0) // resume
+  const src = join(root, "src.js")
+  // 재개 세션에 강제 적용(추가 안 하면 fail-open)
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-b" })))
+  // **아직 작업 중인 이전 소유 세션도 계속 보호**(교체하면 여기가 뚫린다 — 리뷰 P1)
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "sid-a" })))
+  // 진입하지 않은 무관한 세션은 여전히 미적용
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "never-entered" }), null)
+  const s = JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8"))
+  assert.deepEqual(s.sessionIds, ["sid-a", "sid-b"])
+})
+
+// 소유자 집합을 직접 심는다(bootstrap 없이 executing 상태의 H2·PostToolUse를 검사하기 위해).
+function setOwners(root, sids) {
+  const f = join(root, ".harnie", "active.json")
+  const s = JSON.parse(readFileSync(f, "utf8"))
+  s.sessionIds = sids
+  delete s.sessionId
+  writeFileSync(f, JSON.stringify(s))
+}
+test("owner 스코프: 동시 활성 이전 소유자도 H1·H2·PostToolUse 보호를 계속 받는다(리뷰 P1 회귀)", () => {
+  const { root } = setupRepo()
+  toExecuting(root)
+  setOwners(root, ["sid-a", "sid-b"]) // sid-a가 진입, sid-b가 resume한 상태
+  // H1: 두 소유자 모두 .harnie 변형 차단(권위 보호) — executing이라 소스 쓰기는 정상 허용
+  for (const sid of ["sid-a", "sid-b"])
+    assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: "rm -rf .harnie" }, cwd: root, session_id: sid })), sid)
+  // H2: 두 소유자 모두 미완료 Stop이 block(교체 방식이면 sid-a가 그냥 통과했다)
+  for (const sid of ["sid-a", "sid-b"])
+    assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "작업 중" }).decision, "block", sid)
+  // 진입하지 않은 세션은 Stop 강제 미적용(과잉 차단 제거 유지)
+  assert.equal(hook(STOP, { cwd: root, session_id: "never-entered", stop_hook_active: false, last_assistant_message: "작업 중" }), null)
+  // PostToolUse: 이전 소유자의 codex 관찰도 계속 등록된다
+  const tid = "019facda-9999-8888-7777-666655554444"
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "read-only" }, tool_response: `{"threadId":"${tid}"}`, cwd: root, session_id: "sid-a" })
+  assert.ok(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).readOnlyThreads.includes(tid))
+})
+
+test("owner 스코프 e2e: sid-a → 식별자 없는 resume → sid-b resume 순서에서도 sid-a 보호 유지(리뷰 P1 회귀)", () => {
+  const root = gitRepo("harnie-owner-noid-")
+  const prompt = "/harnie:dev-full 합계 함수 추가"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-a" }).status, 0)
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root }).status, 0)                    // session_id 없는 resume
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt, cwd: root, session_id: "sid-b" }).status, 0)
+  assert.deepEqual(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).sessionIds, ["sid-a", "sid-b"])
+  const src = join(root, "src.js")
+  // H1: 두 참여 세션 모두 승인 前 Write deny(비웠다면 sid-a가 통과했다)
+  for (const sid of ["sid-a", "sid-b"])
+    assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: sid })), sid)
+  // (H2·PostToolUse는 executing 상태가 필요하므로 아래 테스트에서 검사한다 — planning엔 완료 강제가 없다.)
+  // 진입하지 않은 세션은 여전히 미적용
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "never-entered" }), null)
+})
+
+test("owner 스코프: 식별자 없는 resume 후에도 이전 소유자가 H2·PostToolUse 대상(executing 상태, 리뷰 P1)", () => {
+  const { root } = setupRepo()
+  toExecuting(root)
+  setOwners(root, ["sid-a"])
+  // 식별자 없는 resume → sid-b resume 을 상태 수준에서 재현(bootstrap 없이 executing을 유지하기 위해)
+  const f = join(root, ".harnie", "active.json")
+  const s = JSON.parse(readFileSync(f, "utf8")); s.sessionIds = ["sid-a", "sid-b"]; writeFileSync(f, JSON.stringify(s))
+  for (const sid of ["sid-a", "sid-b"])
+    assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "작업 중" }).decision, "block", sid)
+  const tid = "019facda-5555-4444-3333-222211110000"
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "read-only" }, tool_response: `{"threadId":"${tid}"}`, cwd: root, session_id: "sid-a" })
+  assert.ok(JSON.parse(readFileSync(f, "utf8")).readOnlyThreads.includes(tid))
+})
+
+test("owner 스코프: H1 승인 前 소스 Write도 두 소유자 모두에게 적용", () => {
+  const { root } = setupRepo() // planning
+  setOwners(root, ["sid-a", "sid-b"])
+  const src = join(root, "src", "a", "x.js")
+  for (const sid of ["sid-a", "sid-b"])
+    assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: sid })), sid)
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: src }, cwd: root, session_id: "never-entered" }), null)
+})
+
 test("bootstrap 라우터: 비-git에서 /harnie:dev는 exit 2 + pending-route 미생성(latch 방지)", () => {
   const root = mkdtempSync(join(tmpdir(), "harnie-nogit-"))
   const r = bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev 합계 함수 추가", cwd: root, session_id: "s1" })

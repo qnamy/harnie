@@ -331,7 +331,9 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
+  // sessionIds = run에 진입·재개한 소유 세션 **집합**(hooks/lib.mjs isOwnerSession이 membership으로 판정).
+  // 빈 배열 = 미기록 → 훅이 repo 전역 적용으로 폴백(보수적).
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -346,7 +348,7 @@ export function loadContext(root) {
   const rawPhase = ex.phase
   // effectivePhase: 승인 전이면 executing/final-wave 주장을 awaiting-approval로 강등(쓰기 게이트 닫음).
   const effectivePhase = approved ? rawPhase : (rawPhase === "executing" || rawPhase === "final-wave" ? "awaiting-approval" : rawPhase)
-  return { active: true, root, track: s.track, slug: s.slug, phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
+  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
 }
 
 // 완료 재도출(§4) — manifest 순회. manifest 부재(승인 前)면 완료 강제 없음(noManifest).
@@ -454,19 +456,47 @@ function genuinelyComplete(root, track, slug) {
   const comp = computeCompletion(root, track, slug)
   return comp.complete === true && comp.noManifest !== true
 }
+// run에 **명시적으로 진입·재개한 세션들의 집합**(hooks/lib.mjs isOwnerSession의 권위).
+// 불변식: **식별 가능한 상태로 참여한 세션은 run이 끝날 때까지 계속 owner다.** 세션 종료를 확인할 증거가 없으므로
+// 집합에서 빼지 않는다 — 빼는 순간 아직 작업 중인 그 세션의 H1 승인-前 쓰기·H2 Stop·PostToolUse 관찰 보호가
+// 전부 풀린다(두 세션 동시 활성은 정상 시나리오다). 그래서 owner 판정은 **membership**이고 resume은 **union**만 한다.
+// 식별자 없는 resume도 집합을 건드리지 않는다: isOwnerSession은 payload에 session_id가 없으면 이미 owner로
+// 취급하므로 지울 이유가 없고, 지우면 그 뒤 식별 가능한 resume이 집합을 다시 좁혀(=[새 세션]) 이전 참여자가 빠진다.
+function ownerSessionId(sessionId) { return typeof sessionId === "string" && sessionId !== "" ? sessionId : null }
+// sentinel의 소유자 표현을 배열로 정규화(레거시 스칼라 sessionId도 1개 집합으로 취급).
+export function normalizeOwnerSessions(s) {
+  if (!s || typeof s !== "object") return []
+  if (Array.isArray(s.sessionIds)) return s.sessionIds.filter((x) => typeof x === "string" && x !== "")
+  const one = ownerSessionId(s.sessionId)
+  return one ? [one] : []
+}
 // 새 run 생성: execution.json 먼저, active.json(포인터) 마지막 원자 전환(§3.5). old dir은 건드리지 않음(보존).
-function createRun(root, track, base) {
+function createRun(root, track, base, sessionId) {
   const slug = collisionFreeSlug(root, track, base)
+  const owner = ownerSessionId(sessionId)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", tasks: {} })
-  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [] })
+  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [], sessionIds: owner ? [owner] : [] })
   return { slug, reused: false }
 }
 // resume: execution.json **strict read + sentinel 일치 검증**(P2-5, cmdInit 수준). 존재 확인만으론 손상 통과.
-function resumeRun(root, s) {
+// 재개 세션을 소유자 집합에 **추가**한다(monotonic union). 추가하지 않으면 재개 세션이 비-owner로 판정돼 강제가
+// 통째로 꺼지고(fail-open), 교체하거나 비우면 아직 작업 중인 이전 참여 세션의 보호가 풀린다.
+function resumeRun(root, s, sessionId) {
   const execPath = join(planDir(root, s.track, s.slug), "execution.json")
   if (!existsSync(execPath)) throw new FailClosed("sentinel 존재하나 execution.json 부재 — 손상, fail-closed")
   const ex = readJSONStrict(execPath) // JSON 손상이면 throw
   if (ex.track !== s.track || ex.slug !== s.slug) throw new FailClosed("execution.json이 sentinel과 불일치 — 손상, fail-closed")
+  const owner = ownerSessionId(sessionId)
+  const prev = normalizeOwnerSessions(s)
+  // 식별자가 없으면 **그대로 보존**(비우지 않는다 — 그 세션은 isOwnerSession에서 이미 owner이고, 비우면 다음
+  // 식별 가능한 resume이 집합을 [새 세션]으로 좁혀 이전 참여자가 빠진다).
+  const next = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : prev
+  // 레거시 스칼라 표현도 이 기회에 배열로 이관. 호출자(bootstrapRun)의 state lock 하에서 RMW.
+  if (stableStringify(next) !== stableStringify(prev) || s.sessionId !== undefined || !Array.isArray(s.sessionIds)) {
+    s.sessionIds = next
+    delete s.sessionId
+    writeJSONAtomic(sentinelPath(root), s)
+  }
   return { slug: s.slug, reused: true, resumed: true }
 }
 // 진입점 훅이 호출. base=slugify(작업인자). 결정표(§3.4)로 resume/new/block. **state lock으로 직렬화**(P1-3). 성공 시 이 세션의 pending-route 해소.
@@ -477,10 +507,10 @@ export function bootstrapRun(root, { base, track = "plan", sessionId = null } = 
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base)
+    if (!s) result = createRun(root, track, base, sessionId)
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base) // 완료 → 새 run(포인터 전환·old 보존)
-    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s) // 같은 작업(구버전 sentinel은 slug=base) → resume
+    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId) // 완료 → 새 run(포인터 전환·old 보존)
+    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 재개하여 완료해야 새 작업을 시작할 수 있습니다.`)
     clearPendingRoute(root, sessionId) // 부트스트랩 성공 = 이 세션 라우팅 해소(§3.9, per-session 파일이라 lock-free)
     return result

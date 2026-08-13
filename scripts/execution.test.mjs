@@ -12,6 +12,7 @@ import {
   deriveCompletion, sealHashOf, parseStatusFooter, FailClosed, authorityApproved,
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState, markRouteFailed,
+  loadContext,
 } from "./execution.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -511,6 +512,59 @@ test("bootstrapRun: 같은 base·미완료 active → resume(reuse)", () => {
   const r = bootstrapRun(root, { base: "feat-x" })
   assert.equal(r.reused, true)
   assert.equal(r.slug, "feat-x")
+})
+
+test("bootstrapRun: 소유 세션을 sentinel에 기록(owner 스코프 권위)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
+  assert.deepEqual(loadContext(root).sessionIds, ["sid-a"]) // 훅이 파일 재독 없이 쓰는 경로
+})
+
+test("bootstrapRun: resume은 소유자를 **추가**한다 — 이전 소유자를 교체하면 그 세션 보호가 풀림(리뷰 P1)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
+  assert.equal(r.reused, true)
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" }) // 재진입은 중복 추가 안 함
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+})
+
+test("bootstrapRun: 세션 식별자 없는 resume은 집합을 보존한다 — 비우면 다음 resume이 다시 좁힌다(리뷰 P1)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 이 세션은 isOwnerSession에서 이미 owner라 지울 이유가 없다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" }) // 비웠다면 여기서 ["sid-b"]가 되어 sid-a가 빠졌다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+})
+
+test("bootstrapRun: 소유자 집합은 monotonic — 어떤 resume 순서에서도 참여 세션이 빠지지 않는다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  for (const sessionId of [undefined, "sid-b", undefined, "sid-a", "sid-c", undefined])
+    bootstrapRun(root, { base: "feat-x", sessionId })
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b", "sid-c"])
+})
+
+test("bootstrapRun: 레거시 스칼라 sessionId 센티넬은 resume에서 배열로 이관(기존 소유자 보존)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  const f = join(root, ".harnie", "active.json")
+  const s = readSentinel(root); delete s.sessionIds; s.sessionId = "legacy-sid"; writeFileSync(f, JSON.stringify(s))
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
+  const after = readSentinel(root)
+  assert.deepEqual(after.sessionIds, ["legacy-sid", "sid-b"])
+  assert.equal(after.sessionId, undefined)
+})
+
+test("bootstrapRun: rollover(완료 run → 새 run)는 소유자 집합을 새 세션만으로 시작", () => {
+  const root = gitRepo()
+  makeCompleteRun(root, "feat-x")
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-new" })
+  assert.equal(r.reused, false)
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-new"])
 })
 
 test("bootstrapRun: 다른 base·미완료 active → block(fail-closed)", () => {
