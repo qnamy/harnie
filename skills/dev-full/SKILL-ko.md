@@ -25,11 +25,25 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 ## 상태 위치 (durable, 파일 기반)
 `.harnie/plan/<slug>/`:
 - `plan.md` — 설계 + 작업 분해 + 검증 전략 + Final Wave(Coverage·Quality·Runtime·Scope). 승인 게이트의 대상.
+- `design/rev-N.md` — **버전이 붙은 설계 정본**: 리비전마다 파일 하나, N은 단조 증가, 덮어쓰기 없음. 서브에이전트·리뷰어에게 설계 내용으로 넘길 수 있는 **유일한 경로**.
 - `notepad.md` — 진행 메모(크로스-프로바이더 공유 단일 소스).
 - `review/design-arch/` · `review/design-detail/` — 아키·상세 설계 리뷰 루프 상태(각 독립: `ledger.json`·`state.json`·`round-N.txt`).
 - `review/<unit>/` — 작업/웨이브별 코드 리뷰 루프 상태.
 
 > 경로 단일 스킴: 모든 리뷰 루프 상태는 `.harnie/plan/<slug>/review/<name>/` 아래(quick의 `.harnie/quick/<slug>/`와 대칭). `<name>` = `design-arch` | `design-detail` | 코드 리뷰 단위.
+
+## 위임 참조 규칙 (디스크 정본만)
+
+서브에이전트·리뷰어에게 넘기는 모든 경로는 repo 안의 **디스크 정본**이어야 한다 — `.harnie/plan/<slug>/…` 또는 소스 파일. **tool-result blob 경로**(`tool-results/*.json`, 트랜스크립트 스크래치, 임시 캡처 등)는 **절대 넘기지 않는다.** 그 파일들은 읽히도록 쓰인 게 아니라서(한 줄 55k 토큰 JSON은 조용히 로드에 실패한다), 위임받은 쪽은 자기가 기억하는 **더 오래된 리비전**으로 설계를 재구성하게 되고, 그렇게 세대가 라운드를 넘어 뒤섞이면 하류에서 탐지되지 않는다.
+
+따라서 **설계 산출물이 존재하는 순간부터**:
+
+1. main이 현재 설계를 `.harnie/plan/<slug>/design/rev-N.md`에 쓴다 — **리비전마다 새 파일**, 이전 `N`을 덮어쓰지 않는다. **최초 작성 위임**(A3/A4 첫 패스)에는 아직 산출물이 없다 — designer가 작업과 그라운딩으로 `rev-1`을 만들고, 이 규칙은 **그 이후 모든 위임**에 적용된다.
+2. **기존 설계를 참조하는 이후 위임**은 **그 정확한 경로와 리비전 번호**를 명시하고, 어떤 리비전이 리뷰 대상인지 말한다(예: "`design/rev-4.md`를 리뷰하라, rev-3은 폐기됨").
+3. 설계 내용을 프롬프트에 인라인으로 싣는 것(`review-loop-driver.md` R2가 `DR` 루프에서 요구 — 설계 파일은 git delta에서 제외되므로)은 이 규칙을 **대체하지 않는다**: 인라인 내용과 명시한 `rev-N.md`는 **같은 리비전**이어야 한다.
+4. **빌더 예외(B2).** Codex 빌더는 `.harnie/`에 접근하지 않으므로 `.harnie` 경로를 받지 않는다. 승인된 설계를 프롬프트에 **인라인**으로 주고, **어느 리비전에서 온 것인지(`rev-N`)를 명시**해 산출의 귀속을 유지한다. 경로 명시 요구는 `.harnie/`를 읽을 수 있는 위임 대상(designer·설계 리뷰어)에 적용된다.
+
+위임받은 쪽이 참조 경로를 읽지 못했다고 보고하면 그 라운드의 산출은 **무효**로 보고, 참조를 고쳐 재위임한다. 기억으로 재구성한 결과는 절대 받아들이지 않는다.
 
 ## 실행 상태 + 강제 훅 (plan 전용 하네스 — `scripts/execution.mjs`)
 plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 immutable `manifest.json` + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다 — 훅은 manifest+planHash로 승인을 판정하지 advisory phase를 믿지 않는다). 아래 스텝에서 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`, `<repo>` = 작업 repo 절대경로. **모든 `execution.mjs`·`loop.mjs` 호출은 `--root <repo>` 필수**(없으면 즉시 종료). 상태 조작은 **반드시 `execution.mjs`로만**(직접 Edit/Write/Bash-write는 훅이 차단):
@@ -75,16 +89,32 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 - **묶음 한도**: 설계 발견 라운드 **한 번에 최대 3개**, 포괄·복합 질문 금지. (A5 승인 질문은 별개이며 여기 셈에 안 든다.)
 - **해소되지 않았지만 진행을 막지 않는 불확실성**(모든 비질문 항목이 아니라)만 기본값과 함께 `plan.md`의 `## Assumptions` 섹션에 기록한다 — announce만 하지 않는다 — 설계 리뷰·승인 게이트가 볼 수 있게.
 
-**A3. 아키텍처 설계(정식) + 리뷰 루프 (조건부).** `harnie-designer`(opus/max)에게 **아키텍처 설계를 "정식으로"** 요청한다 — 위임 프롬프트에 `design-authoring-arch.md`의 **정식 섹션 계약을 인라인 주입**하고 `architecture, formal`을 신호한다(서브에이전트는 프로필이 자동 로드되지 않음). 시스템 경계·데이터 소유권·기술선택·SPOF에 집중, 클래스·SQL로 안 내려감. main이 `plan.md`의 아키텍처 섹션에 기록한다.
+**A3. 아키텍처 설계(정식) + 리뷰 루프 (조건부).** `harnie-designer`(opus/max)에게 **아키텍처 설계를 "정식으로"** 요청한다 — 위임 프롬프트에 `design-authoring-arch.md`의 **정식 섹션 계약을 인라인 주입**하고 `architecture, formal`을 신호한다(서브에이전트는 프로필이 자동 로드되지 않음). 시스템 경계·데이터 소유권·기술선택·SPOF에 집중, 클래스·SQL로 안 내려감. main은 받은 설계를 **그것을 참조하는 위임 前에** `.harnie/plan/<slug>/design/rev-N.md`에 쓰고(§위임 참조 규칙), 같은 리비전을 `plan.md`의 아키텍처 섹션에 기록한다.
 - **조건부**: 경계/데이터 소유권/기술 선택이 실제로 **바뀔 때만** 이 단계를 수행한다. 기존 아키텍처가 그대로면(그 안의 큰 상세 작업) skip하고 A4로 간다 — 근거 없는 정식 아키 단계는 scope inflation.
-- 수행 시 → **아키 설계 리뷰 루프**(review-loop-driver.md, producer=designer, 기준=design-review.md **아키 고도 렌즈**: 경계·소유권·기술선택·SPOF, namespace `DR`, `<dir>`=`.harnie/plan/<slug>/review/design-arch/`)를 APPROVE까지. R1의 delta 대신 `plan.md` 아키 섹션을 codex `prompt`에 싣는다(나머지 R2~R5 동일).
+- 수행 시 → **아키 설계 리뷰 루프**(review-loop-driver.md, producer=designer, 기준=design-review.md **아키 고도 렌즈**: 경계·소유권·기술선택·SPOF, namespace `DR`, `<dir>`=`.harnie/plan/<slug>/review/design-arch/`)를 APPROVE까지. R1의 delta 대신 아키 설계를 codex `prompt`에 싣고 **그 리비전이 담긴 `design/rev-N.md` 경로를 함께 명시**한다(나머지 R2~R5 동일).
+- 리뷰 라운드에 답하는 각 개정본은 **새 `rev-N.md`**이며, 재리뷰 위임 前에 먼저 쓴다. 이전 파일이나 tool-result blob을 가리켜 재리뷰하지 않는다.
 
-**A4. 상세 설계(정식) + 리뷰 루프.** 승인된 아키(또는 기존 아키) 위에서 `harnie-designer`(opus/max)에게 **상세 설계를 "정식으로"** 요청한다 — 위임 프롬프트에 `design-authoring-detail.md`의 **정식 섹션 계약을 인라인 주입**하고 `detailed design, formal`을 신호(요구 추적표·핵심 처리 로직·계약·데이터/상태·작업 분해, decision-complete 수준). 아키 결정을 조용히 바꾸지 않는다(바꿔야 하면 A3로 되돌려 아키 변경 요청). main이 `plan.md`의 상세 섹션에 기록한다.
-- → **상세 설계 리뷰 루프**(A3와 **독립** — 별도 ledger·state, producer=designer, 기준=design-review.md **상세 고도 렌즈**: decision-completeness·요구충족·실패모드, namespace `DR`, `<dir>`=`.harnie/plan/<slug>/review/design-detail/`)를 APPROVE까지. A3와 동일하게 **R1 git-delta 대신 `plan.md` 상세 섹션을 리뷰어 prompt에 싣는다**(설계 파일은 `.harnie/`/git 관리라 delta 비적용).
+**A4. 상세 설계(정식) + 리뷰 루프.** 승인된 아키(또는 기존 아키) 위에서 `harnie-designer`(opus/max)에게 **상세 설계를 "정식으로"** 요청한다 — 위임 프롬프트에 `design-authoring-detail.md`의 **정식 섹션 계약을 인라인 주입**하고 `detailed design, formal`을 신호(요구 추적표·핵심 처리 로직·계약·데이터/상태·작업 분해, decision-complete 수준). 아키 결정을 조용히 바꾸지 않는다(바꿔야 하면 A3로 되돌려 아키 변경 요청). main은 받은 설계를 그것을 참조하는 위임 前에 다음 `.harnie/plan/<slug>/design/rev-N.md`에 쓰고, 같은 리비전을 `plan.md`의 상세 섹션에 기록한다.
+- → **상세 설계 리뷰 루프**(A3와 **독립** — 별도 ledger·state, producer=designer, 기준=design-review.md **상세 고도 렌즈**: decision-completeness·요구충족·실패모드, namespace `DR`, `<dir>`=`.harnie/plan/<slug>/review/design-detail/`)를 APPROVE까지. A3와 동일하게 **R1 git-delta 대신 상세 설계를 리뷰어 prompt에 싣고 그 `design/rev-N.md` 경로를 명시한다**(설계 파일은 `.harnie/`/git 관리라 delta 비적용).
 - 두 루프 모두 설계 오류를 **구현 전에** 잡는 게 목적. STALLED면 사용자 보고. (아키·상세는 각각 독립 리뷰 — 아키 APPROVE 후 상세로.)
-- **기계 파싱 manifest 블록(승인 대상)**: 상세 설계의 작업 분해가 확정되면 `plan.md`에 ` ```harnie-manifest ` 펜스로 JSON 블록을 넣는다 — `{tasks:[{id, deps, reviewUnit, scope:[<경로>], verification:[{executable, args, cwd, timeout}]}], gates:[{name, reviewUnit}]}`. `reviewUnit`은 task·gate 전부 유일(리뷰 디렉터리명), `scope`는 그 작업이 만질 경로, `verification`은 shell 없이 실행할 argv(런타임 증거 강제). gates = Final Wave 4종(`coverage`·`quality`·`runtime`·`scope`, reviewUnit=`final-<name>`). 이 블록이 A5 승인 시 immutable `manifest.json`으로 고정되고 planHash로 봉인된다(권위 집합).
+- **리뷰 지적 반영 순서 — 충족안을 쓰기 前에 두 질문에 먼저 답한다(두 루프 공통).** 각 REJECT 지적에 대해 이 순서로: ① 이 지적이 상정한 위협/실패가 **위협모델 안**인가(`§0.1` — 실수하는 fallible·over-eager 오케스트레이터/빌더가 대상이고, 세션을 통제하는 적대적 main은 비목표)? ② **이 기구가 존재해야 하는가**, 아니면 설계에 이미 있는 것으로 덮이는가? 두 답을 낸 뒤에야 어떻게 충족할지 쓴다. 매 REJECT를 "어떻게 충족하지?"로만 받는 것이 claim·lease·영수증·해시 식별자를 리비전마다 누적시키고, 되돌리는 데 라운드를 여러 번 쓰게 만든 원인이다.
+- **기구를 새로 추가하는 반영은 근거를 함께 남긴다**: 그 기구가 막는 **구체적 실수 시나리오 1개 이상**을 새 `design/rev-N.md`의 `## Revision Notes`에 기록한다. 근거를 못 대면 기구를 추가하지 말고, 다음 라운드에 위 두 답을 제시해 리뷰어에게 **blocking 요구 철회**를 요청한다. ledger는 리뷰어의 다음 응답으로만, 그리고 `mergeLedger`가 받는 형태로만 움직인다: 리뷰어가 **원래 ID를 `resolved`로 닫고**(현재 범위·결정 하에서 그 위험이 더는 해당 없음), 기록할 가치가 남으면 **새 `non-blocking` ID를 연다**. 같은 ID를 blocking→non-blocking으로 재라벨하는 것은 `scripts/ledger.mjs`에서 fail-closed이므로 요청하지도 말고, `ledger.json`·verdict를 손으로 고치지도 않는다.
+- **기계 파싱 manifest 블록(승인 대상)**: 상세 설계의 작업 분해가 확정되면 `plan.md`에 ` ```harnie-manifest ` 펜스로 JSON 블록을 넣는다 — `{tasks:[{id, deps, reviewUnit, scope:[<경로>], verification:[{executable, args, cwd, timeout}]}], gates:[{name, reviewUnit}]}`. `reviewUnit`은 task·gate 전부 유일(리뷰 디렉터리명), `scope`는 그 작업이 만질 경로, `verification`은 shell 없이 실행할 argv(런타임 증거 강제) — **각 항목은 아래 A5.0 증거 검사를 통과해야만 등록된다**. gates = Final Wave 4종(`coverage`·`quality`·`runtime`·`scope`, reviewUnit=`final-<name>`). 이 블록이 A5 승인 시 immutable `manifest.json`으로 고정되고 planHash로 봉인된다(권위 집합).
 
-**A5. 승인 게이트 (1회, 실제 승인 툴에 바인딩).** 리뷰 통과한 `plan.md`(아키+상세 설계 + 작업 분해 + 검증 전략 + Final Wave + `harnie-manifest` 블록)를 사용자에게 제시한다. 그다음 **① `execution.mjs arm-approval --root <repo> --slug <slug> --question "<정확한 질문 텍스트>" --approve-option "승인"`**(이 승인 질문만 후보로 arm — 기대 질문·승인 옵션 값을 고정해 다른 질문의 오-바인딩·오판 차단)를 부르고 **② 곧바로 `AskUserQuestion`으로 그 질문을 그대로** 묻는다 — 질문 텍스트는 arm의 `--question`과 정확히 일치해야 하고, 옵션 라벨은 선택 값만으로 승인/거절이 구분되게(예: `승인` / `거절·수정`). 훅은 arm의 질문/옵션과 실제 질문/옵션을 대조하고, **선택 값이 정확히 `승인`일 때만** 승인으로 본다(질문 텍스트에 "승인"이 들어가도 오판 없음). 실제 승인 응답에 바인딩하는 이유: PreToolUse 훅이 armed 질문의 tool_use_id와 현재 planHash를 pending으로 기록하고, PostToolUse 훅이 **선택 값이 "승인"이며 planHash가 그대로일 때만** manifest를 확정하고 phase=executing으로 연다(over-eager main의 self-승인·질문 후 몰래 plan 변경 차단; `set-phase`로는 executing 진입 불가). 거절·planHash 불일치면 awaiting-approval 유지(fail-closed). 승인 확정 후 → PHASE B. (A3·A4 설계 리뷰가 이미 건전성 게이트이므로 승인은 1회.)
+**A5. 승인 게이트 (1회, 실제 승인 툴에 바인딩).**
+
+**A5.0 — 검증 명령이 실제로 무언가를 실행·검사하는지 등록 前에 입증한다(필수, arm 前).** manifest의 `verification[]`는 `verify`가 앞으로 만들어낼 **유일한 런타임 증거**다. 아무것도 훑지 않는 항목은 아무것도 검증하지 않으면서 영원히 통과한다. 승인 前 Bash는 H1이 read-only 명령으로 제한하므로, **그 게이트가 허용하는 가장 강한 방법으로** 각 항목을 입증하고 결과를 `plan.md`의 manifest 블록 옆에 기록한다:
+
+- **read-only 질의 항목**(`rg`·`grep`·`git ls-files`·`jq` 등): argv를 **적힌 그대로** 1회 실행하고 `exitCode`와 **매치 수**를 기록한다. 매치 0건 → 등록하지 않는다.
+- **인터프리터·테스트 러너가 필요한 항목**(`node --test`·`npm test`·`tsc --noEmit` 등): 승인 前에는 **실행할 수 없고, 실행시키려고 게이트를 느슨하게 하지 않는다** — 승인 前 repo 코드 실행은 H1이 막는 쓰기 primitive 그 자체다. 대신 **입력 집합**을 read-only 탐색 명령으로 입증하고(그 러너의 패턴이 수집할 파일 목록) 개수를 기록한다. 0이면 그 항목은 아무것도 검증하지 않는다. 조용히 새는 경우는 **아무것도 매치하지 않는 패턴 인자**다: `node --test 'scripts/*.test.mjs'`는 매치 파일이 없으면 `# tests 0`을 찍고 **exit 0**이다(Node v21.6.2에서 실행 확인). manifest argv는 shell 없이 실행되므로 그런 패턴은 러너에 문자 그대로 전달된다 — 매치 목록을 먼저 뽑고, 입력을 열거해 둔 argv를 우선한다.
+- **"비어 있음"과 "조용함"은 다르다.** `tsc --noEmit`·quiet 린터·스키마 검사기는 성공 시 아무것도 출력하지 않는다 — 그건 통과지 빈 증거가 아니다. **비어 있음은 그 명령이 아무것도 훑지 않았다는 뜻**이다(매치 0·수집된 테스트 0·검사한 파일 0). silent-success 도구는 출력 크기가 아니라 **도구 자신이 알려주는 수**(파일 목록·verbose 플래그·보고된 입력 수)로 확인한다.
+- **하류 백스톱은 없다 — 이 게이트가 유일하다.** `verify`는 argv를 `stdio: "ignore"`로 실행하고 receipt에는 `{executable, args, exitCode}`만 기록하므로([execution.mjs:734](scripts/execution.mjs:734)), 이후 어떤 단계도 "테스트 200개 실행"과 "0개 수집"을 구별하지 못한다. 게다가 승인 후 manifest는 immutable이고 `set-phase`는 `planning` 역전이를 거부하므로([execution.mjs:775](scripts/execution.mjs:775)), 껍데기 항목은 **그 run 안에서 고칠 수 없다**: 정직한 결말은 그 항목을 지목해 `HARNIE_STATUS: INCOMPLETE`로 보고하고 판단을 사용자에게 넘기는 것뿐이다. 여기서 맞게 잡아라.
+
+몇 초면 확인되는 함정: `rg -e A -e B`는 AND가 아니라 **OR**, `rg --files-without-match`는 의도한 폴라리티를 뒤집는다. 실패할 수 없는 명령은 검증이 아니다.
+
+> 이 단계의 올바른 기계화는 `scripts/execution.mjs`의 엔진 측 변경 2개이지 **Bash allowlist 확대가 아니다**: `dry-run` 서브커맨드(sanctioned CLI라 승인 前 실행 가능) + verify receipt에 **실행량 증거 필드**(출력 캡처 또는 훑은 개수)를 넣어 완료 재도출이 껍데기 통과를 거부할 수 있게 하는 것. 그것이 생기기 전까지는 위 검사가 계약이다.
+
+**A5.1 — 승인 요청.** 리뷰 통과한 `plan.md`(아키+상세 설계 + 작업 분해 + 검증 전략과 그 A5.0 증거 + Final Wave + `harnie-manifest` 블록)를 사용자에게 제시한다. 그다음 **① `execution.mjs arm-approval --root <repo> --slug <slug> --question "<정확한 질문 텍스트>" --approve-option "승인"`**(이 승인 질문만 후보로 arm — 기대 질문·승인 옵션 값을 고정해 다른 질문의 오-바인딩·오판 차단)를 부르고 **② 곧바로 `AskUserQuestion`으로 그 질문을 그대로** 묻는다 — 질문 텍스트는 arm의 `--question`과 정확히 일치해야 하고, 옵션 라벨은 선택 값만으로 승인/거절이 구분되게(예: `승인` / `거절·수정`). 훅은 arm의 질문/옵션과 실제 질문/옵션을 대조하고, **선택 값이 정확히 `승인`일 때만** 승인으로 본다(질문 텍스트에 "승인"이 들어가도 오판 없음). 실제 승인 응답에 바인딩하는 이유: PreToolUse 훅이 armed 질문의 tool_use_id와 현재 planHash를 pending으로 기록하고, PostToolUse 훅이 **선택 값이 "승인"이며 planHash가 그대로일 때만** manifest를 확정하고 phase=executing으로 연다(over-eager main의 self-승인·질문 후 몰래 plan 변경 차단; `set-phase`로는 executing 진입 불가). 거절·planHash 불일치면 awaiting-approval 유지(fail-closed). 승인 확정 후 → PHASE B. (A3·A4 설계 리뷰가 이미 건전성 게이트이므로 승인은 1회.)
 
 ---
 
@@ -114,5 +144,7 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 ## 불변
 - **모든 수정은 반드시 리뷰된다.** 아키 설계 리뷰(A3)·상세 설계 리뷰(A4)·코드 리뷰(B3)·Final Wave(B5) 모두 동일한 review-loop-driver.md 루프 — producer·리뷰어 프로바이더·기준·고도 렌즈·namespace·`<dir>`만 다르다. **대칭 크로스-모델**: 설계는 Claude producer→Codex 리뷰, 개발은 Codex producer→Claude 리뷰(리뷰어=producer의 반대).
 - ledger·verdict 정합·상태 전이는 **손으로 판정하지 말고 loop CLI로**(false approval 방지).
-- 설계·계획은 durable 파일(`plan.md`·`notepad.md`)로 — Claude와 Codex가 같은 소스를 읽는다.
+- 설계·계획은 durable 파일(`plan.md`·`design/rev-N.md`·`notepad.md`)로 — Claude와 Codex가 같은 소스를 읽는다. **위임에서 참조할 수 있는 것은 디스크 정본뿐**이며, tool-result blob 경로는 참조가 아니다.
+- 설계 리뷰 지적은 **충족안을 쓰기 前에** "위협모델 안인가"·"이 기구가 존재해야 하는가"에 먼저 답한다. 구체적 실수 시나리오 없이 추가된 기구는 준수가 아니라 과설계다.
+- **무언가를 실제로 훑는다는 증거 없이 manifest에 들어가는 검증 명령은 없다.** 아무것도 매치하지 않거나 테스트를 하나도 수집하지 않는 검사는 영원히 통과한다.
 - 승인 게이트(A5) 전에 코드를 쓰지 않는다.

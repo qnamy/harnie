@@ -129,7 +129,7 @@
 > 3. **④ 잔여**: `comment-resolve`·`deploy-approval`·`quality-digest` 루틴을 얇은 호출자로 rewire(회사색은 `~/Tradlinx/ROUTINE-CONFIG.md` on-demand read).
 > 4. **포트폴리오 서사**: README/공개 문서에 설계 근거·크로스-모델 루프 서사 정리.
 >
-> **열린 후속(별건, ⑦ 차단 아님)**: (a) 승인-前 Bash 게이트 하드닝(DR-002 — `isReadOnlyBash`의 `rg --pre`·`git --ext-diff`·경로지정 실행파일). (b) `dev-quick` 트랙의 bootstrap은 아직 **no-op/이연**(`bootstrapRun`은 `track=plan`만 — quick은 pending-route 해소만 하고 sentinel 미생성). (c) ②(stage skill 분해) 이연분.
+> **열린 후속(별건, ⑦ 차단 아님)**: (a) 승인-前 Bash 게이트 하드닝(DR-002 — `isReadOnlyBash`의 `rg --pre`·`git --ext-diff`·경로지정 실행파일). (b) `dev-quick` 트랙의 bootstrap은 아직 **no-op/이연**(`bootstrapRun`은 `track=plan`만 — quick은 pending-route 해소만 하고 sentinel 미생성). (c) ②(stage skill 분해) 이연분. (d) **A5.0 검증 증거 계약의 엔진 측 잔여**: `execution.mjs`에 ① `dry-run` 서브커맨드(sanctioned CLI라 승인 前 실행 가능) ② verify receipt의 **실행량 증거 필드**(출력 캡처 또는 훑은 개수). 현재 receipt는 `{executable, args, exitCode}`뿐이고 `stdio:"ignore"`라(`execution.mjs` cmdVerify) "0 tests 통과"를 완료 재도출이 거부할 수 없고, 승인 후 manifest immutable·`planning` 역전이 금지라 run 안에서 복구도 불가하다(미완료 run은 rollover 대상이 아니라 resume됨). 지침 측 계약은 `skills/dev-full/SKILL.md` A5.0에 있고, 그 문서는 현재 "하류 백스톱 없음"을 명시한다.
 >
 > **검증 명령**: `node --test scripts/*.test.mjs hooks/*.test.mjs`(현재 **171 pass**). 라이브 재검증이 필요하면 throwaway repo + watcher 프로시저는 아래 "라이브 검증" 항목 참조.
 
