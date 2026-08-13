@@ -5,7 +5,7 @@ import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute } from "../scripts/execution.mjs"
-import { decideWriteEdit, decideBash, decideTask, decideCodex, isControlPath, referencesHarnie } from "../scripts/guards.mjs"
+import { decideWriteEdit, decideBash, decideTask, decideCodex, isControlPath, referencesHarnie, isHarnieRead } from "../scripts/guards.mjs"
 
 // 신뢰 상태 CLI 절대경로(이 훅과 형제인 scripts/). Bash 가드가 sanctioned 판정을 이 정확 경로에만 부여.
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
@@ -40,8 +40,11 @@ try {
   // baseline(control/route 쓰기)·pending-route 게이트·`.harnie` Bash 차단은 비-owner에도 계속 적용된다.
   // sessionId 미기록(구버전 sentinel)이거나 payload에 session_id가 없으면 하위호환으로 현행 repo 전역 적용(fail-closed).
   if (!ctx.active || !isOwnerSession(root, ctx, p.session_id)) {
-    // active run 없음/비-owner: `.harnie` 접근 Bash는 sanctioned CLI가 성립할 수 없으므로 차단(다른 세션의 route/control 파일 Bash 삭제 방지, P1-3).
-    if (toolName === "Bash" && referencesHarnie(input.command)) denyPreTool("`.harnie` 접근 — 이 세션 소유의 active run 아님(비-sanctioned Bash 차단)")
+    // active run 없음/비-owner: `.harnie` **변형** Bash는 sanctioned CLI가 성립할 수 없으므로 차단(다른 세션의
+    // route/control 파일 Bash 삭제 방지, P1-3). 이 차단의 목적은 삭제·변조 방지이므로 **좁은 읽기 형태는 통과**시킨다
+    // (isHarnieRead = 아는 읽기 명령 + 짧은 플래그만, 확장·치환 fail-closed) — 상태 확인조차 막던 과잉 차단 제거.
+    if (toolName === "Bash" && referencesHarnie(input.command) && !isHarnieRead(input.command))
+      denyPreTool("`.harnie` 변경 — 이 세션 소유의 active run 아님(좁은 읽기만 허용, 기록·변경은 신뢰 CLI로만)")
     allow()
   } else {
     // fail-closed(sentinel-first 위반)면 가장 보수적으로: 쓰기류 차단(slug를 못 맞추게 해 전부 deny), read-only 통과.
