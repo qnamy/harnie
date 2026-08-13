@@ -1,16 +1,41 @@
 #!/usr/bin/env node
 // 진입점 bootstrap 훅 — 스킬 A0의 자체 init을 대체해 sentinel을 결정적으로 생성한다(부트스트랩 갭 제거).
 // 설계: docs/bootstrap-adherence.md.
-//   UserPromptSubmit(직접 slash): `/harnie:dev-full` → bootstrap. `/harnie:dev`(라우터) → pending-route 기록(P1-2).
-//     `/harnie:dev-quick`·비-harnie → no-op.
-//   PreToolUse(Skill): tool_input.skill === "harnie:dev-full" → bootstrap. "harnie:dev-quick" → 라우팅 해소. 기타 → no-op.
-// 성공·no-op = exit 0. 실패(빈 인자·malformed payload·손상·미완료 run 충돌·예외) = exit 2 → invocation 차단(fail-closed).
+//   UserPromptSubmit(직접 slash): `/harnie:dev-full` → worktree 생성 + bootstrap(T2 DEC-001). `/harnie:dev`(라우터)
+//     → pending-route 기록(P1-2). `/harnie:dev-quick`·비-harnie → no-op.
+//   PreToolUse(Skill): tool_input.skill === "harnie:dev-full" → worktree 생성 + bootstrap. "harnie:dev-quick" →
+//     라우팅 해소. 기타 → no-op.
+// 성공·no-op = exit 0. 실패(빈 인자·malformed payload·손상·미완료 run 충돌·이미 바인딩된 세션·예외) = exit 2 → invocation 차단(fail-closed).
+//
+// worktree-per-run(T2): dev-full은 매 run마다 `<mainRoot>/.harnie-wt/harnie-<slug>` worktree를 만들고 run 상태
+// (`.harnie/`)를 그 worktree 안에 둔다. 세션 cwd는 계속 main 작업트리이므로, 이 훅은 성공 시 워크루트 절대경로를
+// 오케스트레이터에게 알려준다(additionalContext/permissionDecisionReason) — 그 뒤 모든 execution.mjs·loop.mjs
+// `--root`와 codex builder `cwd`는 이 워크루트여야 한다(main root 아님).
 import { execFileSync } from "node:child_process"
-import { findRoot } from "./lib.mjs"
+import { existsSync } from "node:fs"
+import { findRoot, readSessionBinding, writeSessionBinding } from "./lib.mjs"
 import { bootstrapRun, slugify, writePendingRoute, clearPendingRoute } from "../scripts/execution.mjs"
+import { createWorktree, worktreeDirFor } from "../scripts/worktree.mjs"
 
 function fail(msg) { process.stderr.write(`harnie bootstrap: ${msg}\n`); process.exit(2) }
 function ok() { process.exit(0) }
+// UserPromptSubmit 성공 경로: 워크루트를 오케스트레이터 컨텍스트에 주입(직접 `/harnie:dev-full` 진입).
+function okContext(text) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text } }) + "\n")
+  process.exit(0)
+}
+// PreToolUse(Skill) 성공 경로: additionalContext 지원 여부가 불확실하므로 permissionDecisionReason도 함께 채운다
+// (라우터 `/harnie:dev` → Skill(harnie:dev-full) 경로).
+function okAllow(text) {
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: text, additionalContext: text } }) + "\n")
+  process.exit(0)
+}
+function workrootMessage(mainRoot, sessionId, workroot) {
+  return `harnie run workroot: ${workroot}\n` +
+    `This run's state lives in a dedicated git worktree, not "${mainRoot}". Use "${workroot}" as --root for every ` +
+    `execution.mjs/loop.mjs call and as cwd for Codex builder calls in this run. If this message becomes unavailable ` +
+    `later, recover it by reading "workroot" from ${mainRoot}/.harnie/sessions/${sessionId}.json.`
+}
 
 const GIT_ONLY = (root) => `harnie는 git repo 안에서만 실행됩니다 — 현재 root: ${root}`
 // root에서 git이 동작하는지(=`git -C <root> …`가 성립). execution.mjs의 verify/completion 전제 확인용.
@@ -43,15 +68,31 @@ try {
   const event = p.hook_event_name || ""
   const root = findRoot(p.cwd)
   const sessionId = p.session_id // pending-route는 session-scoped(P1-3): 다른 세션이 해제하지 못하게
-  // bootstrap 실패면 pending-route를 지우고 호출을 fail-closed한다. 성공은 bootstrapRun이 pending을 해소한다.
-  const doBootstrap = (base) => {
+  // bootstrap 실패면 pending-route를 지우고 호출을 fail-closed한다. 성공은 emit이 그 이벤트에 맞는 방식으로 exit.
+  const doBootstrap = (base, emit) => {
     try {
       // git repo 밖에서는 run을 만들지 않는다: 검증·완료 재도출(execution.mjs verify/completion)이 `git -C <root>`를
       // 전제하므로, 비-git 워크스페이스(예: repo 여러 개를 담은 부모 디렉터리)에 상태만 생기고 머신이 돌 수 없다.
       if (!isGitRepo(root)) throw new Error(GIT_ONLY(root))
-      bootstrapRun(root, { base, track: "plan", sessionId })
+      // 한 세션 = 한 run(v1 고정): 이미 이 세션이 (아직 정리되지 않은) **다른** run에 바인딩돼 있으면 새 run을 만들지
+      // 않는다. 같은 작업(같은 base → 같은 worktree 경로)의 재호출은 resume이므로 허용한다.
+      const branch = `harnie/${base}`
+      const targetPath = worktreeDirFor(root, branch)
+      const existing = readSessionBinding(root, sessionId)
+      if (existing && existsSync(existing.workroot) && existing.workroot !== targetPath)
+        throw new Error(`이 세션은 이미 다른 run에 바인딩됨(${existing.workroot}) — 한 세션 = 한 run(v1). 다른 작업은 새 세션에서 /harnie:dev-full로 시작하세요.`)
+      // worktree-per-run(DEC-001): run 상태는 main root가 아니라 이 worktree 안에 생성한다. from 생략 = 현재 HEAD에서 분기.
+      const { worktreePath } = createWorktree({ repo: root, branch })
+      bootstrapRun(worktreePath, { base, track: "plan", sessionId })
+      // bootstrapRun 내부의 pending-route 해소는 (worktreePath, sessionId) 기준이라 항상 no-op이 된다 —
+      // pending-route는 main root(세션 cwd)에 기록되므로 여기서 명시적으로 해소한다(멱등: 없으면 그냥 통과).
+      clearPendingRoute(root, sessionId)
+      // session_id 없는 호출(구버전 하위호환·payload 부재)은 바인딩을 기록할 키가 없다 — 이런 호출은 이후
+      // resolveRoot로 자기 worktree를 못 찾아 게이트가 느슨해질 수 있음을 알고 감내한다(적대적 방어 비목표,
+      // 실제 Claude Code 훅은 항상 session_id를 준다). 식별 가능한 호출만 기록한다.
+      if (sessionId) writeSessionBinding(root, sessionId, worktreePath)
+      emit(worktreePath)
     } catch (e) { const msg = e && e.message ? e.message : String(e); clearPendingRoute(root, sessionId); fail(msg) }
-    ok()
   }
 
   if (event === "UserPromptSubmit") {
@@ -60,7 +101,7 @@ try {
     if (mFull) {
       const base = slugify((mFull[1] || "").trim())
       if (!base) fail("작업 인자가 비어 있음 — `/harnie:dev-full <작업 설명>` 형태로 실행하세요")
-      doBootstrap(base)
+      doBootstrap(base, (wt) => okContext(workrootMessage(root, sessionId, wt)))
     }
     if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 직접 quick 진입 = 이 세션 라우팅 해소(deferred)
     const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 라우터(정확 prefix; dev-full/dev-quick은 위에서 처리)
@@ -77,7 +118,7 @@ try {
     if (skill === "harnie:dev-full") {
       const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim())
       if (!base) fail("작업 인자가 비어 있음 — dev-full skill args 필요")
-      doBootstrap(base)
+      doBootstrap(base, (wt) => okAllow(workrootMessage(root, sessionId, wt)))
     }
     if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // quick으로 이 세션 라우팅 해소(deferred machine)
     ok() // 기타 skill

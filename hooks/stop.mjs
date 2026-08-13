@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stop re-derives completion from authority files instead of trusting narration or phase.
-import { readStdin, findRoot, isOwnerSession, blockStop, allow } from "./lib.mjs"
+import { readStdin, findRoot, resolveRoot, isOwnerSession, blockStop, allow } from "./lib.mjs"
 import { loadContext, computeCompletion, parseStatusFooter, getRouteState } from "../scripts/execution.mjs"
 import { decideStop } from "../scripts/guards.mjs"
 
@@ -13,8 +13,11 @@ const failClosed = (blockers) => {
 }
 
 try {
-  const root = findRoot(p.cwd)
-  const routeState = getRouteState(root, p.session_id)
+  // pending-route는 항상 main 작업트리(세션 cwd)에 있다 — plain findRoot로 찾는다(worktree 안에서 시작한
+  // 세션이면 findRoot 자체가 이미 그 worktree를 가리켜 일치). 활성 run 판정은 세션 바인딩을 거친 root로(T2).
+  const mainRoot = findRoot(p.cwd)
+  const root = resolveRoot(p.cwd, p.session_id)
+  const routeState = getRouteState(mainRoot, p.session_id)
   if (routeState === "pending") blockStop("라우팅 미완료(pending-route) — track 스킬(dev-full/dev-quick)을 호출해 라우팅을 완료한 뒤 종료하세요")
   const ctx = loadContext(root)
   if (!ctx.active) allow()
@@ -25,7 +28,9 @@ try {
     const comp = computeCompletion(root, ctx.track, ctx.slug)
     const d = decideStop({ complete: comp.complete, blockers: comp.blockers, footer, stopHookActive })
     if (d.block) blockStop(d.reason)
-    else allow()
+    // 한 세션 = 한 run(v1): 완료 후에도 바인딩을 세션 수명 동안 유지한다. 그래야 후속 수정이 생겨도
+    // resolveRoot가 같은 workroot를 찾아 H1/H2가 다시 권위를 재검증한다.
+    allow()
   }
   else if (ctx.approvalEvidence)
     failClosed(["승인 권위 재검증 실패(승인 후 plan.md/manifest 변조 의심) — phase 무관 차단"])

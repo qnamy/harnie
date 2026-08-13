@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Observe successful tool results to bind threads and approval without trusting main narration.
-import { readStdin, findRoot, classifyCodex, extractThreadId, isOwnerSession, allow } from "./lib.mjs"
+import { readStdin, resolveRoot, classifyCodex, extractThreadId, isOwnerSession, allow } from "./lib.mjs"
 import { loadContext, registerReadonlyThread, registerBuilderAuto, bindApproval } from "../scripts/execution.mjs"
 
 try {
   const p = await readStdin()
-  const root = findRoot(p.cwd)
+  // worktree-per-run(T2): H1과 동일한 해석 순서(①cwd 상향 findRoot ②세션 바인딩)로 이 세션의 run을 찾는다.
+  const root = resolveRoot(p.cwd, p.session_id)
   const ctx = loadContext(root)
   if (ctx.active && !ctx.failClosed && isOwnerSession(root, ctx, p.session_id)) {
     const toolName = p.tool_name || ""

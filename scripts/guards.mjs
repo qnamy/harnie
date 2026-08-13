@@ -9,6 +9,7 @@ export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")
   if (!p.startsWith(".harnie/")) return false
   if (p.startsWith(".harnie/pending-route/")) return true
+  if (p.startsWith(".harnie/sessions/")) return true // 세션→run(worktree) 바인딩 보호(T2 DEC-001)
   if (p === ".harnie/state.lock") return true
   return CONTROL_BASENAMES.has(p.split("/").pop())
 }
@@ -29,8 +30,29 @@ export function decideWriteEdit({ relPath, phase, track, slug, outside = false }
 }
 
 // Bash는 sanctioned CLI 외 `.harnie` 접근만 차단한다. 승인 전 Bash 소스 쓰기는 계획된 트레이드오프로 차단하지 않는다.
-const HARNIE_REF = /\.harnie(?:[\/]|\b)/
-export function referencesHarnie(cmd) { return HARNIE_REF.test(String(cmd || "")) }
+// 첫 대안은 `.harnie` 자체(어디에 nested든) — `\b`가 아니라 `(?![\w-])`를 쓴다: worktree-per-run(T2)의 컨테이너
+// `.harnie-wt`는 "harnie"와 "-" 사이가 단어경계라 `\b` 기준으로는 매치돼, 그 안의 평범한 파일까지 Bash로 전부
+// 접근 불가능해지는 회귀가 있었다. 둘째 대안은 `.harnie-wt` **컨테이너 자체**(뒤에 실제 worktree 이름(`/<slug>`)
+// 으로 이어지지 않는 형태 — `rm -rf .harnie-wt`·트레일링 슬래시(`.harnie-wt/`)·glob(`.harnie-wt/*`) 포함) — 모든
+// run의 상태를 한 번에 지우는 실수를 막는다. `.harnie-wt/<slug>/…`처럼 특정 worktree 안의 평범한 파일은 매치하지
+// 않아 그 worktree에서 build·test·git 등을 자유롭게 쓸 수 있다.
+const HARNIE_STATE_REF = /\.harnie(?![\w-])/
+const GLOB_META = /[*?\[\]{}]/
+function referencesWorktreeContainer(cmd) {
+  const s = String(cmd || "")
+  const marker = ".harnie-wt"
+  for (let from = 0, at; (at = s.indexOf(marker, from)) >= 0; from = at + marker.length) {
+    const tail = (s.slice(at + marker.length).match(/^[^\s'\"]*/) || [""])[0]
+    // Empty/container-only tokens and any glob can span the container or multiple paths. A concrete `/segment`
+    // without glob syntax names one worktree/path and is intentionally allowed.
+    if (tail === "" || tail === "/" || !tail.startsWith("/") || GLOB_META.test(tail)) return true
+  }
+  return false
+}
+export function referencesHarnie(cmd) {
+  const s = String(cmd || "")
+  return HARNIE_STATE_REF.test(s) || referencesWorktreeContainer(s)
+}
 
 function isSanctionedCli(cmd, { trustedClis, activeRoot }) {
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return false
@@ -46,6 +68,7 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot }) {
   const isRepo = (v) => v !== undefined && resolve(root, v) === root
   if (scriptAbs.endsWith("execution.mjs")) return isRepo(flagVal("--root"))
   if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRepo(flagVal("--root")) : isRepo(rest[1])
+  if (scriptAbs.endsWith("worktree.mjs")) return isRepo(flagVal("--repo"))
   return false
 }
 
