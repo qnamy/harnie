@@ -32,6 +32,15 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 
 > 경로 단일 스킴: 모든 리뷰 루프 상태는 `.harnie/plan/<slug>/review/<name>/` 아래(quick의 `.harnie/quick/<slug>/`와 대칭). `<name>` = `design-arch` | `design-detail` | 코드 리뷰 단위.
 
+> **병렬 PHASE B(태스크 worktree).** B1이 병렬 경로를 선택하면 태스크마다 자기 git worktree(`scripts/worktree.mjs`가 생성, 별도 작업 소유 — B1 참조)를 `<repo>/.harnie-wt/<name>`에 갖는다. `.harnie/`와 같은 방식으로 git에서 제외된다(`worktree.mjs create`가 `.git/info/exclude`에 둘 다 등록). 그 worktree는 **별개의 repo 루트**로 자기만의 `.harnie/`를 가지며, 그 태스크의 머지 前 설계(`.harnie/design/rev-N.md`)와 리뷰 루프 상태(`.harnie/review/design/`, `.harnie/review/code/`)만 담는다 — `.harnie/plan/<slug>/…`는 절대 아니며, 그 경로는 run worktree 전용으로 남는다. 태스크 worktree는 `execution.mjs` run 상태(`active.json`·manifest)를 전혀 갖지 않는다 — run 전체 승인은 A5에서 이미 1회 끝났으므로, PHASE B에서 태스크마다 다시 재도출하지 않는다.
+>
+> **알려진 의존성, 여기서 구현하지 않음 — 이게 풀리기 前엔 설치된 세션에서 병렬 경로가 돌지 않는다.** 이 스킬이 소유하지 않는(`scripts/guards.mjs`·`scripts/execution.mjs`는 별도 작업 소유이고, 이 태스크는 명시적으로 그걸 고치는 범위 밖이다) 구체적인 갭 3가지:
+> 1. **Bash 가드.** `guards.mjs`의 `.harnie` 보호 정규식(`/\.harnie\b/i`)은 `.harnie-wt`도 같이 잡는다 — 그래서 태스크 worktree(`<taskWt>`) 아래 경로를 텍스트로 참조하는 모든 Bash 명령(B2′의 모든 `loop.mjs capture`/`delta`/`apply` 호출, B2′ 6단계의 `git commit` 포함)이 거부된다. 이 가드는 태스크 worktree가 생기기 전에 쓰였고 정당한 보조 루트라는 개념이 없다.
+> 2. **Codex 빌더 가드.** `cwd`가 단일 활성 repo 루트와 정확히 같아야 하는데, 태스크 worktree의 `cwd`(B2′ 4단계)는 그 검사를 그대로 통과 못 한다.
+> 3. **빌더 스레드 등록.** `execution.mjs`의 `registerBuilderAuto`는 시스템 전체에서 정확히 한 태스크가 `building`이면서 미바인딩일 때만(`buildingUnboundTasks`) 성공한 Codex 호출을 그 태스크에 바인딩한다 — 태스크 2개 이상이 동시에 building이면 전부에 대해 no-op이 되어 아무 태스크의 builder threadId도 등록되지 않고, 이후 모든 `codex-reply` 수정이 거부된다. 이건 위 두 가드 검사만의 문제가 아니라 엔진의 threadId 추적 모델 자체의 한계다 — 1·2만 고쳐도 진짜 동시 빌드는 가능해지지 않는다.
+>
+> 가드 계층이 태스크 worktree를 정당한 루트로 인식하고 엔진이 동시에 building 중인 태스크를 여럿 추적하게 되기 전까지는, 설치된 세션의 훅이 B2′의 빌드·리뷰·커밋 호출을 거부하고, 진짜 동시성은 어차피 한 번에 한 태스크로 제한된다. (같은 계열의 네 번째, 더 좁은 갭: `guards.mjs`의 Write/Edit control-path 검사(`isControlPath`)는 `.harnie/`로 시작하는 경로만 인식하므로, 태스크 worktree 자신의 `.harnie/review/…`는 run worktree의 것만큼 독립적으로 가드 보호되지 않는다 — 어느 쪽이든 손으로 고치지 않는다.) 이 스킬은 이 중 어느 것도 우회를 시도하지 않는다 — 훅을 끄거나 `guards.mjs`/`execution.mjs`를 고치거나 상태 파일을 손으로 써서 deny를 피하는 것은 가드를 만족시키는 게 아니라 무력화하는 것이다. 아래 단계에서 훅이 거부하면, 우회하지 말고 STOP하고 그 갭을 보고한다. 별개로, 이 글을 쓰는 시점에 `scripts/worktree.mjs` 자체가 이 코드베이스에 아직 없다(B2′ 1단계가 이미 다룬다 — 없으면 STOP하고 보고). **이건 웨이브-2 통합 항목이지, 조용히 우회할 거리가 아니다** — 이 병렬-개발 노력의 조각들(가드/엔진, `worktree.mjs`, 이 스킬)이 합쳐져 함께 테스트되는 자리에서 명시적으로 제기한다. 어느 한 조각도 단독으로 고칠 수 있는 게 아니기 때문이다.
+
 ## 위임 참조 규칙 (디스크 정본만)
 
 서브에이전트·리뷰어에게 넘기는 모든 경로는 repo 안의 **디스크 정본**이어야 한다 — `.harnie/plan/<slug>/…` 또는 소스 파일. **tool-result blob 경로**(`tool-results/*.json`, 트랜스크립트 스크래치, 임시 캡처 등)는 **절대 넘기지 않는다.** 그 파일들은 읽히도록 쓰인 게 아니라서(한 줄 55k 토큰 JSON은 조용히 로드에 실패한다), 위임받은 쪽은 자기가 기억하는 **더 오래된 리비전**으로 설계를 재구성하게 되고, 그렇게 세대가 라운드를 넘어 뒤섞이면 하류에서 탐지되지 않는다.
@@ -46,7 +55,7 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 위임받은 쪽이 참조 경로를 읽지 못했다고 보고하면 그 라운드의 산출은 **무효**로 보고, 참조를 고쳐 재위임한다. 기억으로 재구성한 결과는 절대 받아들이지 않는다.
 
 ## 실행 상태 + 강제 훅 (plan 전용 하네스 — `scripts/execution.mjs`)
-plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 immutable `manifest.json` + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다 — 훅은 manifest+planHash로 승인을 판정하지 advisory phase를 믿지 않는다). 아래 스텝에서 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`, `<repo>` = 작업 repo 절대경로. **모든 `execution.mjs`·`loop.mjs` 호출은 `--root <repo>` 필수**(없으면 즉시 종료). 상태 조작은 **반드시 `execution.mjs`로만**(직접 Edit/Write/Bash-write는 훅이 차단):
+plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 immutable `manifest.json` + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다 — 훅은 manifest+planHash로 승인을 판정하지 advisory phase를 믿지 않는다). 아래 스텝에서 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`, `<repo>` = 작업 repo 절대경로. **모든 `execution.mjs` 서브커맨드와 `loop.mjs apply`는 `--root <repo>` 필수**(없으면 즉시 종료). (`loop.mjs capture`/`delta`는 `<repo>`를 위치 인자로 받는다.) 상태 조작은 **반드시 `execution.mjs`로만**(직접 Edit/Write/Bash-write는 훅이 차단):
 - **활성 run은 bootstrap 훅이 만든다 — 스킬이 직접 만들지 않는다.** `/harnie:dev-full`(또는 라우터 `/harnie:dev` → `Skill(harnie:dev-full)`) 호출 시 bootstrap 훅이 이미 sentinel(`.harnie/active.json`)과 `execution.json`을 만들었다. **`.harnie/active.json`을 읽어 `track === "plan"`을 확인하고 그 `slug`(`<slug>`)를 아래 모든 CLI에 쓴다. `execution.mjs init`을 직접 실행하지 않는다.** active.json이 없거나 손상이면 **중단하고 bootstrap 훅 실패를 보고**한다 — 자체 init으로 복구하지 않는다(부트스트랩 갭 재발; `bootstrap-adherence.md` 참조).
 - **승인 바인딩(A5)**: plan.md에 기계 파싱 `harnie-manifest` 블록이 있어야 한다. 승인 질문 직전 `execution.mjs arm-approval --root <repo> --slug <slug> --question "<질문>" --approve-option "승인"`(이 질문·옵션만 승인 후보로 arm)를 부르고, 승인은 실제 `AskUserQuestion`으로 받는다(PreToolUse가 질문/옵션 대조 후 pending, PostToolUse가 선택값 정확일치 관찰; §PHASE A A5). **승인·threadId 등록은 CLI로 노출되지 않는다** — 훅이 실제 툴 호출을 관찰해 in-process로만 수행(sanctioned Bash로 self-승인 불가).
 - **빌더 게이트(B2)**: 작업 위임 직전 `set-task --root <repo> --slug <slug> --task <id> --run-status building` + `seal --root <repo> --slug <slug>`(권위 스냅샷) → 빌더 산출 후 delta 귀속 前 `seal-verify --root <repo> --slug <slug>`(빌더가 권위 파일 훼손 시 fail-closed, exit 3).
@@ -120,17 +129,57 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 
 ## PHASE B — EXECUTE (실행 단계)
 
-**B1. 플랜 파싱 → 작업 + 의존성 맵.** named 의존이 없으면 fan-out. **delta는 전체 tree를 비교**하므로 비중첩 경로만으론 부족(loop.md 귀속 불변): **진짜 동시 실행 → 작업별 격리 worktree**, **공유 worktree → 작업들의 write+delta 캡처 구간을 직렬화**(A 빌드·캡처 완료 후 B 시작).
+**B1. 플랜 파싱 → 작업별 파일 스코프 부여 → 실행 경로 선택.** manifest의 모든 태스크는 이미 `scope`(만질 경로, A4의 `harnie-manifest` 스키마)를 선언한다 — **경로만, glob 아님**: `loop.mjs delta`의 `outOfScope` 검사는 변경된 각 경로를 정확 일치 또는 디렉터리-접두어로만 대조하지 glob 확장을 하지 않으므로, 와일드카드 항목을 넣으면 실제 변경 전부가 범위 밖으로 오탐된다. 위임 前에 모든 태스크 쌍의 `scope`가 **비중첩**인지 확인한다 — 어떤 경로도 두 태스크의 `scope`에 동시에 나오거나(또는 한쪽의 상위/하위 디렉터리이거나) 하면 안 된다. 겹치면 분해 실패다: A4로 돌아가 겹치지 않게 manifest를 고치고 A5 승인을 다시 받은 뒤 진행한다. 비중첩 스코프는 병렬 실행의 **전제조건**이며, 여기서 한 번 확인하는 것이지 런타임 가드가 아니다.
 
-**B2. 각 작업 → Codex 빌더 위임 (개발 producer = Codex).** 위임 직전 순서로: ① `execution.mjs set-task --root <repo> --slug <slug> --task <id> --run-status building`(빌더 workspace-write codex 부트스트랩을 훅이 이걸로 게이트) → ② `loop.mjs capture <repo>`로 작업별 baseline 캡처(B3 R1 fix-delta 기준점) → ③ `execution.mjs seal --root <repo> --slug <slug>`(권위 스냅샷). 병렬이면 작업마다 독립 baseline이 필요하므로 **동시 실행=격리 worktree / 공유 worktree=write+캡처 직렬화**(B1 참조 — 비중첩 경로만으론 delta 오염). 그다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `cwd:<repo>`)에게 위임 — 프롬프트에 작업 지시 + **승인된 `plan.md`의 해당 설계 섹션**을 실어 리뷰된 설계대로 짓게 한다. 6-section 계약(요구/설계간단/구현/견고함/테스트/검증). surgical scope. **빌더는 `.harnie/`에 접근하지 않는다**(권위 상태는 오케스트레이터·CLI 소유). threadId는 PostToolUse 훅이 성공한 codex를 관찰해 등록(재수정은 codex-reply).
+그다음 경로를 고른다:
+- **직렬 경로 — 태스크 1개, 또는 총 규모가 작아 격리로 얻을 게 없을 때.** 아래 B2~B3를 그대로 진행: worktree 없이 빌더 1개, 리뷰 루프 1개, run worktree에서 직접.
+- **병렬 경로 — 태스크 ≥2개이고 스코프가 비중첩일 때.** 아래 B2′~B3′로 진행: 태스크마다 격리 worktree를 갖고 병렬로 빌드·리뷰한 뒤 하나씩 merge한다. manifest `deps`가 다른 태스크를 지정한 태스크는 그 의존 태스크의 B3′ **4단계 확인이 APPROVE된 후에만**(merge만으론 부족 — 거기서 REJECT되면 그 태스크의 코드가 다시 바뀔 수 있다) 시작한다 — 오케스트레이터가 손으로 적용하는 순서 규칙 한 줄이며, 이를 위한 스케줄러·의존 그래프 실행기·자동 재시도는 만들지 않는다.
 
-**B3. ★ 코드 리뷰 루프 (작업/웨이브별, 크로스-모델).** 빌더 산출 직후 delta 귀속 前 **`execution.mjs seal-verify --root <repo> --slug <slug>`**(빌더가 권위 파일을 실수로 훼손했으면 fail-closed → 그 라운드 무효·보고). 통과하면 review-loop-driver.md R1~R5:
-- producer = **Codex 빌더**, **리뷰어 = read-only `harnie-reviewer` 서브에이전트**(main 인라인 아님 — 빌더가 Codex라 크로스-모델, 리뷰어는 쓰기 불가). 기준 = code-review.md + verification-tiers.md. namespace = `CR`. `<dir>` = `.harnie/plan/<slug>/review/<unit>/`(manifest의 그 작업 `reviewUnit`).
+### 직렬 경로
+
+**B2. 작업 → Codex 빌더 위임 (개발 producer = Codex).** 위임 직전 순서로: ① `execution.mjs set-task --root <repo> --slug <slug> --task <id> --run-status building`(빌더 workspace-write codex 부트스트랩을 훅이 이걸로 게이트) → ② `loop.mjs capture <repo>`로 baseline 캡처(B3 R1 fix-delta 기준점) → ③ `execution.mjs seal --root <repo> --slug <slug>`(권위 스냅샷). 그다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `cwd:<repo>`)에게 위임 — 프롬프트에 작업 지시 + **승인된 `plan.md`의 해당 설계 섹션**을 실어 리뷰된 설계대로 짓게 한다. 6-section 계약(요구/설계간단/구현/견고함/테스트/검증). surgical scope. **빌더는 `.harnie/`에 접근하지 않는다**(권위 상태는 오케스트레이터·CLI 소유). threadId는 PostToolUse 훅이 성공한 codex를 관찰해 등록(재수정은 codex-reply).
+
+**B3. ★ 코드 리뷰 루프, run worktree(크로스-모델; 완료 판정의 정본 리뷰 유닛 — 두 경로 모두 여기로 수렴).** 빌더 산출 직후 delta 귀속 前 **`execution.mjs seal-verify --root <repo> --slug <slug>`**(빌더가 권위 파일을 실수로 훼손했으면 fail-closed → 그 라운드 무효·보고). 통과하면 review-loop-driver.md R1~R5:
+- producer = **Codex 빌더**, **리뷰어 = read-only `harnie-reviewer` 서브에이전트**(main 인라인 아님 — 빌더가 Codex라 크로스-모델, 리뷰어는 쓰기 불가). 기준 = code-review.md + verification-tiers.md. namespace = `CR`. `<dir>` = `.harnie/plan/<slug>/review/<unit>/`(manifest의 그 작업 `reviewUnit`, **run worktree 안**).
 - 리뷰어는 loop.md VERDICT/ISSUES 스키마로 `round-N.txt`에 기록. `apply`엔 **이 라운드 delta의 `postSHA`를 `--artifact`로** 넘긴다(CR 필수 — execution.mjs가 이 tree에서 `reviewedScopeHash` 재계산해 검증을 리뷰 tree에 바인딩). 수정 → 델타만 재리뷰(Codex 빌더 codex-reply). 전 차원 APPROVE까지.
+- **병렬 경로** — 기준·namespace·`<dir>`은 같고, 태스크마다 run worktree에서 돈다:
+  - **타이밍:** 그 태스크의 B3′ merge가 반영된 **후, 그 태스크 worktree가 제거되기 前**(아래) — B2′ 빌드 직후도 아니고, worktree가 사라진 뒤도 아니다. `execution.mjs verify`/`completion`이 실제로 읽는 것은 이 라운드, 이 `<dir>`이다. 태스크 worktree 안에서의 머지 前 리뷰(B2′ 5단계)는 격리된 코드에 대한 앞선 품질 게이트일 뿐, 이를 대체하지 않는다.
+  - **Baseline·scope:** R1 baseline = B3′ 1단계에서 그 태스크의 merge 직전에 캡처한 `mergeBaselineSHA` — 그래야 이 라운드가 리뷰하는 delta가 그 merge(와 있었다면 충돌 해결 커밋)가 들여온 것 정확히 그만큼이지, 뒤 태스크의 것이 안 섞인다. `--scope`는 그 태스크의 선언된 `scope` **더하기** 충돌 해결이 그 밖에서 건드린 경로(B3′ 3단계)까지 함께 넘긴다 — 후자를 빼먹으면 `delta`의 `outOfScope` 검사가 해결 편집을 귀속 안 된 외부 변경으로 오탐한다.
+  - **사전 맥락:** 태스크의 머지 前 verdict·라운드 수(run의 `notepad.md`로 전달, B2′ 참조)를 리뷰어에게 제공해, 이 라운드가 완전 재스캔이 아니라 **경량 확인**(merge된 결과와 merge 자체가 바꾼 부분 확인)이 되게 한다.
+  - **seal-verify 반복 금지:** 이 라운드 서두에 `execution.mjs seal-verify`를 다시 돌리지 않는다 — B3′ 3단계가 아직 어떤 리뷰 라운드 파일도 없을 때 이미 한 번 돌렸다. 여기서 또 돌리면 그 단계가 정당하게 써 넣은 `merge-t<id>` ledger·state를 훼손으로 오판한다.
+  - **REJECT 시:** 태스크 worktree와 그 빌더 스레드가 **아직 존재한다**(B3′가 정확히 이걸 위해 이 라운드 이후로 제거를 미룬다 — 5단계 참조). 그 자리에서 같은 Codex 빌더에게 `codex-reply`로 수정을 요청하고, `harnie/<slug>-t<id>`에 커밋(B2′ 6단계와 동일)한 뒤 — merge 前에 캡처, B3′ 1단계와 같은 순서 — 새 `mergeBaselineSHA`를 먼저 캡처하고 `worktree.mjs merge`를 **다시**(같은 브랜치의 새 커밋만 들여오는 두 번째, 증분 merge) 돌려 그 새 baseline부터의 delta만 재리뷰한다. 이미 등록된 빌더 스레드만 재사용하며, 이미 바인딩된 태스크에 두 번째 빌더를 새로 부트스트랩하는 것과 달리 엔진에 없는 능력이 필요 없다.
 
-**B4. 작업별 검증.** `execution.mjs verify --root <repo> --slug <slug> --task <id>` — manifest의 `verification[]` argv를 shell 없이 실행해 exitCode·scopeHash·planHash receipt를 기록한다(리뷰 APPROVE 후, reviewedPostSHA 기준). 추가로 Manual QA(자동으로 못 잡는 사용자 가시 동작) + `plan.md` 재읽기로 범위 대조. 완료는 **ledger APPROVE ∧ receipt pass**로 재도출되므로(권위), 검증 실패·코드 재변경은 자동으로 미완료가 된다.
+### 병렬 경로
 
-**B5. Final Wave (규모비례, 병렬) — 게이트 `Coverage·Quality·Runtime·Scope`.** 전체가 하나로 맞물리는지 최종 확인. **각 게이트를 별개 리뷰 단위로** review-loop-driver.md로 구동(namespace `CR`, `<dir>`=`review/final-<gate>/` — `coverage`·`quality`·`runtime`·`scope`):
+**B2′. 태스크별 빌드(worktree 격리; 동시성은 위 알려진 의존성에 의해 제한됨 — `registerBuilderAuto` 항목 참조).** 태스크마다 독립적으로 아래를 수행 — 위 의존성이 해결되면 태스크 간 동시 진행 가능하지만, 오늘은 한 번에 한 태스크의 B2′ 빌더 호출(4단계)만 threadId 등록이 된다:
+
+1. **태스크 worktree 생성.** `node <ROOT>/scripts/worktree.mjs create --repo <repo> --branch harnie/<slug>-t<id> --from harnie/<slug>` → `<taskWt>`(worktree 경로, stdout). 분기점 = run 브랜치(`harnie/<slug>`). `worktree.mjs`는 이 코드베이스에서 별도 작업이 소유한다 — 존재하지 않거나 여기서 쓰는 `create`/`merge`/`remove` 계약과 다르면 **중단하고 불일치를 보고**한다(이 스킬에서 구현·수정하지 않는다).
+2. **태스크 상세설계, 경량.** `harnie-designer`(read-only)에게 이 태스크 하나만의 **경량** 상세설계를 요청한다 — `design-authoring-detail.md`의 Lightweight Output 계약을 인라인 주입("formal" 신호 **금지**), run의 승인된 `plan.md` 아키/상세 섹션 + 이 태스크의 manifest 항목(id·scope·verification)을 입력으로 준다. 결과를 `<taskWt>/.harnie/design/rev-1.md`에 쓴다 — PHASE A 위임 참조 규칙과 동일한 디스크-정본 원칙을, `.harnie/plan/<slug>/` 대신 태스크 worktree로 스코프만 바꿔 적용.
+3. **태스크 설계 리뷰, 1 루프, 스코프만 축약이지 기구는 축약 아님.** review-loop-driver.md의 설계 리뷰 루프를 돌린다: producer=designer, 리뷰어=Codex(`sandbox:"read-only"`), 기준=design-review.md 상세 고도 렌즈, namespace `DR`, `<dir>`=`<taskWt>/.harnie/review/design/`. A4와 **같은 DR 상태기계**를 APPROVE까지 돌리는 것이다 — "축약"은 이미 아키가 확정된 단일 태스크의 경량 설계라는 **작은 범위**를 뜻하지, REJECT/REVISING을 건너뛰는 지름길이 아니다. REJECT면 그대로 `rev-2.md`를 만들고 재리뷰한다.
+4. **빌드.** `execution.mjs set-task --root <repo> --slug <slug> --task <id> --run-status building`을 실행(직렬 B2의 ①과 같은 목적 — 이 태스크를 빌더-부트스트랩 후보로 표시)하고, baseline 캡처(`node <ROOT>/scripts/loop.mjs capture <taskWt>`) 후 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `cwd:<taskWt>`)에게 위임 — 호출자가 모델을 고를 수 있으면 고성능 모델(예: `gpt-5.6-sol`), 아니면 설치 기본값. 태스크의 승인된 경량 설계 + manifest scope를 실어주고, B2와 같은 6-section 계약을 적용한다.
+5. **코드 리뷰, 머지 前 품질 게이트.** fix-delta 캡처(`node <ROOT>/scripts/loop.mjs delta <taskWt> <baselineSHA> --scope <task-scope-paths> --out <taskWt>/.harnie/review/code/delta.patch`). 리뷰어 = read-only **`harnie-reviewer`**(빌더의 프로바이더와 달라야 함). `apply`: `node <ROOT>/scripts/loop.mjs apply --root <taskWt> --ledger <taskWt>/.harnie/review/code/ledger.json --review <taskWt>/.harnie/review/code/round-N.txt --ns CR --state <taskWt>/.harnie/review/code/state.json --artifact <postSHA>`. REJECT → codex-reply가 델타만 수정 → 재리뷰, B3와 같은 방식으로 APPROVE까지.
+6. **승인된 작업을 커밋한다.** `loop.mjs`의 capture/delta는 working tree를 다룰 뿐 git history를 다루지 않으므로, 위 어디에도 커밋이 없다 — 그런데 `worktree.mjs merge`(B3′)는 브랜치를 merge하고, 그러려면 커밋이 있어야 한다. 5단계가 APPROVE에 도달하면 `<taskWt>` 안의 모든 변경을 `harnie/<slug>-t<id>`에 커밋한다(`git add -A` + `git commit`, 태스크 worktree 안에서). `worktree.mjs merge`가 run 브랜치로 들여올 상태가 바로 이것이다. 커밋은 working tree를 바꾸지 않으므로 5단계의 `--artifact` 검사를 훼손하지 않는다.
+
+이 태스크의 B3 확인 라운드(B3′ 4단계)를 돌리기 前에, run의 `notepad.md`에 태스크마다 항목 하나를 append한다: 그 태스크의 설계·코드 리뷰 verdict와 라운드 수. B3의 확인 라운드가 이걸 사전 맥락으로 읽고(위 B3의 병렬-경로 노트 참조), worktree가 나중에 제거되면(B3′ 5단계) 이게 태스크 리뷰의 유일한 흔적이 된다 — 기록이지, 확인 라운드의 대체물이 아니다.
+
+**B3′. 순차 통합, 한 번에 태스크 하나씩.** B2′에서 APPROVE에 도달한 태스크부터 run 브랜치로 통합한다 — 여러 태스크가 병렬로 빌드를 마쳤어도 **한 번에 하나씩**(유일한 필수 직렬화 지점). "한 번에 하나씩"은 한 태스크의 **B3′ 전체**(1~5단계)를 뜻하지 그 merge만이 아니다: 현재 태스크의 5단계(worktree 제거)가 끝나기 前엔 다음 태스크의 1단계(baseline 캡처)를 시작하지 않는다 — 진행 중인 태스크의 미해결 상태 위에 두 번째 merge가 동시에 얹히면, 그 태스크 자신의 확인 라운드 delta가 귀속 안 된 잡음으로 오염된다.
+
+1. **그 태스크의 merge 직전에 run worktree의 baseline을 캡처하고 권위를 스냅샷한다:** `node <ROOT>/scripts/loop.mjs capture <repo>`(`<repo>` = run worktree) → `mergeBaselineSHA` — B3 확인 라운드(4단계)가 대조할 R1 baseline이 이것이므로, 여기서 캡처해야지 더 일찍 캡처하면 안 된다(더 일찍이면 앞 태스크의 merge가 이미 들여온 것까지 포함돼 버린다). 그다음 `node <ROOT>/scripts/execution.mjs seal --root <repo> --slug <slug>`. **여기서, merge 前에 한 번만** seal한다 — 나중이 아니라. `execution.mjs`의 권위 해시는 `.harnie/plan/<slug>/` 아래 모든 `review/*/{ledger,state,receipt}.json`을 훑는데, 3단계 자체의 충돌 해결 리뷰(있다면)가 정당하게 새 파일 하나를 쓴다 — 그 뒤에 seal하면 나중의 `seal-verify`가 그 정당한 기록을 훼손으로 본다.
+2. `node <ROOT>/scripts/worktree.mjs merge --repo <repo> --branch harnie/<slug>-t<id> --into harnie/<slug>`.
+3. **권위를 확인한 뒤 merge 결과를 처리한다:**
+   - **클린 merge(exit 0):** `node <ROOT>/scripts/execution.mjs seal-verify --root <repo> --slug <slug>`를 한 번 돈다. `git merge`는 `.harnie/`를 건드릴 수 없으므로(`worktree.mjs`의 exclude 등록에 따라 제외됨) 이건 항상 통과해야 정상이다 — merge 자체가 아니라 이 구간에 다른 무언가가 권위를 건드렸는지 잡기 위함이다.
+   - **충돌(exit 3):** merge는 미해결 상태로 남고 충돌 파일이 stdout에 나열된다. **손대기 前, 이 충돌 상태 그대로 baseline을 지금 캡처한다:** `node <ROOT>/scripts/loop.mjs capture <repo>` → `resolveBaselineSHA`. (해결 *후에* 캡처하면 해결된 tree를 자기 자신과 비교하게 돼 빈 delta가 나오고, 아무것도 리뷰하지 않은 라운드가 조용히 APPROVE된다.) 손으로 해결하고 해결 커밋을 만든 뒤 `execution.mjs seal-verify --root <repo> --slug <slug>`를 돈다 — 해결은 추적되는 소스 파일만 건드렸으니 통과해야 정상이다. 불일치면 다른 무언가가 권위를 바꾼 것이고 이 라운드는 무효다(seal-verify가 쓰이는 다른 모든 곳과 같은 판정). 통과하면 **그 델타에 대해서만 CR 라운드 1회**를 돈다: `loop.mjs delta <repo> <resolveBaselineSHA> --scope <해결이 건드린 경로> --out .../review/merge-t<id>/delta.patch` 후 `.harnie/plan/<slug>/review/merge-t<id>/` 아래 apply(B2′ 5단계와 같은 방식, run worktree에 뿌리). 이 태스크는 이 라운드가 APPROVE되기 전엔 4단계로 넘어가지 않는다(위 헤더에 따라 다음 태스크의 B3′도 마찬가지). **해결이 이미 merge·확인된 앞선 태스크의 선언된 `scope`** 안쪽 경로를 건드렸다면(이 태스크의 것만이 아니라), 그 앞선 태스크의 B4 receipt는 이제 stale이다 — 계속하기 前에 그 태스크의 B3 확인(새 baseline을 지금 캡처, 그 앞선 태스크의 선언된 `scope`로 delta 범위 지정, 그 기존 `<dir>`에 리뷰·apply)과 B4 verify를 현재 tree에 대고 재실행한다. 뒤 태스크만 반려·rebase하는 것으로는 앞선 태스크의 바인딩이 고쳐지지 않는다.
+   어느 쪽이든, 아래 4단계의 B3 확인 라운드 서두에서 `seal`/`seal-verify`를 반복하지 않는다 — 이 쌍이 이미 그 전제조건을 충족했다(위 B3의 병렬-경로 노트 참조).
+4. **이 태스크의 B3 확인 라운드(위)를 run worktree에서** 1단계의 `mergeBaselineSHA`부터 현재 tree까지 — 즉 merge와 (있었다면) 3단계의 충돌 해결 커밋까지 포함해서 — 돌린다. 태스크 worktree를 제거하기(5단계) **前에** 한다: REJECT되면 아직 존재하는 태스크 worktree와 아직 등록된 빌더 스레드로 수정이 돌아간다(위 B3의 병렬-경로 노트 참조 — `codex-reply`·커밋·재-merge·재리뷰). 이 라운드가 APPROVE된 후에만 5단계로 진행한다.
+5. `node <ROOT>/scripts/worktree.mjs remove --repo <repo> --branch harnie/<slug>-t<id> --keep-branch`.
+
+뒤 태스크의 델타가 앞서 이미 merge된 태스크가 만졌던 경로를 건드리는 경우(B1 검사는 선언된 `scope`만 대조했지 실제 diff는 아니므로 여기서 놓칠 수 있음) — B1 겹침과 똑같이 처리한다: 뒤 태스크의 빌드를 반려하고, 그 worktree를 갱신된 run 브랜치 위로 rebase한 뒤 merge 前 재리뷰한다.
+
+### 두 경로 공통
+
+**B4. 작업별 검증.** `execution.mjs verify --root <repo> --slug <slug> --task <id>`를 **run worktree**에서, 그 태스크의 B3 확인 라운드 후에 실행한다 — manifest의 `verification[]` argv를 shell 없이 실행해 exitCode·scopeHash·planHash receipt를 기록한다(reviewedPostSHA 기준). 추가로 Manual QA(자동으로 못 잡는 사용자 가시 동작) + `plan.md` 재읽기로 범위 대조. 완료는 **ledger APPROVE ∧ receipt pass**로 재도출되므로(권위), 검증 실패·코드 재변경은 자동으로 미완료가 된다.
+
+**B5. Final Wave (규모비례, 병렬) — 게이트 `Coverage·Quality·Runtime·Scope`.** 전체가 하나로 맞물리는지 run worktree에서 최종 확인 — B1이 직렬·병렬 어느 경로를 골랐든 이 시점엔 모든 태스크가 한 tree로 merge돼 있으므로 무관하다. **각 게이트를 별개 리뷰 단위로** review-loop-driver.md로 구동(namespace `CR`, `<dir>`=`review/final-<gate>/` — `coverage`·`quality`·`runtime`·`scope`):
 - **Coverage** — plan.md·설계 결정·요구 ID를 실제로 **전부 충족**했나(커버 안 된 FR/NFR = under-build).
 - **Quality** — 정확성·안전성·과설계(code-review.md 렌즈 전체).
 - **Runtime** — 실제 실행 검증(verification-tiers.md, 통합 경계 포함). 미검증 위험 = REJECT.
@@ -142,7 +191,8 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 ---
 
 ## 불변
-- **모든 수정은 반드시 리뷰된다.** 아키 설계 리뷰(A3)·상세 설계 리뷰(A4)·코드 리뷰(B3)·Final Wave(B5) 모두 동일한 review-loop-driver.md 루프 — producer·리뷰어 프로바이더·기준·고도 렌즈·namespace·`<dir>`만 다르다. **대칭 크로스-모델**: 설계는 Claude producer→Codex 리뷰, 개발은 Codex producer→Claude 리뷰(리뷰어=producer의 반대).
+- **모든 수정은 반드시 리뷰된다.** 아키 설계 리뷰(A3)·상세 설계 리뷰(A4)·병렬 경로의 태스크별 설계·코드 리뷰(B2′)·머지 충돌 해결 리뷰(B3′)·run 레벨 코드 리뷰(B3)·Final Wave(B5) 모두 동일한 review-loop-driver.md 루프 — producer·리뷰어 프로바이더·기준·고도 렌즈·namespace·`<dir>`만 다르다. **대칭 크로스-모델**: 설계는 Claude producer→Codex 리뷰, 개발은 Codex producer→Claude 리뷰(리뷰어=producer의 반대).
+- **비중첩 스코프는 B1에서 한 번 확인하는 전제조건이지, 리뷰의 대체물이 아니다.** 태스크 worktree의 머지 前 리뷰(B2′)는 격리된 코드에 대한 품질 게이트이고, `execution.mjs verify`/`completion`이 읽는 것은 B3에서 만든 run 레벨 리뷰 유닛뿐이다. 태스크를 merge한다고 그 B3 확인 라운드를 건너뛰지 않는다.
 - ledger·verdict 정합·상태 전이는 **손으로 판정하지 말고 loop CLI로**(false approval 방지).
 - 설계·계획은 durable 파일(`plan.md`·`design/rev-N.md`·`notepad.md`)로 — Claude와 Codex가 같은 소스를 읽는다. **위임에서 참조할 수 있는 것은 디스크 정본뿐**이며, tool-result blob 경로는 참조가 아니다.
 - 설계 리뷰 지적은 **충족안을 쓰기 前에** "위협모델 안인가"·"이 기구가 존재해야 하는가"에 먼저 답한다. 구체적 실수 시나리오 없이 추가된 기구는 준수가 아니라 과설계다.
