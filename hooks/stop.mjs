@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // H2 Stop — 미완료-확정 방지(설계 §5.2). 권위 재도출로 완료 판정, 재호출은 HARNIE_STATUS footer 계약으로.
 // 오류·상태 손상은 **fail-closed**: block한다(throw로 exit 1 나면 Claude Code가 비차단 처리 → fail-open이 되므로 전체 catch).
-import { readStdin, findRoot, blockStop, allow } from "./lib.mjs"
+import { readStdin, findRoot, isOwnerSession, blockStop, allow } from "./lib.mjs"
 import { loadContext, computeCompletion, parseStatusFooter, getRouteState, clearPendingRoute } from "../scripts/execution.mjs"
 import { decideStop } from "../scripts/guards.mjs"
 
@@ -31,6 +31,10 @@ try {
   }
   const ctx = loadContext(root)
   if (!ctx.active) allow()
+  // **owner 경계**: 이 run을 돌리는 세션이 아니면 완료 게이트를 적용하지 않는다 — 같은 repo에 우연히 있는 무관한
+  // 세션(예: PR 리뷰 루틴)이 owner run의 미완료를 이유로 종료까지 차단되던 과잉 차단 제거. H1(PreToolUse)과 대칭.
+  // **자기 pending-route 처리는 위에서 이미 끝났다** — 비-owner라도 자기 라우팅 미완료는 계속 차단된다.
+  else if (!isOwnerSession(root, ctx, p.session_id)) allow()
   else if (ctx.failClosed) failClosed([`상태 손상: ${ctx.reason}`])
   // **승인된 active run이면 phase와 무관하게 항상 권위 재도출**(closed·역전이로 Stop 게이트를 우회하지 못하게).
   else if (ctx.approved) {
