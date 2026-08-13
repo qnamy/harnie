@@ -122,6 +122,8 @@ function runFailRaw(args) {
 function runFail(args) { return runFailRaw(withDefaults(args)) }
 const REJ = ["VERDICT: REJECT", "ISSUES:", "- [CR-001] (blocking) (open) [a.ts:1] x → y → z"].join("\n")
 const APPROVE = ["VERDICT: APPROVE", "ISSUES:", "- [CR-001] (blocking) (resolved) [a.ts:1] 반영됨"].join("\n")
+// APPROVE(=CR-001 resolved)를 받을 수 있는 진행 중 ledger — 미지 ID를 resolved로 제출하면 rollback되므로.
+const LEDGER_OPEN_CR001 = JSON.stringify({ "CR-001": { id: "CR-001", blocking: true, status: "open", location: "a.ts:1", text: "x" } })
 
 // limit 1로 STALLED 도달. {dir} 반환(표준 파일명).
 function reachStalled() {
@@ -241,37 +243,43 @@ test("apply CLI: ledger·state 부모 디렉터리 불일치 → die", () => {
   assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(a), "--review", R(a), "--ns", "CR", "--state", S(b), "--artifact", captureTree(base)]), 2)
 })
 
-test("apply CLI: ledger·state·review 셋 다 stale unit으로 symlink → die(lexical identity 바인딩)", () => {
+// ── symlink 재지정: **차단하지 않는다**(의도적 결정) ──────────────────────
+// 정직한 외부 경로는 assertUnderHarnie(canonical containment)가, 인자로 직접 준 unit 혼합(symlink 없이
+// 서로 다른 dir 지정)은 lexical colocation이 잡는다.
+// 남는 것은 의도적 symlink 재지정뿐 = 설계 §0.1의 비목표(적대적 main). 아래 두 테스트는
+// "이 계층을 다시 쌓지 않는다"를 고정한다 — die로 바뀌면 계층이 재도입된 것이다.
+test("apply CLI: ledger·state·review 셋 다 stale unit으로 symlink → 차단하지 않음(§0.1 비목표)", () => {
   const base = tmpBase()
   const active = unitOf(base, "u1"), stale = unitOf(base, "stale")
-  writeFileSync(join(stale, "ledger.json"), "{}")
+  writeFileSync(join(stale, "ledger.json"), LEDGER_OPEN_CR001)
   writeFileSync(join(stale, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "REVISING" }))
   writeFileSync(join(stale, "round-1.txt"), APPROVE)
-  const staleBefore = readFileSync(join(stale, "state.json"), "utf8")
-  // active unit u1의 세 경로를 모두 stale의 동명 파일로 symlink(=canonical 부모끼리는 서로 같음)
+  // active unit u1의 세 경로를 모두 stale의 동명 파일로 symlink
   symlinkSync(join(stale, "ledger.json"), L(active))
   symlinkSync(join(stale, "state.json"), S(active))
   symlinkSync(join(stale, "round-1.txt"), R(active))
-  assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(active), "--review", R(active), "--ns", "CR", "--state", S(active), "--artifact", captureTree(base)]), 2)
-  assert.equal(readFileSync(join(stale, "state.json"), "utf8"), staleBefore) // stale unit 상태 불변
+  const r = runRaw(["apply", "--root", base, "--ledger", L(active), "--review", R(active), "--ns", "CR", "--state", S(active), "--artifact", captureTree(base)])
+  assert.equal(r.committed, true)
+  // 쓰기는 symlink를 따라 stale unit에 적용된다(차단 없음).
+  assert.equal(JSON.parse(readFileSync(join(stale, "state.json"), "utf8")).machineState, "APPROVED")
 })
 
-test("apply CLI: state가 symlink으로 다른 unit의 state.json을 가리키면 die(canonical colocation)", () => {
+test("apply CLI: state만 다른 unit의 state.json으로 symlink → 차단하지 않음(§0.1 비목표)", () => {
   const base = tmpBase()
   const dir = unitOf(base, "u1"), other = unitOf(base, "u2")
   // other unit에 진행 중 상태(round 1) 심기
   writeFileSync(join(other, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "REVISING" }))
   writeFileSync(join(other, "ledger.json"), "{}")
-  const otherBefore = readFileSync(join(other, "state.json"), "utf8")
   // active unit(u1): ledger는 진행 중, state.json은 u2의 state.json으로 symlink
-  writeFileSync(L(dir), "{}")
+  writeFileSync(L(dir), LEDGER_OPEN_CR001)
   symlinkSync(join(other, "state.json"), S(dir))
   writeFileSync(R(dir), APPROVE)
-  assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--artifact", captureTree(base)]), 2)
-  assert.equal(readFileSync(join(other, "state.json"), "utf8"), otherBefore) // 다른 unit 상태 불변
+  const r = runRaw(["apply", "--root", base, "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--artifact", captureTree(base)])
+  assert.equal(r.committed, true)
+  assert.equal(JSON.parse(readFileSync(join(other, "state.json"), "utf8")).machineState, "APPROVED")
 })
 
-test("apply CLI: review가 symlink으로 외부 APPROVE 파일을 가리키면 die(canonical colocation)", () => {
+test("apply CLI: review가 symlink으로 외부 APPROVE 파일을 가리키면 die(canonical containment)", () => {
   const base = tmpBase(); const dir = unitOf(base)
   const outside = mkdtempSync(join(tmpdir(), "harnie-ext-"))
   const ext = join(outside, "approve.txt"); writeFileSync(ext, APPROVE)

@@ -18,6 +18,7 @@ ISSUES:
 - **ID:** Reuse the same stable ID for the same issue across rounds. Each review-criteria file defines its namespace.
 - **Location:** Each review-criteria file defines its location format.
 - **Status:** Report `open` or `resolved` as verified in the current response.
+- **Severity is fixed for the lifetime of an ID.** Emit the original severity even when reporting the issue as `resolved` — an ID that switches between `blocking` and `non-blocking` is rejected on merge. If the severity assessment itself changed, close the ID as `resolved` and open a new ID at the new severity.
 - `code-review.md` and `design-review.md` do not duplicate this schema; they define only their ID namespace and location format.
 
 ## Aggregate Issue Ledger: Evidence for the Approval Gate
