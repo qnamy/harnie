@@ -586,6 +586,59 @@ test("bootstrapRun: 같은 base·미완료 active → resume(reuse)", () => {
   assert.equal(r.slug, "feat-x")
 })
 
+test("bootstrapRun: 소유 세션을 sentinel에 기록(owner 스코프 권위)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
+  assert.deepEqual(loadContext(root).sessionIds, ["sid-a"]) // 훅이 파일 재독 없이 쓰는 경로
+})
+
+test("bootstrapRun: resume은 소유자를 **추가**한다 — 이전 소유자를 교체하면 그 세션 보호가 풀림(리뷰 P1)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
+  assert.equal(r.reused, true)
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" }) // 재진입은 중복 추가 안 함
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+})
+
+test("bootstrapRun: 세션 식별자 없는 resume은 집합을 보존한다 — 비우면 다음 resume이 다시 좁힌다(리뷰 P1)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 이 세션은 isOwnerSession에서 이미 owner라 지울 이유가 없다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" }) // 비웠다면 여기서 ["sid-b"]가 되어 sid-a가 빠졌다
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
+})
+
+test("bootstrapRun: 소유자 집합은 monotonic — 어떤 resume 순서에서도 참여 세션이 빠지지 않는다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  for (const sessionId of [undefined, "sid-b", undefined, "sid-a", "sid-c", undefined])
+    bootstrapRun(root, { base: "feat-x", sessionId })
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b", "sid-c"])
+})
+
+test("bootstrapRun: 레거시 스칼라 sessionId 센티넬은 resume에서 배열로 이관(기존 소유자 보존)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
+  const f = join(root, ".harnie", "active.json")
+  const s = readSentinel(root); delete s.sessionIds; s.sessionId = "legacy-sid"; writeFileSync(f, JSON.stringify(s))
+  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
+  const after = readSentinel(root)
+  assert.deepEqual(after.sessionIds, ["legacy-sid", "sid-b"])
+  assert.equal(after.sessionId, undefined)
+})
+
+test("bootstrapRun: rollover(완료 run → 새 run)는 소유자 집합을 새 세션만으로 시작", () => {
+  const root = gitRepo()
+  makeCompleteRun(root, "feat-x")
+  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-new" })
+  assert.equal(r.reused, false)
+  assert.deepEqual(readSentinel(root).sessionIds, ["sid-new"])
+})
+
 test("bootstrapRun: 다른 base·미완료 active → block(fail-closed)", () => {
   const root = gitRepo()
   bootstrapRun(root, { base: "feat-x" })
@@ -755,7 +808,7 @@ test("park 후 새 run 생성 가능(다른 작업으로 이동) → resume으�
   assert.equal(readSentinel(root).slug, "feat-y")
   // 활성 run이 있으면 resume 거부
   assert.throws(() => resumeParkedRun(root, { slug: "feat-x" }), (e) => e instanceof FailClosed && /이미 활성 run/.test(e.message))
-  // feat-y를 park한 뒤 feat-x resume → 원복(소유 세션 갱신)
+  // feat-y를 park한 뒤 feat-x resume → 원복(소유자 집합에 재개 세션 union)
   parkRun(root, { slug: "feat-y" })
   const back = resumeParkedRun(root, { slug: "feat-x", sessionId: "sess-C" })
   assert.equal(back.resumed, true)
@@ -763,14 +816,15 @@ test("park 후 새 run 생성 가능(다른 작업으로 이동) → resume으�
   const s = readSentinel(root)
   assert.equal(s.slug, "feat-x")
   assert.equal(s.base, "feat-x")
-  assert.equal(s.sessionId, "sess-C", "resume하는 세션이 소유권을 갖는다")
+  // park은 소유자 집합을 보존하고, resume은 재개 세션을 **추가**한다(교체·삭제하면 아직 작업 중인 이전 세션 보호가 풀린다).
+  assert.deepEqual(s.sessionIds, ["sess-A", "sess-C"])
   assert.equal(s.parkedAt, undefined)
   assert.ok(!existsSync(parkedPtr(root, "feat-x")), "park 기록은 정리됨")
   // 원복된 run은 그대로 이어서 사용 가능(bootstrap resume)
   assert.equal(bootstrapRun(root, { base: "feat-x" }).reused, true)
 })
 
-test("resume: park 기록 없음·손상 execution.json은 fail-closed / --session 없으면 소유자 미지", () => {
+test("resume: park 기록 없음·손상 execution.json은 fail-closed / --session 없으면 소유자 집합 보존", () => {
   const root = gitRepo()
   mkdirSync(join(root, ".harnie"), { recursive: true })
   assert.throws(() => resumeParkedRun(root, { slug: "nope" }), (e) => e instanceof FailClosed && /park된 run 없음/.test(e.message))
@@ -781,10 +835,12 @@ test("resume: park 기록 없음·손상 execution.json은 fail-closed / --sessi
   writeFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "{ not json")
   assert.throws(() => resumeParkedRun(root, { slug: "feat-x" }), FailClosed)
   assert.ok(!existsSync(join(root, ".harnie", "active.json")))
-  // 정상 복구 후, --session 미지정이면 sessionId 제거(구버전 sentinel과 동일 = 게이트 없음)
+  // 정상 복구 후, --session 미지정이면 소유자 집합을 **그대로 보존**(비우면 다음 식별 가능한 resume이 집합을 좁혀 이전 참여자가 빠진다)
   writeFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), JSON.stringify({ track: "plan", slug: "feat-x", planHash: null, phase: "planning", tasks: {} }))
   resumeParkedRun(root, { slug: "feat-x" })
-  assert.equal(readSentinel(root).sessionId, undefined)
+  const s = readSentinel(root)
+  assert.deepEqual(s.sessionIds, ["sess-A"])
+  assert.equal(s.sessionId, undefined)
 })
 
 test("park: 일회성 승인 스캐폴딩(arm/pending)은 정리(나중 세션의 stale 바인딩 차단)", () => {
@@ -805,7 +861,7 @@ test("park/resume CLI: 서브커맨드로 동작(승인 後 die)", () => {
   assert.equal(run(["park", "--root", root, "--track", "plan", "--slug", "feat-x"]).ok, true)
   assert.ok(!existsSync(join(root, ".harnie", "active.json")))
   assert.equal(run(["resume", "--root", root, "--track", "plan", "--slug", "feat-x", "--session", "sess-B"]).resumed, true)
-  assert.equal(readSentinel(root).sessionId, "sess-B")
+  assert.deepEqual(readSentinel(root).sessionIds, ["sess-A", "sess-B"])
   approveFlow(root, "feat-x")
   const e = runFail(["park", "--root", root, "--track", "plan", "--slug", "feat-x"])
   assert.ok(e && /승인된 run/.test(e.stderr), e && e.stderr)
@@ -840,27 +896,8 @@ test("route-abandon CLI: --session 필수 + failed 전환", () => {
   assert.match(JSON.parse(readFileSync(join(root, ".harnie", "pending-route", "s1.json"), "utf8")).reason, /사용자 결정/)
 })
 
-// ── sentinel owner 세션(세션 2의 owner-only 게이트 계약) ─────────────────
-test("createRun: sentinel에 sessionId 기록 / 구버전(필드 부재)은 손상 아님", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sess-A" })
-  assert.equal(readSentinel(root).sessionId, "sess-A")
-  assert.equal(loadContext(root).sessionId, "sess-A")
-  // sessionId 미지정 → null(게이트 없음)
-  const root2 = gitRepo()
-  bootstrapRun(root2, { base: "feat-x" })
-  assert.equal(readSentinel(root2).sessionId, null)
-  assert.equal(loadContext(root2).sessionId, null)
-  // 구버전 sentinel(필드 자체 부재) → 손상 아님, 정상 동작(resume 포함)
-  const root3 = gitRepo()
-  run(["init", "--root", root3, "--slug", "feat-x"]) // 레거시 CLI 경로: 필드 없음
-  const legacy = readSentinel(root3)
-  assert.equal(Object.prototype.hasOwnProperty.call(legacy, "sessionId"), false)
-  const ctx = loadContext(root3)
-  assert.equal(ctx.failClosed, undefined)
-  assert.equal(ctx.sessionId, null)
-  assert.equal(bootstrapRun(root3, { base: "feat-x", sessionId: "sess-Z" }).reused, true) // 구버전 sentinel resume
-})
+// sentinel owner 세션 계약(`sessionIds` 집합·monotonic union·레거시 이관)은 이 파일 위쪽의
+// "bootstrapRun: 소유 세션 집합…" 테스트 군이 소유한다 — park/resume은 그 규칙을 따르는지만 위에서 검증한다.
 
 // ── h1: trial 등록 게이트(실제 실행 영수증만 인정) ────────────────────────
 test("trialKey: argv·cwd·timeout·정책이 같으면 같은 키, 하나라도 다르면 다른 키", () => {
@@ -1136,22 +1173,8 @@ test("isRouteAbandonCli: 이 세션의 route-abandon만 통과(그 외 전부 �
   assert.equal(isRouteAbandonCli(`node ${cli} route-abandon --root ${root} --session sess-1`, { trustedClis, root: null, sessionId: "sess-1" }), false)
 })
 
-// ── #3 passive resume 소유권 이전 ────────────────────────────────────────
-test("bootstrapRun resume: 소유권을 재개 세션으로 이전(죽은 세션이 owner로 남지 않음)", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sess-old" })
-  assert.equal(readSentinel(root).sessionId, "sess-old")
-  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sess-new" }) // 같은 작업 passive resume
-  assert.equal(r.reused, true)
-  assert.equal(readSentinel(root).sessionId, "sess-new", "resume 세션이 owner")
-  assert.equal(loadContext(root).sessionId, "sess-new")
-  // sessionId 없이 resume → stale owner를 남기지 않고 소유자 미지(게이트 없음)
-  bootstrapRun(root, { base: "feat-x" })
-  assert.equal(readSentinel(root).sessionId, undefined)
-  // resume이 run 내용을 훼손하지 않음(track·slug·base 유지)
-  const s = readSentinel(root)
-  assert.equal(s.slug, "feat-x"); assert.equal(s.base, "feat-x"); assert.equal(s.track, "plan")
-})
+// passive resume의 소유권 규칙은 `sessionIds` 집합의 monotonic union이며, 위쪽 "bootstrapRun: 소유 세션 집합…"
+// 테스트 군이 그 계약(추가만·비우지 않음·레거시 이관)을 소유한다. park/resume 경로는 동일 규칙을 따른다(위 테스트).
 
 // ── #4 손상 run은 park로 숨길 수 없다 ────────────────────────────────────
 test("park 거부: execution.json 부재·손상·불일치·미승인 executing 주장(손상 세탁 차단)", () => {

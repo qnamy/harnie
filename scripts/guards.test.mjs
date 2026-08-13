@@ -60,11 +60,24 @@ test("decideBash: 개행·프로세스치환으로 명령 밀반입 deny", () =>
   assert.equal(decideBash({ command: "grep x src > src/out", phase: "planning" }).deny, true) // 리다이렉트
 })
 
-test("decideBash: 비-sanctioned Bash의 .harnie 접근은 phase 무관 deny(승인 후 포함)", () => {
+test("decideBash: 비-sanctioned Bash의 .harnie **변형**은 phase 무관 deny(승인 후 포함)", () => {
   assert.equal(decideBash({ command: "find .harnie -delete" }).deny, true)
+  assert.equal(decideBash({ command: "rm -rf .harnie" }).deny, true)
   assert.equal(decideBash({ command: "git clean -fd .harnie" }).deny, true)
   assert.equal(decideBash({ command: "node -e \"require('fs').rmSync('.harnie/plan/x/manifest.json')\"" }).deny, true)
-  assert.equal(decideBash({ command: "cat .harnie/plan/x/manifest.json" }).deny, true)
+  assert.equal(decideBash({ command: "echo x > .harnie/y" }).deny, true)
+  assert.equal(decideBash({ command: "mv .harnie/plan .harnie/old", phase: "executing" }).deny, true)
+})
+
+test("decideBash: .harnie read-only 조사는 허용(쓰기 능력 없음 — 오탐 제거)", () => {
+  for (const phase of ["planning", "awaiting-approval", "executing"]) {
+    assert.equal(decideBash({ command: "cat .harnie/active.json", phase }).deny, false, phase)
+    assert.equal(decideBash({ command: "cat .harnie/plan/x/manifest.json", phase }).deny, false, phase)
+    assert.equal(decideBash({ command: "ls .harnie/plan/x/review", phase }).deny, false, phase)
+    assert.equal(decideBash({ command: "jq .phase .harnie/plan/x/execution.json", phase }).deny, false, phase)
+  }
+  // read-only 허용이 auto-allow(프롬프트 skip)로 번지지 않는다
+  assert.equal(decideBash({ command: "cat .harnie/active.json", phase: "planning" }).autoAllow, false)
 })
 
 test("decideBash: sanctioned CLI는 active root·slug·positional repo에 바인딩", () => {
@@ -171,6 +184,161 @@ test("decideBash: 승인 前 allowlist — git apply·npm·writer 스크립트 d
   assert.equal(decideBash({ command: "git log --oneline | head -20", phase: "planning" }).deny, false)
   assert.equal(decideBash({ command: "grep -r foo src | wc -l", phase: "planning" }).deny, false)
   assert.equal(decideBash({ command: "git diff HEAD", phase: "planning" }).deny, false)
+})
+
+test("decideBash: read-only 판정 오탐 4건 — git 전역옵션·인용부호 파이프·stderr 억제·find", () => {
+  const ro = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, false, cmd)
+  // (a) git 전역 옵션이 하위명령 앞에 오는 형태
+  ro("git -C /tmp/x rev-parse HEAD")
+  ro("git -C /tmp/x log --oneline -5")
+  ro("git --no-pager diff HEAD")
+  ro("git --git-dir=/tmp/x/.git status")
+  ro("git -c core.quotepath=false ls-files")
+  // (b) 인용부호 안의 | 는 파이프가 아니다
+  ro("rg -n \"A|B\" p")
+  ro("grep -nE 'foo|bar' src/app.js")
+  // (c) stderr 억제만 리다이렉트 예외
+  ro("grep -r x . 2>/dev/null")
+  ro("find . -name '*.mjs' 2>&1")
+  // (d) find 재포함
+  ro("find . -name '*.mjs'")
+  ro("find src -type f -newer package.json")
+  // 파이프 조합
+  ro("grep x f | head -5")
+})
+
+test("decideBash: 오탐 수정이 승인-前 쓰기 게이트를 넓히지 않는다", () => {
+  const deny = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, true, cmd)
+  deny("find . -delete")
+  deny("find . -exec rm {} ;")
+  deny("find . -execdir rm {} +")
+  deny("find . -fprint out.txt")
+  deny("rm -rf .harnie")
+  deny("echo x > .harnie/y")
+  deny("git apply p.patch")
+  deny("npm i")
+  deny("node -e \"require('fs').writeFileSync('a','b')\"")
+  deny("git -C /tmp/x apply p.patch")          // 전역옵션 스킵 후에도 하위명령이 GIT_RO 밖
+  deny("git -C /tmp/x diff --output=/tmp/o")   // 쓰기 옵션은 여전히 거부
+  deny("grep x f > out.txt")                   // stdout 리다이렉트는 예외 아님
+  deny("grep x f 2>out.txt")                   // stderr를 파일로 쓰는 것도 예외 아님
+  deny("cat f | tee out.txt")                  // 파이프 뒷단이 쓰기 명령
+})
+
+test("decideBash: 인용 인식이 치환·플래그 검사를 무력화하지 않는다(리뷰 R1 회귀)", () => {
+  const deny = (cmd) => { for (const phase of ["planning", "executing"]) assert.equal(decideBash({ command: cmd, phase }).deny, true, `${phase}: ${cmd}`) }
+  // 큰따옴표 안에서도 명령치환·백틱은 살아있다 → 판정 불가(fail-closed)
+  deny("cat \"$(rm -rf .harnie; echo x)\"")
+  deny("cat \"`rm -rf .harnie`\"")
+  deny("grep x \"$(pwd)/.harnie/active.json\"")
+  // 인용·이스케이프로 감싼 쓰기 플래그도 argv로 벗겨 검사 → 거부
+  deny("find .harnie '-delete'")
+  deny("find .harnie \\-delete")
+  deny("find .harnie \"-delete\"")
+  // 외부 프로그램을 실행시키는 옵션 → read-only 명령이어도 거부
+  deny("rg --pre 'sh -c \"rm -rf .harnie\"' x .harnie/active.json")
+  deny("rg --pre=sh x .harnie/active.json")
+  // 닫히지 않은 인용 → 판정 불가
+  deny("cat '.harnie/active.json")
+  // .harnie 무관 명령의 실행 옵션은 승인 前 게이트에서만 거부(승인 後 Bash 자유는 기존 설계)
+  assert.equal(decideBash({ command: "git log --ext-diff", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "rg --pre sh x src", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "git log --ext-diff", phase: "executing" }).deny, false)
+})
+
+test("decideBash: .harnie 접근은 좁은 positive 판정만 통과(리뷰 R2 회귀)", () => {
+  const deny = (cmd) => { for (const phase of ["planning", "executing"]) assert.equal(decideBash({ command: cmd, phase }).deny, true, `${phase}: ${cmd}`) }
+  // 리뷰 R2가 보고한 4종 — denylist가 놓치던 부작용 옵션·파라미터 확장
+  deny("tree -o .harnie/active.json")
+  deny("find .harnie -okdir rm -rf {} +")
+  deny("find .harnie \"${X:--delete}\"")           // 셸이 `-delete`로 확장 → 확장 자체를 fail-closed
+  deny("git -c core.pager=evil log .harnie")
+  // 플래그 없이 위치인자로 쓰는 형태(열거로 닫을 수 없다는 증거)
+  deny("uniq .harnie/active.json .harnie/pwned")
+  // positive 판정을 직접 공격: 경로지정 위장 실행파일·긴 부작용 옵션·파이프 뒷단 쓰기
+  deny("/tmp/cat .harnie/active.json")
+  deny("./cat .harnie/active.json")
+  deny("file -C -m .harnie/active.json")
+  deny("rg --pre sh x .harnie/active.json")
+  deny("cat .harnie/active.json | tee .harnie/pwned")
+  deny("cp .harnie/active.json .harnie/bak")
+  deny("env cat .harnie/active.json")
+  deny("cat $X/.harnie/active.json")
+  // 정상 조사는 계속 허용
+  const allow = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, false, cmd)
+  allow("cat .harnie/active.json")
+  allow("cat .harnie/active.json 2>/dev/null")
+  allow("jq .phase .harnie/plan/x/execution.json")
+  allow("ls -la .harnie/plan/x/review")
+  allow("grep -nE 'phase|slug' .harnie/active.json")
+  allow("head -5 .harnie/active.json")
+  allow("test -s .harnie/active.json")
+  allow("cat .harnie/active.json | wc -l")
+  allow("ls --color=always .harnie")
+})
+
+test("decideBash: brace·glob 확장이 옵션 형태를 만들 수 있으면 fail-closed(리뷰 R3 회귀)", () => {
+  const deny = (cmd) => { for (const phase of ["planning", "executing"]) assert.equal(decideBash({ command: cmd, phase }).deny, true, `${phase}: ${cmd}`) }
+  // brace 확장이 `--pre /bin/rm` 두 단어가 되어 실제로 .harnie 파일이 삭제된 사례
+  deny("rg x {--pre,/bin/rm} .harnie/active.json")
+  deny("cat {--pre,/bin/rm} .harnie/active.json")
+  deny("rg x {{--pre,a},b} .harnie/active.json")
+  deny("rg x ''{--pre,y} .harnie/active.json")     // 빈 인용 접두어도 접두어 없음
+  // 무접두 glob은 `-`로 시작하는 파일명으로 확장될 수 있다
+  deny("rg x * .harnie/active.json")
+  deny("grep x ?? .harnie/active.json")
+  deny("rg x [a-z]* .harnie/active.json")
+  deny("rg x *pre .harnie/active.json")
+  // 승인 前 소스 게이트도 같은 부류(임의 실행 통로)
+  assert.equal(decideBash({ command: "rg x {--pre,/bin/rm} src", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "grep x * src", phase: "planning" }).deny, true)
+  // 확장 결과가 리터럴 접두어로 고정되면 옵션 형태가 될 수 없다 → 유지
+  const allow = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, false, cmd)
+  allow("cat .harnie/*/manifest.json")
+  allow("ls .harnie/plan/*/review")
+  allow("rg x .{--pre,/bin/rm} .harnie/active.json") // `.--pre`·`./bin/rm` — 둘 다 경로
+  allow("find . -name '*.mjs'")                      // 인용된 glob은 셸이 확장하지 않는다
+  allow("grep -r x src")
+})
+
+test("decideBash: 홑따옴표 밖 파라미터 확장은 fail-closed(토큰=argv 계약 유지)", () => {
+  for (const cmd of ["cat $HOME/f", "cat \"$HOME/f\"", "grep \"$PAT\" f", "find . -name \"${X:--delete}\""])
+    assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, true, cmd)
+  assert.equal(decideBash({ command: "grep '$HOME' f", phase: "planning" }).deny, false) // 홑따옴표 안은 리터럴
+})
+
+test("decideBash: 파일을 쓰는 형태가 있는 명령은 승인 前 allowlist에서 제외(tree·uniq)", () => {
+  assert.equal(decideBash({ command: "tree -o out.txt", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "tree src", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "uniq src/a src/b", phase: "planning" }).deny, true)
+  assert.equal(decideBash({ command: "find . -okdir rm -rf {} +", phase: "planning" }).deny, true)
+})
+
+test("decideBash: 렉서 경계 — 인용 밖 메타는 fail-closed, 인용 안 리터럴은 argv로", () => {
+  const deny = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, true, JSON.stringify(cmd))
+  const allow = (cmd) => assert.equal(decideBash({ command: cmd, phase: "planning" }).deny, false, JSON.stringify(cmd))
+  deny("cat f\nrm -rf .harnie")                        // 인용 밖 개행
+  deny("FOO=bar cat .harnie/active.json")              // env 접두 할당은 선두 명령으로 인정 안 함
+  deny("cat f # ; rm -rf .harnie")                     // 주석 뒤 메타도 보수적으로 거부
+  deny("sh -c 'cat .harnie/active.json'")              // 인터프리터는 allowlist 밖
+  deny("cat .harnie/active.json '--output=/tmp/x'")    // 인용된 쓰기 플래그
+  allow("grep 'a\nb' f")                               // 인용 안 개행은 인자(명령 분리 아님)
+  allow("grep x f 2>&1 | wc -l")                       // stderr 억제 + 파이프
+  allow("cat .harnie/*/manifest.json")                 // glob 읽기
+})
+
+test("decideWriteEdit: outside=true면 승인 前 run 디렉터리 밖 규칙 미적용(control 검사는 유지)", () => {
+  const base = { phase: "planning", track: "plan", slug: "x" }
+  // repo 밖 경로: 기존(outside 미지정/false)엔 deny, outside=true면 allow
+  assert.equal(decideWriteEdit({ ...base, relPath: "../scratch/notes.md" }).deny, true)
+  assert.equal(decideWriteEdit({ ...base, relPath: "../scratch/notes.md", outside: false }).deny, true)
+  assert.equal(decideWriteEdit({ ...base, relPath: "../scratch/notes.md", outside: true }).deny, false)
+  assert.equal(decideWriteEdit({ ...base, relPath: "/tmp/x/notes.md", outside: true }).deny, false)
+  // control 검사는 outside=true에서도 유지
+  assert.equal(decideWriteEdit({ ...base, relPath: ".harnie/active.json", outside: true }).deny, true)
+  assert.equal(decideWriteEdit({ ...base, relPath: ".harnie/plan/x/manifest.json", outside: true, phase: "executing" }).deny, true)
+  // repo 안 소스는 outside=false 기본값에서 기존대로 deny
+  assert.equal(decideWriteEdit({ ...base, relPath: "src/foo.ts" }).deny, true)
 })
 
 test("decideTask: designer는 read-only라 planning 허용, builder deny", () => {

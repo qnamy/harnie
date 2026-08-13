@@ -388,10 +388,9 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  // sessionId = 이 run을 만든(또는 resume한) 세션. 훅의 owner-only 게이트가 읽는다.
-  // **구버전 sentinel에 필드가 없으면 null** — 손상이 아니라 하위호환(소유자 미지 = 게이트 없음).
-  const ownerSessionId = typeof s.sessionId === "string" && s.sessionId !== "" ? s.sessionId : null
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionId: ownerSessionId, readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
+  // sessionIds = run에 진입·재개한 소유 세션 **집합**(hooks/lib.mjs isOwnerSession이 membership으로 판정).
+  // 빈 배열 = 미기록 → 훅이 repo 전역 적용으로 폴백(보수적).
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -406,7 +405,7 @@ export function loadContext(root) {
   const rawPhase = ex.phase
   // effectivePhase: 승인 전이면 executing/final-wave 주장을 awaiting-approval로 강등(쓰기 게이트 닫음).
   const effectivePhase = approved ? rawPhase : (rawPhase === "executing" || rawPhase === "final-wave" ? "awaiting-approval" : rawPhase)
-  return { active: true, root, track: s.track, slug: s.slug, sessionId: ownerSessionId, phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
+  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
 }
 
 // 완료 재도출(§4) — manifest 순회. manifest 부재(승인 前)면 완료 강제 없음(noManifest).
@@ -514,26 +513,47 @@ function genuinelyComplete(root, track, slug) {
   const comp = computeCompletion(root, track, slug)
   return comp.complete === true && comp.noManifest !== true
 }
+// run에 **명시적으로 진입·재개한 세션들의 집합**(hooks/lib.mjs isOwnerSession의 권위).
+// 불변식: **식별 가능한 상태로 참여한 세션은 run이 끝날 때까지 계속 owner다.** 세션 종료를 확인할 증거가 없으므로
+// 집합에서 빼지 않는다 — 빼는 순간 아직 작업 중인 그 세션의 H1 승인-前 쓰기·H2 Stop·PostToolUse 관찰 보호가
+// 전부 풀린다(두 세션 동시 활성은 정상 시나리오다). 그래서 owner 판정은 **membership**이고 resume은 **union**만 한다.
+// 식별자 없는 resume도 집합을 건드리지 않는다: isOwnerSession은 payload에 session_id가 없으면 이미 owner로
+// 취급하므로 지울 이유가 없고, 지우면 그 뒤 식별 가능한 resume이 집합을 다시 좁혀(=[새 세션]) 이전 참여자가 빠진다.
+function ownerSessionId(sessionId) { return typeof sessionId === "string" && sessionId !== "" ? sessionId : null }
+// sentinel의 소유자 표현을 배열로 정규화(레거시 스칼라 sessionId도 1개 집합으로 취급).
+export function normalizeOwnerSessions(s) {
+  if (!s || typeof s !== "object") return []
+  if (Array.isArray(s.sessionIds)) return s.sessionIds.filter((x) => typeof x === "string" && x !== "")
+  const one = ownerSessionId(s.sessionId)
+  return one ? [one] : []
+}
 // 새 run 생성: execution.json 먼저, active.json(포인터) 마지막 원자 전환(§3.5). old dir은 건드리지 않음(보존).
-// sentinel에 **owner 세션(sessionId)** 기록 — 훅(pretooluse)이 owner-only 게이트에 사용. 호출자는 withStateLock 하에서만.
-function createRun(root, track, base, sessionId = null) {
+function createRun(root, track, base, sessionId) {
   const slug = collisionFreeSlug(root, track, base)
+  const owner = ownerSessionId(sessionId)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", tasks: {} })
-  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, sessionId: sessionId || null, readOnlyThreads: [] })
+  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [], sessionIds: owner ? [owner] : [] })
   return { slug, reused: false }
 }
 // resume: execution.json **strict read + sentinel 일치 검증**(P2-5, cmdInit 수준). 존재 확인만으론 손상 통과.
-// **소유권 이전**: 진입점이 소유권을 정의한다 — resume하는 세션을 sentinel.sessionId로 갱신한다. 이전 세션 id를 남기면
-// owner-scoped 훅에서 재개 세션이 non-owner로 판정되고, 죽은 세션이 영구 owner로 남는다(호출자가 state lock 보유).
-function resumeRun(root, s, sessionId = null) {
+// 재개 세션을 소유자 집합에 **추가**한다(monotonic union). 추가하지 않으면 재개 세션이 비-owner로 판정돼 강제가
+// 통째로 꺼지고(fail-open), 교체하거나 비우면 아직 작업 중인 이전 참여 세션의 보호가 풀린다.
+function resumeRun(root, s, sessionId) {
   const execPath = join(planDir(root, s.track, s.slug), "execution.json")
   if (!existsSync(execPath)) throw new FailClosed("sentinel 존재하나 execution.json 부재 — 손상, fail-closed")
   const ex = readJSONStrict(execPath) // JSON 손상이면 throw
   if (ex.track !== s.track || ex.slug !== s.slug) throw new FailClosed("execution.json이 sentinel과 불일치 — 손상, fail-closed")
-  const next = { ...s }
-  if (sessionId) next.sessionId = sessionId
-  else delete next.sessionId // 소유자 미지(구버전 sentinel과 동일 = 게이트 없음) — stale owner를 남기지 않는다
-  writeJSONAtomic(sentinelPath(root), next)
+  const owner = ownerSessionId(sessionId)
+  const prev = normalizeOwnerSessions(s)
+  // 식별자가 없으면 **그대로 보존**(비우지 않는다 — 그 세션은 isOwnerSession에서 이미 owner이고, 비우면 다음
+  // 식별 가능한 resume이 집합을 [새 세션]으로 좁혀 이전 참여자가 빠진다).
+  const next = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : prev
+  // 레거시 스칼라 표현도 이 기회에 배열로 이관. 호출자(bootstrapRun)의 state lock 하에서 RMW.
+  if (stableStringify(next) !== stableStringify(prev) || s.sessionId !== undefined || !Array.isArray(s.sessionIds)) {
+    s.sessionIds = next
+    delete s.sessionId
+    writeJSONAtomic(sentinelPath(root), s)
+  }
   return { slug: s.slug, reused: true, resumed: true }
 }
 // 진입점 훅이 호출. base=slugify(작업인자). 결정표(§3.4)로 resume/new/block. **state lock으로 직렬화**(P1-3). 성공 시 이 세션의 pending-route 해소.
@@ -637,10 +657,13 @@ export function resumeParkedRun(root, { track = "plan", slug = null, sessionId =
     if (ex.track !== track || ex.slug !== slug) throw new FailClosed("execution.json이 park 기록과 불일치 — 손상, fail-closed")
     const next = { ...p }
     delete next.parkedAt
-    // 소유권은 **resume하는 세션**으로 갱신 — 옛 세션 id가 남으면 owner-only 게이트가 재개 세션을 막는다.
-    // --session 미지정이면 필드 제거 = 소유자 미지(구버전 sentinel과 동일한 하위호환 = 게이트 없음).
-    if (sessionId) next.sessionId = sessionId
-    else delete next.sessionId
+    // 소유자 집합은 **monotonic union**(resumeRun과 동일 규칙): 재개 세션을 추가하되 이전 참여자를 빼지 않는다.
+    // 교체·삭제하면 아직 작업 중인 이전 세션의 H1/H2 보호가 풀리고, 식별자 없는 resume이 집합을 비우면
+    // 다음 식별 가능한 resume이 집합을 [새 세션]으로 좁혀 이전 참여자가 빠진다. 레거시 스칼라도 이 기회에 이관.
+    const owner = ownerSessionId(sessionId)
+    const prev = normalizeOwnerSessions(p)
+    next.sessionIds = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : prev
+    delete next.sessionId
     writeJSONAtomic(sPath, next)
     rmSync(pPath, { force: true })
     if (existsSync(pPath)) throw new FailClosed(`park 기록 정리 실패(잔존): ${pPath} — 수동 확인 필요`)
