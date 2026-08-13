@@ -177,18 +177,11 @@ function cmdApply({ flags }) {
   if (!/^round-\d+\.txt$/.test(basename(reviewPath))) die(`--review basename은 round-N.txt 형식이어야 함 (got ${basename(reviewPath)})`)
   if (dirname(ledgerPath) !== dirname(statePath) || dirname(ledgerPath) !== dirname(reviewPath))
     die(`ledger·state·review는 같은 review-unit 디렉터리를 지정해야 함`)
-  // **symlink 재지정 거부**: 각 경로의 canonical이 자기 lexical 위치와 일치해야 한다. "세 canonical 부모가 서로 같은지"만
-  // 보면 셋을 함께 다른 unit으로 symlink할 때 canonical 부모끼리는 같아 통과 → 각 경로를 **lexical identity**(realRoot +
-  // lexical relative)와 대조해 어떤 symlink 재지정도 거부한다(active unit이 아닌 stale unit으로의 우회 차단).
-  const realRoot = existsSync(root) ? realpathSync(root) : resolve(root)
-  const assertNoRedirect = (p, name) => {
-    const expected = join(realRoot, relative(resolve(root), resolve(p)))
-    const actual = canonicalize(p)
-    if (actual !== expected) die(`--${name} symlink 재지정 감지 — lexical 위치와 canonical 불일치: ${expected} ≠ ${actual}`)
-  }
-  assertNoRedirect(ledgerPath, "ledger")
-  assertNoRedirect(statePath, "state")
-  assertNoRedirect(reviewPath, "review")
+  // 여기서 멈춘다: **symlink 재지정(active unit → 다른 unit)은 차단하지 않는다.** 정직한 외부 경로는 위의
+  // assertUnderHarnie(canonical containment)가, **인자로 직접 준 unit 혼합**(symlink 없이 서로 다른 dir 지정)은 위의
+  // lexical colocation이 이미 잡는다. 남는 것은 **의도적 symlink 재지정**뿐이고
+  // 그것은 설계 §0.1의 비목표(세션을 통제하는 적대적 main)다. 같은 계층을 다시 쌓지 말 것 —
+  // loop.test.mjs의 "symlink 재지정은 차단하지 않는다" 테스트가 이 결정을 고정한다.
 
   // ledger·state 존재 정합(래치 우회 차단): 둘 다 부재(리뷰 단위 최초) 또는 둘 다 존재(진행 중)만 정당.
   // 하나만 존재하면 "기존 ledger + 새 state" 위장이거나 손상 → fail-closed.
