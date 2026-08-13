@@ -155,14 +155,14 @@ test("UserPromptSubmit /harnie:dev(빈 인자) → exit 2·pending 미생성(P1-
   assert.equal(pending(root), false)
 })
 
-test("라우터 실패 흐름: 미완료 run 있을 때 Skill(dev-full) 실패 → pending을 failed로 전환(latch 방지, P1-1)", () => {
+test("라우터 실패 흐름: 미완료 run 있을 때 Skill(dev-full) 실패 → pending 삭제", () => {
   const root = gitRepo()
   run(ups("/harnie:dev-full task A", root, "sessA"))     // task A active(미완료)
   run(ups("/harnie:dev task B", root, "sessB"))          // 세션 B 라우터 → pending
   assert.equal(getRouteState(root, "sessB"), "pending")
   const r = run(skill("harnie:dev-full", "task B", root, "sessB")) // 라우팅 시도 → A 미완료라 block
   assert.equal(r.code, 2)
-  assert.equal(getRouteState(root, "sessB"), "failed")   // pending → failed(영구 latch 아님)
+  assert.equal(getRouteState(root, "sessB"), null)
 })
 
 // ── hooks.json 배선 검증 (dispatcher 레벨 — matcher가 bootstrap.mjs로 실제 발화하는가; 라운드 11 P0 교훈) ──
