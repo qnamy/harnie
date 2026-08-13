@@ -65,22 +65,27 @@ export function findRoot(startCwd) {
   return resolve(startCwd || process.cwd())
 }
 
-// active run의 **소유 세션 id**를 sentinel에서 직접 읽는다(기록이 없으면 null).
+// active run에 **진입·재개한 소유 세션 집합**을 sentinel에서 직접 읽는다(기록이 없으면 []).
 // 컨텍스트(loadContext)가 소유자를 노출하지 않는 경우 — 구버전 sentinel·부분 통합·손상 상태의 축약된
-// 반환 형태 — 를 위한 폴백이다.
-export function sentinelSessionId(root) {
+// 반환 형태 — 를 위한 폴백이다. 레거시 스칼라 `sessionId`도 1개 집합으로 취급한다.
+export function sentinelSessionIds(root) {
   try {
     const s = JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8"))
-    return s && typeof s.sessionId === "string" && s.sessionId ? s.sessionId : null
-  } catch { return null }
+    if (Array.isArray(s && s.sessionIds)) return s.sessionIds.filter((x) => typeof x === "string" && x !== "")
+    return s && typeof s.sessionId === "string" && s.sessionId ? [s.sessionId] : []
+  } catch { return [] }
 }
 
-// 이 세션이 active run의 **소유 세션**인가. run 단위 게이트(H1 phase·H2 완료·PostToolUse 관찰)를 owner로 좁혀
-// 같은 repo에 우연히 있는 무관한 세션이 차단되거나 owner run 상태를 오염시키지 않게 한다.
-// sentinel에 소유자가 없거나(구버전) payload에 session_id가 없으면 하위호환·보수적으로 owner 취급(=현행 전역 적용).
+// 이 세션이 active run의 **소유 세션 중 하나**인가. run 단위 게이트(H1 phase·H2 완료·PostToolUse 관찰)를 owner로
+// 좁혀 같은 repo에 우연히 있는 무관한 세션이 차단되거나 owner run 상태를 오염시키지 않게 한다.
+// **membership**인 이유: 소유자를 하나만 두고 resume이 교체하면, 아직 작업 중인 이전 소유 세션이 그 즉시
+// 비-owner가 되어 보호가 전부 풀린다(세션 종료를 확인할 증거가 없다). 진입·재개한 세션은 모두 계속 owner다.
+// sentinel에 소유자가 없거나(구버전) payload에 session_id가 없으면 하위호환·보수적으로 owner 취급(=전역 적용).
 export function isOwnerSession(root, ctx, sessionId) {
-  const owner = (ctx && ctx.sessionId) || sentinelSessionId(root)
-  return !owner || !sessionId || owner === sessionId
+  const fromCtx = ctx && Array.isArray(ctx.sessionIds) && ctx.sessionIds.length ? ctx.sessionIds : null
+  const owners = fromCtx || sentinelSessionIds(root)
+  if (!owners.length || !sessionId) return true
+  return owners.includes(sessionId)
 }
 
 // codex MCP 툴명 판별(플러그인/로컬 양형). isReply = codex-reply.
