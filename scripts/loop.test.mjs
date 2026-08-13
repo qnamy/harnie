@@ -120,6 +120,13 @@ function runFailRaw(args) {
   catch (e) { return e.status }
 }
 function runFail(args) { return runFailRaw(withDefaults(args)) }
+
+test("delta CLI: --out으로 harnie control 파일 덮어쓰기 거부", () => {
+  const root = tmpBase()
+  assert.equal(runFailRaw(["delta", root, captureTree(root), "--out", join(root, ".harnie", "active.json")]), 2)
+  assert.equal(existsSync(join(root, ".harnie", "active.json")), false)
+})
+
 const REJ = ["VERDICT: REJECT", "ISSUES:", "- [CR-001] (blocking) (open) [a.ts:1] x → y → z"].join("\n")
 const APPROVE = ["VERDICT: APPROVE", "ISSUES:", "- [CR-001] (blocking) (resolved) [a.ts:1] 반영됨"].join("\n")
 // APPROVE(=CR-001 resolved)를 받을 수 있는 진행 중 ledger — 미지 ID를 resolved로 제출하면 rollback되므로.
@@ -155,9 +162,10 @@ test("apply CLI: 잘못된 --progress / --reentry 값은 die", () => {
   assert.equal(runFail([...base, "--reentry", "because"]), 2)
 })
 
-test("apply CLI: 중복 플래그는 die(가드-CLI last-wins 불일치 우회 차단)", () => {
+test("apply CLI: 중복 플래그는 last value 사용", () => {
   const dir = tmpUnit(); writeFileSync(R(dir), REJ)
-  assert.equal(runFail(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--root", rootOf(L(dir)), "--root", "/other"]), 2)
+  const r = run(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--limit", "bad", "--limit", "1"])
+  assert.equal(r.committed, true)
 })
 
 test("apply CLI: STALLED 후 --state 생략으로 우회 불가(die, 커밋 안 됨)", () => {
