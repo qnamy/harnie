@@ -12,6 +12,8 @@ The loop core (`loop.mjs`) is provider-agnostic: R1 and R3–R5 are identical fo
 
 **Producer's fix (between rounds):** In the design loop the Claude designer revises. In the code loop the **Codex builder** writes and revises via `codex-reply` (stateful, `workspace-write`); it receives the approved design (from `<dir>`'s `design.md` or the plan's `plan.md`) in its prompt so it builds against the reviewed design. R1 captures whatever the producer wrote, regardless of provider.
 
+All Codex `codex`/`codex-reply` MCP calls assume `approval-policy:"never"` (pinned via the server's startup override); if a call fails with an MCP idle timeout or `AbortError: remote-cancel`, retry once via `codex-reply` against the registered threadId.
+
 ## R1. Capture the Fix Delta (Generated Independently by the Orchestrator)
 **R1 applies to the code loop only.** For the **design loop**, the reviewed artifact is a document under `.harnie/` (`design.md` / `plan.md`), which `delta.mjs` deliberately excludes — a git delta there is always empty. So the design loop does **not** use R1's git delta: instead, **inject the design content directly** into the reviewer (the full design on the first review; the revised design — changed sections or full — on each re-review, to the stateful reviewer). The rest (R2–R5, ledger, state) is identical.
 

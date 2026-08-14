@@ -12,6 +12,8 @@
 
 **producer의 수정(라운드 사이):** 설계 루프에서는 Claude designer가 개정한다. 코드 루프에서는 **Codex 빌더**가 `codex-reply`(stateful, `workspace-write`)로 쓰고 개정한다 — 승인된 설계(`<dir>`의 `design.md` 또는 plan의 `plan.md`)를 프롬프트로 받아 리뷰된 설계대로 짓는다. R1은 프로바이더와 무관하게 producer가 쓴 것을 그대로 캡처한다.
 
+모든 codex/codex-reply MCP 호출은 `approval-policy:"never"`를 전제로 한다(서버 기동 오버라이드로 고정됨). 호출이 MCP idle timeout이나 `AbortError: remote-cancel`로 실패하면, 등록된 threadId로 `codex-reply`를 1회 재시도한다.
+
 ## R1. fix-delta 캡처 (오케스트레이터가 독립적으로 생성 — producer 자기보고 아님)
 **R1은 코드 루프에만 적용된다.** **설계 루프**의 리뷰 대상은 `.harnie/` 아래 문서(`design.md`/`plan.md`)이고, `delta.mjs`는 이를 의도적으로 제외하므로 거기서의 git delta는 항상 비어 있다. 그래서 설계 루프는 R1의 git delta를 쓰지 **않는다**: 대신 **설계 내용을 리뷰어에게 직접 주입**한다(첫 리뷰는 전체 설계, 재리뷰는 개정된 설계 — 바뀐 섹션이든 전체든 — stateful 리뷰어에게). 나머지(R2~R5, ledger, state)는 동일하다.
 

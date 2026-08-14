@@ -51,7 +51,7 @@ Capture a baseline excluding `.harnie/` first:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/loop.mjs capture <repo>   # → record baselineSHA
 ```
 
-Then delegate implementation to the **Codex builder** through Codex MCP with `sandbox:"workspace-write"` and `cwd:<repo>`. Include the task intent and constraints in the prompt plus, when Step 3 ran, the contents of **`review/design/design.md`** so the builder follows the reviewed design. Keep the change **surgical**: preserve existing style and touch only requested scope. Record the threadId; use `codex-reply` for revisions. The code reviewer is Claude, so the builder must be Codex to preserve cross-model review.
+Then delegate implementation to the **Codex builder** through Codex MCP with `sandbox:"workspace-write"`, `approval-policy:"never"`, and `cwd:<repo>`. Include the task intent and constraints in the prompt plus, when Step 3 ran, the contents of **`review/design/design.md`** so the builder follows the reviewed design. Keep the change **surgical**: preserve existing style and touch only requested scope. Record the threadId; use `codex-reply` for revisions. The code reviewer is Claude, so the builder must be Codex to preserve cross-model review.
 
 ### 5. Verify (Self)
 
