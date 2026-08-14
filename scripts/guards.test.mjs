@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, referencesHarnie } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, referencesHarnie, isActiveTaskWorktree } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·route·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
@@ -90,7 +90,19 @@ test("decideBash: worktree CLI는 --repo가 활성 repo일 때만 sanctioned, au
   const probe = "node /plugin/scripts/worktree.mjs create --repo /repo --branch .harnie/probe"
   assert.equal(decideBash({ command: probe, ...ctx }).deny, false)
   assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /other"), ...ctx }).deny, true)
+  assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /repo/.harnie-wt/harnie-x-t1"), ...ctx }).deny, true)
   assert.equal(decideBash({ command: `${probe} && rm -rf /`, ...ctx }).deny, true)
+})
+
+test("decideBash: loop CLI는 활성 task worktree를 repo로 허용", () => {
+  const wt = "/repo/.harnie-wt/harnie-x-t1"
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${wt}`, ...ctx }).deny, false)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${wt} a --out ${wt}/.harnie/review/code/delta.patch`, ...ctx }).deny, false)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${wt} --ledger ${wt}/.harnie/review/code/ledger.json --review ${wt}/.harnie/review/code/round-1.txt --ns CR --state ${wt}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, false)
+  const other = wt.replace("harnie-x-t1", "harnie-other-t1")
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${other}`, ...ctx }).autoAllow, false)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${other} a --out ${other}/.harnie/review/code/delta.patch`, ...ctx }).deny, true)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${other} --ledger ${other}/.harnie/review/code/ledger.json --review ${other}/.harnie/review/code/round-1.txt --ns CR --state ${other}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, true)
 })
 
 test("decideBash: sanctioned auto-allow는 4종만", () => {
@@ -120,9 +132,22 @@ test("decideCodex: 승인 전 read-only만", () => {
   assert.equal(decideCodex({ isReply: true, threadId: "r", readOnlyThreads: ["r"], phase: "planning" }).deny, false)
 })
 
-test("decideCodex: 승인 후 builder는 workspace-write + cwd=root + building task", () => {
-  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", cwd: "/repo", phase: "executing", hasBuildingUnbound: true }
+test("isActiveTaskWorktree: 활성 slug의 직접 task worktree만 허용", () => {
+  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-t1"), true)
+  assert.equal(isActiveTaskWorktree("/repo", "x.y", "/repo/.harnie-wt/harnie-x.y-tA_2"), true)
+  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-other-t1"), false)
+  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-t1/nested"), false)
+  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt-evil/harnie-x-t1"), false)
+})
+
+test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building task", () => {
+  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", hasBuildingUnbound: true }
   assert.equal(decideCodex(base).deny, false)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, false)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-other-t1" }).deny, true)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt" }).deny, true)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt-evil/harnie-x-t1" }).deny, true)
   assert.equal(decideCodex({ ...base, sandbox: "danger-full-access" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/other" }).deny, true)
   assert.equal(decideCodex({ ...base, hasBuildingUnbound: false }).deny, true)

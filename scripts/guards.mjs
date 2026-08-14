@@ -1,5 +1,5 @@
 // harnie 강제 훅의 순수 결정 함수. 위협모델은 fallible·over-eager 오케스트레이터/빌더의 실수 방지다.
-import { isAbsolute, resolve } from "node:path"
+import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 const CONTROL_BASENAMES = new Set([
   "manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json",
@@ -54,7 +54,15 @@ export function referencesHarnie(cmd) {
   return HARNIE_STATE_REF.test(s) || referencesWorktreeContainer(s)
 }
 
-function isSanctionedCli(cmd, { trustedClis, activeRoot }) {
+export function isActiveTaskWorktree(root, slug, candidate) {
+  if (root == null || slug == null || candidate == null) return false
+  const parent = resolve(root, ".harnie-wt")
+  const target = resolve(root, candidate)
+  const escapedSlug = String(slug).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+  return dirname(target) === parent && new RegExp(`^harnie-${escapedSlug}-t[A-Za-z0-9._-]+$`).test(basename(target))
+}
+
+function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return false
   const toks = String(cmd || "").trim().split(/\s+/)
   if (toks[0] !== "node") return false
@@ -66,8 +74,9 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot }) {
   const rest = toks.slice(2)
   const flagVal = (name) => { const i = rest.lastIndexOf(name); return i >= 0 ? rest[i + 1] : undefined }
   const isRepo = (v) => v !== undefined && resolve(root, v) === root
+  const isRepoOrTaskWt = (v) => isRepo(v) || (v !== undefined && activeSlug != null && isActiveTaskWorktree(root, activeSlug, resolve(root, v)))
   if (scriptAbs.endsWith("execution.mjs")) return isRepo(flagVal("--root"))
-  if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRepo(flagVal("--root")) : isRepo(rest[1])
+  if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRepoOrTaskWt(flagVal("--root")) : isRepoOrTaskWt(rest[1])
   if (scriptAbs.endsWith("worktree.mjs")) return isRepo(flagVal("--repo"))
   return false
 }
@@ -85,7 +94,7 @@ function isAutoAllowSanctionedSub(cmd) {
 }
 export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
   const cmd = String(command || "")
-  if (isSanctionedCli(cmd, { trustedClis, activeRoot })) {
+  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
   }
@@ -104,8 +113,8 @@ export function decideTask({ subagentType, phase }) {
   return { deny: false }
 }
 
-// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo cwd만 허용한다.
-export function decideCodex({ isReply, sandbox, cwd, root, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false }) {
+// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/task worktree cwd만 허용한다.
+export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
     if (!isReply) {
@@ -121,8 +130,8 @@ export function decideCodex({ isReply, sandbox, cwd, root, threadId, phase, read
     if (sandbox === "read-only") return { deny: false }
     if (sandbox !== "workspace-write")
       return { deny: true, reason: `빌더 codex sandbox는 정확히 "workspace-write"만(${JSON.stringify(sandbox)} 차단 — danger-full-access·미지정 불가)` }
-    if (cwd == null || root == null || cwd !== root)
-      return { deny: true, reason: `빌더 codex cwd는 활성 repo root로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)})` }
+    if (cwd == null || root == null || (cwd !== root && !isActiveTaskWorktree(root, slug, cwd)))
+      return { deny: true, reason: `빌더 codex cwd는 활성 repo root 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)} 또는 그 task worktree)` }
     if (!hasBuildingUnbound)
       return { deny: true, reason: "빌더 workspace-write 호출은 building·미바인딩 task가 있을 때만(set-task로 표시 후) — 임의 쓰기 차단" }
     return { deny: false }

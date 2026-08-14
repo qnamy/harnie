@@ -2,7 +2,7 @@
 // harnie worktree 엔진(T2, DEC-001) — run별 git worktree 생성·병합·제거.
 // 위협모델 §0.1: 실수하는 오케스트레이터의 실수 방지가 목적. execution.mjs 수준의 방어 계층은 두지 않고
 // 단순 인자 검증 + git 종료코드 전파만 한다(과설계 지양, T2 프롬프트 §1).
-import { existsSync, mkdirSync, readFileSync, writeFileSync, realpathSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, realpathSync, renameSync, rmSync } from "node:fs"
 import { join, dirname, resolve, isAbsolute } from "node:path"
 import { execFileSync, spawnSync } from "node:child_process"
 import { fileURLToPath } from "node:url"
@@ -19,6 +19,10 @@ export function sanitizeBranchForDir(branch) {
 }
 export function worktreeDirFor(repo, branch) {
   return join(repo, ".harnie-wt", sanitizeBranchForDir(branch))
+}
+function assertWithinContainer(repo, dir) {
+  if (dirname(dir) !== join(repo, ".harnie-wt"))
+    throw new Error(`worktree 경로가 .harnie-wt 컨테이너를 벗어남: ${dir}`)
 }
 
 // repo(평범한 repo든 그 worktree든) 공용 gitdir — info/exclude는 worktree 간 공유된 파일 하나뿐이다.
@@ -73,8 +77,9 @@ export function createWorktree({ repo, branch, from = null }) {
   if (!repo || typeof repo !== "string") throw new Error("--repo 필요")
   if (!isAbsolute(repo)) throw new Error(`--repo는 절대경로여야 함: ${repo}`)
   if (!branch || typeof branch !== "string") throw new Error("--branch 필요")
-  ensureExcludeEntries(repo)
   const dir = worktreeDirFor(repo, branch)
+  assertWithinContainer(repo, dir)
+  ensureExcludeEntries(repo)
   const existingWt = listWorktrees(repo).find((w) => realOrResolve(w.path) === realOrResolve(dir))
   if (existingWt) {
     if (existingWt.branch && existingWt.branch !== branch)
@@ -113,8 +118,33 @@ export function removeWorktree({ repo, branch, deleteBranch = false }) {
   if (!repo || typeof repo !== "string") throw new Error("--repo 필요")
   if (!branch || typeof branch !== "string") throw new Error("--branch 필요")
   const dir = worktreeDirFor(repo, branch)
+  assertWithinContainer(repo, dir)
+  const harniePath = join(dir, ".harnie")
+  const hasRunState = [join(harniePath, "active.json"), join(harniePath, "plan"), join(harniePath, "quick")].some(existsSync)
+  const status = gitStatus(dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
+  const changes = (status.stdout || "").split("\0").filter(Boolean)
+  const onlyHarnie = status.status === 0 && changes.every((entry) => {
+    const p = entry.length > 3 && entry[2] === " " ? entry.slice(3) : entry
+    return p === ".harnie" || p.startsWith(".harnie/")
+  })
+  // 이동→remove→(성공 시만)스태시 삭제/실패 시 원복 — 유일본은 remove 성공 前엔 어느 시점에도 지워지지 않는다.
+  // 두 rename 사이에 프로세스가 죽으면 `.harnie-wt/.harnie-stash-*`에 고아로 남을 수 있으나(데이터 소실은 아님),
+  // 복구 경로는 그 디렉터리를 그대로 `<dir>/.harnie`로 옮기는 것뿐이다(§0.1: 적대적 방어·프로세스 크래시 복구는 비목표).
+  let stashRoot = null, stashPath = null
+  if (existsSync(harniePath) && !hasRunState && onlyHarnie) {
+    stashRoot = mkdtempSync(join(repo, ".harnie-wt", ".harnie-stash-"))
+    stashPath = join(stashRoot, ".harnie")
+    renameSync(harniePath, stashPath)
+  }
   const r = gitStatus(repo, ["worktree", "remove", dir])
-  if (r.status !== 0) throw new Error(`git worktree remove 실패(exit ${r.status}, 미커밋 변경 등 확인): ${(r.stderr || r.stdout || "").trim()}`)
+  if (r.status !== 0) {
+    if (stashPath) {
+      renameSync(stashPath, harniePath)
+      rmSync(stashRoot, { recursive: true, force: true })
+    }
+    throw new Error(`git worktree remove 실패(exit ${r.status}, 미커밋 변경 등 확인): ${(r.stderr || r.stdout || "").trim()}`)
+  }
+  if (stashRoot) rmSync(stashRoot, { recursive: true, force: true })
   if (deleteBranch) {
     const rb = gitStatus(repo, ["branch", "-d", branch])
     if (rb.status !== 0) throw new Error(`git branch -d 실패(exit ${rb.status}, 미병합 커밋 등 확인): ${(rb.stderr || rb.stdout || "").trim()}`)
