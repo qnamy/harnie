@@ -89,7 +89,7 @@
 - `instructions/design-authoring-{arch,detail}.md` — 설계 **작성** 출력 계약(고도별 경량/정식 분기). designer body=역할·원칙, 계약=주입 프로필. 전역 ARCH/DETAIL 일반화 이전본(harnie 자기완결).
 
 **harnie 자산**
-- `skills/{pr-review,comment-resolve,deploy-approval,quality-digest,pr-delivery}/SKILL.md` — 일반화 방법론 스킬(판단·작성만, 실행은 호출자). `pr-review`=PR 판단 단일 소스(issue/discuss/nit)
+- `skills/{pr-review,comment-resolve,deploy-approval,quality-digest,pr-delivery}/SKILL.md` — 일반화 방법론 스킬(판단·작성만, 실행은 호출자). `pr-review`=PR 판단 단일 소스(issue/discuss/nit), `pr-delivery`=호출자 주입 Delivery Profile(제목 규약·Section Library 부분집합(full/minimal)·리뷰요청 정책 `none`/`ask-once-then-send`) 기반 PR 본문·리뷰요청 내용
 - `agents/{harnie-scout,harnie-designer,harnie-builder,harnie-reviewer}.md` — 역할 에이전트 영문 실행 정본(`*-ko.md`는 한국어 미러, harnie-reviewer=read-only 코드 리뷰어, ⑥.6 C)
 - `scripts/ledger.mjs`·`delta.mjs`·`loop.mjs` — loop 계약의 결정적 구현(ledger·delta 캡처·apply 상태전이)
 - `scripts/execution.mjs` — plan 실행상태 엔진(⑥.6 C): sentinel-first init·manifest/planHash·완료 재도출·seal·verify·승인/threadId 등록. 권위 재도출 코어
