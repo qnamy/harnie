@@ -143,13 +143,71 @@ test("remove: --delete-branch면 브랜치도 함께 삭제", () => {
   assert.equal(execFileSync("git", ["-C", repo, "branch", "--list", "harnie/remove-me"], { encoding: "utf8" }).trim(), "")
 })
 
-test("remove: untracked .harnie 상태가 있는 live worktree는 --force 없이 제거 거부(CR-005 안전망)", () => {
+test("remove: task worktree의 untracked .harnie 잔여는 제거 전 자동 정리", () => {
   const repo = gitRepo()
   const wt = createWorktree({ repo, branch: "harnie/live-state" }).worktreePath
+  mkdirSync(join(wt, ".harnie", "design"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "design", "rev-1.md"), "design\n")
+  assert.doesNotThrow(() => removeWorktree({ repo, branch: "harnie/live-state" }))
+  assert.equal(existsSync(wt), false)
+})
+
+test("remove: active.json이 있는 run worktree의 권위 상태는 자동 정리하지 않음", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/run-state" }).worktreePath
   mkdirSync(join(wt, ".harnie"), { recursive: true })
-  writeFileSync(join(wt, ".harnie", "active.json"), "{}\n")
-  assert.throws(() => removeWorktree({ repo, branch: "harnie/live-state" }), /git worktree remove 실패/)
+  const active = join(wt, ".harnie", "active.json")
+  writeFileSync(active, "{}\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/run-state" }), /git worktree remove 실패/)
+  assert.ok(existsSync(active))
+})
+
+test("remove: bootstrap 중 plan 상태만 있는 run worktree도 자동 정리하지 않음", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/bootstrap-state" }).worktreePath
+  mkdirSync(join(wt, ".harnie", "plan", "x"), { recursive: true })
+  const execution = join(wt, ".harnie", "plan", "x", "execution.json")
+  writeFileSync(execution, "{}\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/bootstrap-state" }), /git worktree remove 실패/)
+  assert.ok(existsSync(execution))
+})
+
+test("remove: .harnie 밖의 untracked 파일이 있으면 상태를 보존하고 제거 거부", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/unexpected-file" }).worktreePath
+  mkdirSync(join(wt, ".harnie", "review", "code"), { recursive: true })
+  const ledger = join(wt, ".harnie", "review", "code", "ledger.json")
+  writeFileSync(ledger, "{}\n")
+  writeFileSync(join(wt, "unexpected.txt"), "unexpected\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/unexpected-file" }), /git worktree remove 실패/)
   assert.ok(existsSync(wt))
+  assert.ok(existsSync(ledger))
+})
+
+test("remove: git이 locked worktree 제거를 거부하면 임시 이동한 .harnie를 원복", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/locked-state" }).worktreePath
+  mkdirSync(join(wt, ".harnie", "review", "code"), { recursive: true })
+  const ledger = join(wt, ".harnie", "review", "code", "ledger.json")
+  writeFileSync(ledger, "original\n")
+  execFileSync("git", ["-C", repo, "worktree", "lock", wt])
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/locked-state" }), /git worktree remove 실패/)
+  assert.ok(existsSync(wt))
+  assert.equal(readFileSync(ledger, "utf8"), "original\n")
+})
+
+test("create: branch traversal로 .harnie-wt 컨테이너를 벗어나면 거부", () => {
+  const repo = gitRepo()
+  assert.throws(() => createWorktree({ repo, branch: ".." }), /worktree 경로가 \.harnie-wt 컨테이너를 벗어남/)
+})
+
+test("remove: branch traversal은 main repo의 .harnie를 건드리기 전에 거부", () => {
+  const repo = gitRepo()
+  mkdirSync(join(repo, ".harnie"), { recursive: true })
+  const marker = join(repo, ".harnie", "marker.txt")
+  writeFileSync(marker, "keep\n")
+  assert.throws(() => removeWorktree({ repo, branch: ".." }), /worktree 경로가 \.harnie-wt 컨테이너를 벗어남/)
+  assert.equal(readFileSync(marker, "utf8"), "keep\n")
 })
 
 // ── CLI e2e ──────────────────────────────────────────────────────────────

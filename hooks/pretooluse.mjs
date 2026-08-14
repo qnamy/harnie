@@ -69,7 +69,7 @@ try {
       const { isCodex, isReply } = classifyCodex(toolName)
       if (isCodex) {
         const d = decideCodex({
-          isReply, sandbox: input.sandbox, cwd: input.cwd, root, threadId: input.threadId, phase,
+          isReply, sandbox: input.sandbox, cwd: input.cwd, root, slug, threadId: input.threadId, phase,
           readOnlyThreads: ctx.readOnlyThreads || [], builderThreads: ctx.builderThreads || [],
           hasBuildingUnbound: ctx.failClosed ? false : buildingUnboundTasks(root, slug).length > 0,
         })
