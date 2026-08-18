@@ -3,8 +3,8 @@
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
-import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute } from "../scripts/execution.mjs"
-import { decideWriteEdit, decideBash, decideTask, decideCodex, isControlPath } from "../scripts/guards.mjs"
+import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
+import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, WATCHDOG_DEFAULTS } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
 const TRUSTED_CLIS = new Set([join(SCRIPTS, "loop.mjs"), join(SCRIPTS, "execution.mjs"), join(SCRIPTS, "worktree.mjs")])
@@ -73,7 +73,25 @@ try {
           readOnlyThreads: ctx.readOnlyThreads || [], builderThreads: ctx.builderThreads || [],
           hasBuildingUnbound: ctx.failClosed ? false : buildingUnboundTasks(root, slug).length > 0,
         })
-        d.deny ? denyPreTool(d.reason) : allow()
+        if (d.deny) denyPreTool(d.reason)
+        // 워치독은 advisory다. 자체 읽기·판정 오류가 권위 가드의 fail-closed 경로로 새지 않게 독립적으로 무시한다.
+        try {
+          let usage = null
+          if (!isReply && input.sandbox === "workspace-write") {
+            const candidates = buildingUnboundTasks(root, slug)
+            if (candidates.length === 1) usage = taskWatchdogUsage(root, slug, { taskId: candidates[0] })
+          } else if (isReply && (ctx.builderThreads || []).includes(input.threadId)) {
+            usage = taskWatchdogUsage(root, slug, { threadId: input.threadId })
+          }
+          if (usage) {
+            const watchdog = decideWatchdog(usage)
+            if (watchdog.deny) {
+              const elapsed = watchdog.elapsedMs == null ? "시간 정보 없음" : `${Math.floor(watchdog.elapsedMs / 60_000)}분/${WATCHDOG_DEFAULTS.wallClockBudgetMs / 60_000}분`
+              denyPreTool(`워치독 예산 초과: task ${usage.taskId}, 경과 ${elapsed}, 빌더 codex 호출 ${watchdog.calls}/${WATCHDOG_DEFAULTS.maxCodexCalls}. 추가 빌더 호출 중단 — 진행 상황과 블로커를 사용자에게 보고하라(정직 종료는 HARNIE_STATUS: INCOMPLETE — <blocker> footer). 사용자 동의 후 계속하려면: node ${join(SCRIPTS, "execution.mjs")} watchdog-extend --root ${root} --slug ${slug} --task ${usage.taskId} --reason "<사용자 승인 근거>"`)
+            }
+          }
+        } catch { /* advisory 워치독 오류는 fail-open */ }
+        allow()
       } else if (toolName === "AskUserQuestion" && !ctx.failClosed && track === "plan") {
         try { recordPendingApproval(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         allow()

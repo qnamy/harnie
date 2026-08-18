@@ -160,6 +160,13 @@ export function allowPreTool(reason) {
   process.exit(0)
 }
 
+export function allowPostTool(additionalContext) {
+  process.stdout.write(JSON.stringify({
+    hookSpecificOutput: { hookEventName: "PostToolUse", additionalContext },
+  }) + "\n")
+  process.exit(0)
+}
+
 export function blockStop(reason) {
   process.stdout.write(JSON.stringify({ decision: "block", reason }) + "\n")
   process.exit(0)

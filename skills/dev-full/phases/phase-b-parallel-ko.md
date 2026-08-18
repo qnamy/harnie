@@ -16,6 +16,8 @@
 
 ### 병렬 경로
 
+- **워치독 계약.** 워치독 deny를 받으면 즉시 진행 상황·블로커를 사용자에게 보고하고 지시를 기다린다. 연장은 사용자 동의 후 `execution.mjs watchdog-extend --reason`으로만 한다.
+
 **B2′. 태스크별 빌드(worktree 격리; 동시성은 위 알려진 의존성에 의해 제한됨 — `registerBuilderAuto` 항목 참조).** 태스크마다 독립적으로 아래를 수행 — 위 의존성이 해결되면 태스크 간 동시 진행 가능하지만, 오늘은 한 번에 한 태스크의 B2′ 빌더 호출(4단계)만 threadId 등록이 된다:
 
 1. **태스크 worktree 생성.** `node <ROOT>/scripts/worktree.mjs create --repo <repo> --branch harnie/<slug>-t<id> --from harnie/<slug>` → stdout JSON `{worktreePath, created}`; `<taskWt>` = `worktreePath`. 분기점 = run 브랜치(`harnie/<slug>`, 즉 run worktree 자신의 현재 브랜치). 이미 그 브랜치의 worktree가 있으면 `create`는 멱등하다 — 다른 브랜치에 이미 붙어 있는 게 아닌 한 에러 대신 `{worktreePath, created:false}`를 돌려준다.

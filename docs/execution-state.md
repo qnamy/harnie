@@ -55,6 +55,9 @@ matcher는 **앵커 정규식으로 확정**(설치 시 `Task`/`Agent`·MCP 정�
 - 첫 호출(`stop_hook_active:false`): incomplete면 `{"decision":"block","reason":"남은 것 …"}`.
 - **재호출(`stop_hook_active:true`): 무조건 통과하지 않는다(DR-012).** 자연어 파싱은 부정문·다국어에서 불안정하므로 **machine-readable footer 계약**을 쓴다: 오케스트레이터 최종 응답 말미에 `HARNIE_STATUS: COMPLETE` 또는 `HARNIE_STATUS: INCOMPLETE — <blocker 요약>`. Stop 입력의 `last_assistant_message`에서 이 footer를 파싱 — 권위상 incomplete인데 footer가 `COMPLETE`(또는 footer 부재)면 **계속 block**; footer가 `INCOMPLETE`+blocker 요약이면(정직 보고·제어권 반환) **통과**. (Claude Code 8회 연속 차단 강제종료가 backstop.)
 
+### 5.3 H3 실행 워치독 (advisory)
+태스크별 기본 예산은 wall-clock 30분과 빌더 Codex 호출 15회다. 80%에서는 PostToolUse additionalContext로 마무리·보고를 경고하고, 100%에서는 다음 빌더 호출을 PreToolUse에서 deny한다. 계속해야 하면 먼저 진행 상황과 블로커를 사용자에게 surface하고, 사용자 동의 근거를 `--reason`으로 남긴 `execution.mjs watchdog-extend`로만 예산을 재시작한다. 이 상태는 `execution.json`의 advisory 데이터이므로 읽기·계산·기록 오류는 §0.1의 실수-안전 경계에 맞춰 fail-open이며, 권위 가드의 fail-closed 동작을 바꾸지 않는다.
+
 ## 6. read-only 코드 리뷰어 (DR-007)
 전용 `harnie-reviewer`(tools=`Read,Grep,Glob`만). 설계 리뷰어(Codex)는 `sandbox:read-only`. driver·quick·plan에서 main-inline 제거(C 구현).
 

@@ -195,6 +195,39 @@ test("codex-reply: executing 미등록 스레드 deny", () => {
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex-reply", tool_input: { threadId: "unknown" }, cwd: root })))
 })
 
+test("codex-reply: 빌더 워치독 예산 초과면 deny, 여유 있으면 통과", () => {
+  const { root, dir } = setupRepo()
+  toExecuting(root)
+  const tid = "019facda-aaaa-bbbb-cccc-ddddeeeeffff"
+  exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, tool_response: `{"threadId":"${tid}"}`, cwd: root })
+  const execPath = join(dir, "execution.json")
+  const ex = JSON.parse(readFileSync(execPath, "utf8"))
+  ex.tasks.T1.codexCalls = 15
+  writeFileSync(execPath, JSON.stringify(ex))
+  const blocked = hook(PRE, { tool_name: "mcp__codex__codex-reply", tool_input: { threadId: tid }, cwd: root })
+  assert.ok(deny(blocked))
+  assert.match(blocked.hookSpecificOutput.permissionDecisionReason, /watchdog-extend/)
+  ex.tasks.T1.codexCalls = 5
+  writeFileSync(execPath, JSON.stringify(ex))
+  assert.equal(hook(PRE, { tool_name: "mcp__codex__codex-reply", tool_input: { threadId: tid }, cwd: root }), null)
+})
+
+test("PostToolUse: 빌더 호출이 80%에 닿으면 워치독 additionalContext 경고", () => {
+  const { root, dir } = setupRepo()
+  toExecuting(root)
+  const tid = "019facda-aaaa-bbbb-cccc-ddddeeeeffff"
+  exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, tool_response: `{"threadId":"${tid}"}`, cwd: root })
+  const execPath = join(dir, "execution.json")
+  const ex = JSON.parse(readFileSync(execPath, "utf8"))
+  ex.tasks.T1.codexCalls = 11
+  writeFileSync(execPath, JSON.stringify(ex))
+  const warned = hook(POST, { tool_name: "mcp__codex__codex-reply", tool_input: { threadId: tid }, cwd: root })
+  assert.match(warned.hookSpecificOutput.additionalContext, /예산 80% 소진/)
+  assert.match(warned.hookSpecificOutput.additionalContext, /빌더 호출 12\/15/)
+})
+
 // ── PostToolUse 등록·승인 관찰 ─────────────────────────────────────────────
 test("PostToolUse: read-only codex 성공 → readOnlyThreads 등록", () => {
   const { root } = setupRepo()

@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, referencesHarnie, isActiveTaskWorktree } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isActiveTaskWorktree } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·route·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
@@ -158,4 +158,26 @@ test("decideStop: 완료 통과, 미완료 block, 정직 INCOMPLETE 재호출 �
   assert.equal(decideStop({ complete: false, blockers: ["T1"] }).block, true)
   assert.equal(decideStop({ complete: false, stopHookActive: true, footer: { present: true, status: "INCOMPLETE" } }).block, false)
   assert.equal(decideStop({ complete: false, stopHookActive: true, footer: { present: true, status: "COMPLETE" } }).block, true)
+})
+
+test("decideWatchdog: 예산 내·80% 경고·100% 차단", () => {
+  const startedAt = "2026-08-18T00:00:00.000Z"
+  const now = Date.parse(startedAt) + 10 * 60_000
+  assert.deepEqual(decideWatchdog({ startedAt, codexCalls: 5, now }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 5, now }).warn, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 12, now }).warn, true)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 15, now }).deny, true)
+})
+
+test("decideWatchdog: 시간 예산·누락 시간·비정수 호출은 advisory로 판정", () => {
+  const startedAt = "2026-08-18T00:00:00.000Z"
+  const base = Date.parse(startedAt)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 30 * 60_000 }).deny, true)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 25 * 60_000 }).warn, true)
+  const missing = decideWatchdog({ codexCalls: 12, now: base })
+  assert.equal(missing.elapsedMs, null)
+  assert.equal(missing.warn, true)
+  const invalidCalls = decideWatchdog({ codexCalls: 4.5, now: base })
+  assert.equal(invalidCalls.calls, 0)
+  assert.equal(invalidCalls.deny, false)
 })

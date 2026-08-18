@@ -588,6 +588,8 @@ export function registerBuilderThread(root, slug, taskId, threadId) {
   const ex = readJSONStrict(execPath)
   ex.tasks = ex.tasks || {}
   ex.tasks[taskId] = ex.tasks[taskId] || { runStatus: "building", builderThreadId: null }
+  if (!ex.tasks[taskId].startedAt) ex.tasks[taskId].startedAt = new Date().toISOString()
+  if (!Number.isInteger(ex.tasks[taskId].codexCalls) || ex.tasks[taskId].codexCalls < 0) ex.tasks[taskId].codexCalls = 0
   if (ex.tasks[taskId].builderThreadId && ex.tasks[taskId].builderThreadId !== threadId)
     throw new FailClosed(`task ${taskId} builderThreadId 이미 등록됨(${ex.tasks[taskId].builderThreadId})`)
   ex.tasks[taskId].builderThreadId = threadId
@@ -603,6 +605,10 @@ export function setTaskRunStatus(root, slug, taskId, runStatus) {
   ex.tasks = ex.tasks || {}
   ex.tasks[taskId] = ex.tasks[taskId] || { runStatus: "pending", builderThreadId: null }
   ex.tasks[taskId].runStatus = runStatus
+  if (runStatus === "building") {
+    ex.tasks[taskId].startedAt = new Date().toISOString()
+    ex.tasks[taskId].codexCalls = 0
+  }
   writeJSONAtomic(execPath, ex)
   return { ok: true, taskId, runStatus }
 }
@@ -617,6 +623,47 @@ export function registerBuilderAuto(root, slug, threadId) {
   const cands = buildingUnboundTasks(root, slug)
   if (cands.length !== 1) return { ok: false, reason: `building-unbound task ${cands.length}개 — 자동 귀속 모호`, candidates: cands }
   return registerBuilderThread(root, slug, cands[0], threadId)
+}
+
+// 빌더 호출 수는 워치독 표시용이다. 권위 상태가 아니므로 조회 실패는 호출자에서 fail-open으로 다룬다.
+export function recordBuilderCall(root, slug, threadId) {
+  const execPath = join(planDir(root, "plan", slug), "execution.json")
+  const ex = readJSONStrict(execPath)
+  const found = Object.entries(ex.tasks || {}).find(([, task]) => task && task.builderThreadId === threadId)
+  if (!found) return { ok: false }
+  const [taskId, task] = found
+  task.codexCalls = Number.isInteger(task.codexCalls) && task.codexCalls >= 0 ? task.codexCalls + 1 : 1
+  if (!task.startedAt) task.startedAt = new Date().toISOString()
+  writeJSONAtomic(execPath, ex)
+  return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt }
+}
+
+export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null } = {}) {
+  try {
+    const ex = readJSONOrNull(join(planDir(root, "plan", slug), "execution.json"))
+    if (!ex || !ex.tasks) return null
+    const found = threadId != null
+      ? Object.entries(ex.tasks).find(([, task]) => task && task.builderThreadId === threadId)
+      : taskId != null && ex.tasks[taskId] ? [taskId, ex.tasks[taskId]] : null
+    if (!found) return null
+    const [id, task] = found
+    return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt }
+  } catch { return null } // advisory 읽기 실패는 훅 차단 근거가 아니다.
+}
+
+export function watchdogExtend(root, slug, taskId, reason) {
+  if (typeof reason !== "string" || reason.trim() === "") throw new FailClosed("watchdog-extend: --reason 필요")
+  const execPath = join(planDir(root, "plan", slug), "execution.json")
+  const ex = readJSONStrict(execPath)
+  const task = ex.tasks && ex.tasks[taskId]
+  if (!task) throw new FailClosed(`watchdog-extend: task ${taskId} 없음`)
+  const at = new Date().toISOString()
+  task.startedAt = at
+  task.codexCalls = 0
+  task.watchdogExtensions = Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions : []
+  task.watchdogExtensions.push({ at, reason: reason.trim() })
+  writeJSONAtomic(execPath, ex)
+  return { ok: true, taskId, extensions: task.watchdogExtensions.length }
 }
 
 export function registerReadonlyThread(root, track, slug, threadId) {
@@ -725,6 +772,10 @@ function cmdSetTask({ flags }) {
   out(setTaskRunStatus(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.task || die("--task 필요"), flags["run-status"] || die("--run-status 필요")))
 }
 
+function cmdWatchdogExtend({ flags }) {
+  out(watchdogExtend(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.task || die("--task 필요"), flags.reason || die("--reason 필요")))
+}
+
 function cmdSetPhase({ flags }) {
   const root = flags.root || die("--root 필요")
   const track = flags.track || "plan"
@@ -766,6 +817,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "verify": cmdVerify(args); break
       case "completion": cmdCompletion(args); break
       case "set-task": cmdSetTask(args); break
+      case "watchdog-extend": cmdWatchdogExtend(args); break
       case "set-phase": cmdSetPhase(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)
     }

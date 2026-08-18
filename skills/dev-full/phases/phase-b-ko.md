@@ -10,6 +10,8 @@
 
 ### 직렬 경로
 
+- **워치독 계약.** 워치독 deny를 받으면 즉시 진행 상황·블로커를 사용자에게 보고하고 지시를 기다린다. 연장은 사용자 동의 후 `execution.mjs watchdog-extend --reason`으로만 한다.
+
 **B2. 작업 → Codex 빌더 위임 (개발 producer = Codex).** 위임 직전 순서로: ① `execution.mjs set-task --root <repo> --slug <slug> --task <id> --run-status building`(빌더 workspace-write codex 부트스트랩을 훅이 이걸로 게이트) → ② `loop.mjs capture <repo>`로 baseline 캡처(B3 R1 fix-delta 기준점) → ③ `execution.mjs seal --root <repo> --slug <slug>`(권위 스냅샷). 그다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `approval-policy:"never"`, `cwd:<repo>`, **run 난이도 모델**(`model-matrix.md` §3: easy = `gpt-5.6-luna`, 순수 기계적이면 `gpt-5.3-codex-spark`, medium = `gpt-5.6-terra`, hard = `gpt-5.6-sol`; 모델 선택이 불가능하면 설치 기본값))에게 위임 — 프롬프트에 작업 지시 + **승인된 `plan.md`의 해당 설계 섹션**을 실어 리뷰된 설계대로 짓게 한다. 6-section 계약(요구/설계간단/구현/견고함/테스트/검증) — 요약이며 구현 소스 전문이 아님(review-loop-driver.md 참조). surgical scope. **빌더는 `.harnie/`에 접근하지 않는다**(권위 상태는 오케스트레이터·CLI 소유). threadId는 PostToolUse 훅이 성공한 codex를 관찰해 등록(재수정은 codex-reply).
 
 **B3. ★ 코드 리뷰 루프, run worktree(크로스-모델; 완료 판정의 정본 리뷰 유닛 — 두 경로 모두 여기로 수렴).** 빌더 산출 직후 delta 귀속 前 **`execution.mjs seal-verify --root <repo> --slug <slug>`**(빌더가 권위 파일을 실수로 훼손했으면 fail-closed → 그 라운드 무효·보고). 통과하면 review-loop-driver.md R1~R5:

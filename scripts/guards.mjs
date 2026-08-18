@@ -16,6 +16,26 @@ export function isControlPath(relPath) {
 
 const PLANNING_PHASES = new Set(["planning", "awaiting-approval"])
 
+// 실행 워치독은 권위가 아닌 advisory 예산이다. 상태가 불완전하면 시간을 근거로 막지 않는다.
+export const WATCHDOG_DEFAULTS = { wallClockBudgetMs: 30 * 60_000, maxCodexCalls: 15 }
+
+export function decideWatchdog({
+  startedAt,
+  codexCalls,
+  now = Date.now(),
+  wallClockBudgetMs = WATCHDOG_DEFAULTS.wallClockBudgetMs,
+  maxCodexCalls = WATCHDOG_DEFAULTS.maxCodexCalls,
+} = {}) {
+  const calls = Number.isInteger(codexCalls) && codexCalls >= 0 ? codexCalls : 0
+  const parsed = typeof startedAt === "string" ? Date.parse(startedAt) : NaN
+  const elapsedMs = Number.isFinite(parsed) ? now - parsed : null
+  const elapsedMinutes = elapsedMs == null ? "시간 정보 없음" : `${Math.floor(elapsedMs / 60_000)}분/${wallClockBudgetMs / 60_000}분`
+  const reason = `경과 ${elapsedMinutes}, 빌더 codex 호출 ${calls}/${maxCodexCalls}`
+  const deny = calls >= maxCodexCalls || (elapsedMs != null && elapsedMs >= wallClockBudgetMs)
+  const warn = !deny && (calls >= Math.ceil(maxCodexCalls * 0.8) || (elapsedMs != null && elapsedMs >= wallClockBudgetMs * 0.8))
+  return { deny, warn, elapsedMs, calls, reason }
+}
+
 // control 파일은 항상 보호하고, 승인 전에는 활성 run 디렉터리 밖 Write/Edit를 막는다.
 export function decideWriteEdit({ relPath, phase, track, slug, outside = false }) {
   const p = String(relPath).replace(/\\/g, "/")

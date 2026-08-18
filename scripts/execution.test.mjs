@@ -11,6 +11,7 @@ import {
   extractManifestBlock, validateManifest, canonicalManifest,
   deriveCompletion, sealHashOf, parseStatusFooter, FailClosed, authorityApproved,
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
+  setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
   detectVacuous, loadContext,
 } from "./execution.mjs"
@@ -451,6 +452,51 @@ test("register(함수): threadId 등록·재등록 금지(훅 전용, CLI 아님
   assert.equal(registerBuilderThread(root, "feat-x", "T1", "th-b").threadId, "th-b")
   assert.throws(() => registerBuilderThread(root, "feat-x", "T1", "th-other"), FailClosed) // 다른 threadId 재등록 금지
   assert.ok(registerReadonlyThread(root, "plan", "feat-x", "th-r").readOnlyThreads.includes("th-r"))
+})
+
+test("워치독 상태: building 진입은 예산을 재시작하고 built 전이는 유지", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  const execPath = join(root, ".harnie", "plan", "feat-x", "execution.json")
+  let ex = JSON.parse(readFileSync(execPath, "utf8"))
+  const startedAt = ex.tasks.T1.startedAt
+  assert.ok(startedAt)
+  assert.equal(ex.tasks.T1.codexCalls, 0)
+  ex.tasks.T1.codexCalls = 7
+  writeFileSync(execPath, JSON.stringify(ex))
+  setTaskRunStatus(root, "feat-x", "T1", "built")
+  ex = JSON.parse(readFileSync(execPath, "utf8"))
+  assert.equal(ex.tasks.T1.startedAt, startedAt)
+  assert.equal(ex.tasks.T1.codexCalls, 7)
+})
+
+test("워치독 상태: 빌더 호출 기록·미등록 no-op·사용량 조회", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "builder-1")
+  assert.equal(recordBuilderCall(root, "feat-x", "builder-1").codexCalls, 1)
+  assert.equal(recordBuilderCall(root, "feat-x", "builder-1").codexCalls, 2)
+  assert.deepEqual(recordBuilderCall(root, "feat-x", "unknown"), { ok: false })
+  assert.equal(taskWatchdogUsage(root, "feat-x", { threadId: "builder-1" }).codexCalls, 2)
+  assert.equal(taskWatchdogUsage(root, "feat-x", { taskId: "missing" }), null)
+})
+
+test("watchdog-extend: 예산 리셋·연장 이력, 사유 없으면 fail-closed", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "builder-1")
+  recordBuilderCall(root, "feat-x", "builder-1")
+  assert.equal(watchdogExtend(root, "feat-x", "T1", "사용자 승인").extensions, 1)
+  const usage = taskWatchdogUsage(root, "feat-x", { taskId: "T1" })
+  assert.equal(usage.codexCalls, 0)
+  assert.ok(usage.startedAt)
+  assert.throws(() => watchdogExtend(root, "feat-x", "T1", ""), FailClosed)
 })
 
 // ── bootstrap (진입점 훅 소유, docs/bootstrap-adherence.md) ─────────────────

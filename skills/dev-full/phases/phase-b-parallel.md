@@ -16,6 +16,8 @@
 
 ### Parallel path
 
+- **Watchdog contract.** On a watchdog deny, immediately report progress and blockers to the user and wait for instructions. Extend only after user consent, using `execution.mjs watchdog-extend --reason`.
+
 **B2′. Per-task build (worktree-isolated; concurrency is bounded by the known dependency above — see its `registerBuilderAuto` note).** For each task, run the following independently — these can run concurrently across tasks once the dependency above is resolved; today, only one task's B2′ builder call (step 4) can have its threadId registered at a time:
 
 1. **Create the task worktree.** `node <ROOT>/scripts/worktree.mjs create --repo <repo> --branch harnie/<slug>-t<id> --from harnie/<slug>` → stdout JSON `{worktreePath, created}`; `<taskWt>` = `worktreePath`. The branch point is the run branch (`harnie/<slug>`, i.e. the run worktree's own current branch). Calling `create` again for a branch that already has a worktree is idempotent — it returns `{worktreePath, created:false}` rather than erroring, as long as that worktree isn't already attached to a different branch.
