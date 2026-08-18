@@ -864,9 +864,13 @@ test("PostToolUse: owner(sessionId 일치)의 등록·승인 흐름은 그대로
   assert.ok(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).readOnlyThreads.includes(rid))
 })
 
-test("sessionId 미기록 sentinel(구버전)·payload session_id 부재: 현행 repo 전역 적용(하위호환 fail-closed)", () => {
-  const { root } = setupRepo() // sentinel에 sessionId 없음
-  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root, session_id: "anyone" })))
-  setOwner(root, "owner-sid") // owner 기록됐지만 payload에 session_id 없음 → 보수적으로 적용
+test("owner 미기록 sentinel(구버전·stale): 식별된 세션은 잠그지 않고, session_id 부재 payload만 fail-closed", () => {
+  const { root } = setupRepo() // sentinel에 owner 기록 없음(구버전 스키마/stale run)
+  // 실측 사고 회귀 감시: harnie를 실행한 적 없는 세션이 "빈 목록 = 전원 owner" 폴백으로
+  // 워크스페이스 전체 소스 쓰기가 잠겼다 — 식별된 세션은 이제 게이트 미적용.
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root, session_id: "anyone" }), null)
+  // 식별 불가 호출은 구분할 수 없으므로 여전히 보수적으로 적용(하위호환 fail-closed)
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })))
+  setOwner(root, "owner-sid") // owner 기록됐지만 payload에 session_id 없음 → 동일하게 보수적 적용
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })))
 })

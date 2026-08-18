@@ -105,10 +105,15 @@ export function sentinelSessionIds(root) {
 }
 
 // Every session that entered or resumed the run remains an owner until completion.
+// owner 미기록 sentinel(구버전 스키마·stale run)은 식별된 세션을 잠그지 않는다 — 과거 "빈 목록 = 전원 owner"
+// 폴백은 harnie를 실행한 적 없는 세션의 소스 쓰기까지 워크스페이스 단위로 잠갔다(실측 사고). 그런 run을
+// 실제로 재개(bootstrap)하면 그 세션이 owner로 기록되어 게이트가 다시 붙는다. session_id 없는 payload는
+// 구분할 방법이 없으므로 fail-closed(owner 취급) 유지.
 export function isOwnerSession(root, ctx, sessionId) {
   const fromCtx = ctx && Array.isArray(ctx.sessionIds) && ctx.sessionIds.length ? ctx.sessionIds : null
   const owners = fromCtx || sentinelSessionIds(root)
-  if (!owners.length || !sessionId) return true
+  if (!sessionId) return true
+  if (!owners.length) return false
   return owners.includes(sessionId)
 }
 
