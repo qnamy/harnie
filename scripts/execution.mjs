@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // Durable run state; completion is always re-derived from manifest, reviews, and receipts.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync, realpathSync } from "node:fs"
 import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { captureTree } from "./delta.mjs"
+import { captureTree, captureWorkspaceTree } from "./delta.mjs"
+import { createWorktree } from "./worktree.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers } from "../hooks/lib.mjs"
 
@@ -87,6 +88,8 @@ export function validateManifest(obj) {
     else if (taskIds.has(t.id)) errors.push(`tasks[${i}].id 중복(${t.id})`)
     else taskIds.add(t.id)
     if (!Array.isArray(t.deps)) errors.push(`tasks[${i}].deps 배열 아님`)
+    if (t.repo != null && (typeof t.repo !== "string" || !REPO_KEY_RE.test(t.repo) || t.repo.split("/").some((seg) => seg === "." || seg === "..")))
+      errors.push(`tasks[${i}].repo 형식 오류(워크스페이스 상대 repo 키, traversal 금지): ${JSON.stringify(t.repo)}`)
     claimUnit(t.reviewUnit, `tasks[${i}]`)
     if (!Array.isArray(t.scope) || t.scope.length === 0) errors.push(`tasks[${i}].scope 비어있지 않은 배열 필요`)
     else for (const s of t.scope) { try { assertContainedRel(s, `tasks[${i}].scope`) } catch (e) { errors.push(e.message) } }
@@ -104,6 +107,12 @@ export function validateManifest(obj) {
   }
   for (const [i, t] of (Array.isArray(obj.tasks) ? obj.tasks : []).entries())
     if (Array.isArray(t?.deps)) for (const d of t.deps) if (!taskIds.has(d)) errors.push(`tasks[${i}].deps: 미지 task ${JSON.stringify(d)}`)
+  // repo 키는 all-or-none: 워크스페이스 run은 모든 task가 repo 바인딩 필수, 단일-repo run은 repo 키 금지.
+  if (Array.isArray(obj.tasks) && obj.tasks.length) {
+    const withRepo = obj.tasks.filter((t) => t && t.repo != null).length
+    if (withRepo !== 0 && withRepo !== obj.tasks.length)
+      errors.push(`tasks의 repo 키는 all-or-none — ${withRepo}/${obj.tasks.length}개만 지정됨(워크스페이스 run이면 전부, 아니면 전부 생략)`)
+  }
   const gateNames = []
   for (const [i, g] of (Array.isArray(obj.gates) ? obj.gates : []).entries()) {
     if (!g || typeof g !== "object") { errors.push(`gates[${i}]: 객체 아님`); continue }
@@ -164,6 +173,7 @@ export function deriveCompletion(manifest, snap) {
   const unit = (u) => (snap.units && snap.units[u]) || {}
   for (const t of manifest.tasks) {
     const u = unit(t.reviewUnit)
+    if (u.repoUnresolved) { blockers.push(`task ${t.id}: repo 바인딩 실패 — ${u.repoUnresolved}`); continue }
     if (u.openBlocking == null) { blockers.push(`task ${t.id}: ledger 없음/손상(${t.reviewUnit})`); continue }
     if (u.openBlocking > 0) blockers.push(`task ${t.id}: open blocking ${u.openBlocking}`)
     if (u.machineState !== "APPROVED") blockers.push(`task ${t.id}: review 미승인(machineState=${u.machineState})`)
@@ -234,6 +244,31 @@ function planDir(root, track, slug) {
 
 function sentinelPath(root) { return join(root, ".harnie", "active.json") }
 
+// ── 워크스페이스 run(멀티레포) ────────────────────────────────────────────
+// 비-git 워크스페이스(예: repo 여러 개를 담은 부모 디렉터리)에서 시작한 run은 run root가 git repo가 아니라
+// `<workspace>/.harnie-wt/harnie-<slug>/` 평범한 디렉터리다. sentinel에 `workspaceRoot`(워크스페이스 절대경로)와
+// `repos`({key: {repo, workroot}})를 기록하고, 멤버 repo마다 `<repo>/.harnie-wt/harnie-<slug>` git worktree를 둔다.
+// manifest task는 `repo: "<key>"`로 자기 repo에 바인딩되며, scope 해시·verify·delta는 그 workroot 기준이다.
+const REPO_KEY_RE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/
+export function workspaceInfo(root) {
+  const s = readJSONOrNull(sentinelPath(root))
+  if (!s || typeof s.workspaceRoot !== "string" || !s.workspaceRoot) return null
+  const repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
+  return { workspaceRoot: s.workspaceRoot, repos }
+}
+// task의 git root(scope 해시·verify·delta 기준) 해석. 실패 사유를 함께 반환해 완료 재도출 blocker에 쓴다.
+function resolveTaskGitRoot(root, task, ws) {
+  if (ws == null) {
+    if (task.repo != null) return { gitRoot: null, reason: `task.repo(${task.repo})는 workspace run에서만 유효` }
+    return { gitRoot: root, reason: null }
+  }
+  if (task.repo == null) return { gitRoot: null, reason: "workspace run의 task는 repo 키 필수" }
+  const entry = ws.repos[task.repo]
+  if (!entry || typeof entry.workroot !== "string") return { gitRoot: null, reason: `repo '${task.repo}' 미등록 — execution.mjs repo-add 필요` }
+  if (!existsSync(entry.workroot)) return { gitRoot: null, reason: `repo '${task.repo}' workroot 소실(${entry.workroot})` }
+  return { gitRoot: entry.workroot, reason: null }
+}
+
 function computeScopeHash(root, treeSHA, scopePaths) {
   const lsTree = execFileSync("git", ["-C", root, "ls-tree", "-r", treeSHA, "--", ...scopePaths], { encoding: "utf8" })
   return sha256(lsTree)
@@ -245,7 +280,15 @@ function buildSnapshot(root, track, slug, manifest, planHash) {
   const units = {}
   const unitNames = new Set([...manifest.tasks.map((t) => t.reviewUnit), ...manifest.gates.map((g) => g.reviewUnit)])
   const taskByUnit = new Map(manifest.tasks.map((t) => [t.reviewUnit, t]))
-  const currentWholeTree = captureTree(root)
+  // workspace run: 전체-tree = 멤버 repo 합성(ws:sha256), task별 캡처는 자기 repo workroot에서(캐시).
+  const ws = workspaceInfo(root)
+  const currentWholeTree = ws ? captureWorkspaceTree(ws.repos) : captureTree(root)
+  const repoTreeCache = new Map()
+  const currentTreeOf = (gitRoot) => {
+    if (!ws) return currentWholeTree
+    if (!repoTreeCache.has(gitRoot)) repoTreeCache.set(gitRoot, captureTree(gitRoot))
+    return repoTreeCache.get(gitRoot)
+  }
   for (const name of unitNames) {
     const uDir = join(reviewRoot, name)
     const ledger = readJSONOrNull(join(uDir, "ledger.json"))
@@ -259,14 +302,19 @@ function buildSnapshot(root, track, slug, manifest, planHash) {
     const reviewedPostSHA = state && typeof state === "object" ? state.reviewedPostSHA : null
     const receipt = readJSONOrNull(join(uDir, "receipt.json"))
     const task = taskByUnit.get(name)
-    let expectedScopeHash = null, currentScopeHash = null
-    if (task && reviewedPostSHA) {
-      try { expectedScopeHash = computeScopeHash(root, reviewedPostSHA, task.scope) } catch { expectedScopeHash = null }
-    }
+    let expectedScopeHash = null, currentScopeHash = null, repoUnresolved = null
     if (task) {
-      try { currentScopeHash = computeScopeHash(root, currentWholeTree, task.scope) } catch { currentScopeHash = null }
+      const { gitRoot, reason } = resolveTaskGitRoot(root, task, ws)
+      repoUnresolved = reason
+      if (gitRoot && reviewedPostSHA) {
+        try { expectedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope) } catch { expectedScopeHash = null }
+      }
+      if (gitRoot) {
+        try { currentScopeHash = computeScopeHash(gitRoot, currentTreeOf(gitRoot), task.scope) } catch { currentScopeHash = null }
+      }
     }
     units[name] = {
+      repoUnresolved,
       openBlocking,
       machineState,
       receipt: receipt && typeof receipt === "object"
@@ -319,7 +367,7 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [], workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -329,7 +377,10 @@ export function loadContext(root) {
   const approvalEvidence = existsSync(join(dir, "manifest.json")) || !!s.planHash
   const rawPhase = ex.phase
   const effectivePhase = approved ? rawPhase : (rawPhase === "executing" || rawPhase === "final-wave" ? "awaiting-approval" : rawPhase)
-  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads }
+  // workspace run(멀티레포): 게이트가 멤버 repo workroot를 허용 집합에 넣을 수 있게 노출.
+  const repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
+  const memberWorkroots = Object.values(repos).map((r) => r && r.workroot).filter((w) => typeof w === "string" && w)
+  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots }
 }
 
 export function computeCompletion(root, track, slug) {
@@ -428,11 +479,13 @@ export function normalizeOwnerSessions(s) {
   return one ? [one] : []
 }
 
-function createRun(root, track, base, sessionId) {
+function createRun(root, track, base, sessionId, workspaceRoot = null) {
   const slug = collisionFreeSlug(root, track, base)
   const owner = ownerSessionId(sessionId)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", tasks: {} })
-  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, readOnlyThreads: [], sessionIds: owner ? [owner] : [] })
+  const sentinel = { track, slug, base, planHash: null, readOnlyThreads: [], sessionIds: owner ? [owner] : [] }
+  if (workspaceRoot) { sentinel.workspaceRoot = workspaceRoot; sentinel.repos = {} } // 워크스페이스 run(멀티레포)
+  writeJSONAtomic(sentinelPath(root), sentinel)
   return { slug, reused: false }
 }
 
@@ -453,16 +506,18 @@ function resumeRun(root, s, sessionId) {
   return { slug: s.slug, reused: true, resumed: true }
 }
 
-export function bootstrapRun(root, { base, track = "plan", sessionId = null } = {}) {
+export function bootstrapRun(root, { base, track = "plan", sessionId = null, workspaceRoot = null } = {}) {
   if (track !== "plan") throw new FailClosed(`bootstrapRun: 현재 track=plan만 (${track})`) // quick 이연(§3.8)
   if (typeof base !== "string" || base === "") throw new FailClosed("bootstrap: 빈 작업 인자 — 진행 불가")
   validateSlug(base)
+  if (workspaceRoot != null && (typeof workspaceRoot !== "string" || !isAbsolute(workspaceRoot)))
+    throw new FailClosed(`bootstrap: workspaceRoot는 절대경로 필요(${JSON.stringify(workspaceRoot)})`)
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base, sessionId)
+    if (!s) result = createRun(root, track, base, sessionId, workspaceRoot)
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId) // 완료 → 새 run(포인터 전환·old 보존)
+    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, workspaceRoot) // 완료 → 새 run(포인터 전환·old 보존)
     else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 완료하거나, 별도 worktree checkout에서 이 스킬을 다시 실행해 새 run을 시작하세요.`)
     clearPendingRoute(root, sessionId) // 부트스트랩 성공 = 이 세션 라우팅 해소(§3.9, per-session 파일이라 lock-free)
@@ -519,10 +574,22 @@ export function derivePlanHash(root, slug) {
   return { ok: true, planHash: computePlanHash(planMd, canonicalManifest(block)), block }
 }
 
+// manifest의 task.repo 바인딩이 이 run의 등록 repo와 정합한지 — 승인 시점에 fail-closed로 확인한다.
+export function validateRepoBinding(root, block) {
+  const ws = workspaceInfo(root)
+  const withRepo = block.tasks.filter((t) => t.repo != null)
+  if (!ws) return withRepo.length ? `task.repo는 workspace run에서만 유효(비-workspace run에 ${withRepo.length}개 지정)` : null
+  if (withRepo.length !== block.tasks.length) return "workspace run은 모든 task에 repo 키 필수"
+  for (const t of block.tasks) if (!ws.repos[t.repo]) return `task ${t.id}: repo '${t.repo}' 미등록 — 먼저 execution.mjs repo-add로 등록`
+  return null
+}
+
 // The first observed AskUserQuestion after arming is the one-shot approval candidate.
 export function armApproval(root, slug, { approveOption = "승인" } = {}) {
   const d = derivePlanHash(root, slug)
   if (!d.ok) return { ok: false, reason: d.reason }
+  const rb = validateRepoBinding(root, d.block)
+  if (rb) return { ok: false, reason: rb }
   const dir = planDir(root, "plan", slug)
   writeJSONAtomic(join(dir, ".arm-approval.json"), { planHash: d.planHash, approveOption, at: new Date().toISOString() })
   const execPath = join(dir, "execution.json")
@@ -559,6 +626,8 @@ export function bindApproval(root, slug, toolUseId, response) {
   if (!d.ok) return { ok: false, reason: d.reason, phase: "awaiting-approval" }
   if (!approved) return { ok: false, reason: "승인 옵션 정확 일치 아님 — awaiting-approval 유지", phase: "awaiting-approval" }
   if (d.planHash !== pending.planHash) return { ok: false, reason: "질문 이후 plan 변경(planHash 불일치) — awaiting-approval 유지", phase: "awaiting-approval" }
+  const rb = validateRepoBinding(root, d.block)
+  if (rb) return { ok: false, reason: `repo 바인딩 불일치 — ${rb}`, phase: "awaiting-approval" }
   const manifestPath = join(dir, "manifest.json")
   const manifest = { ...canonicalManifest(d.block), planHash: d.planHash }
   if (existsSync(manifestPath)) {
@@ -666,6 +735,42 @@ export function watchdogExtend(root, slug, taskId, reason) {
   return { ok: true, taskId, extensions: task.watchdogExtensions.length }
 }
 
+// 워크스페이스 run에 멤버 repo를 등록: 검증(워크스페이스 하위 + git toplevel) → `<repo>/.harnie-wt/harnie-<slug>`
+// worktree 생성(멱등) → sentinel repos에 기록. key = 워크스페이스 상대경로(manifest task.repo가 참조).
+export function repoAdd(root, repoPathArg) {
+  if (typeof repoPathArg !== "string" || !repoPathArg) throw new FailClosed("repo-add: --repo <절대경로> 필요")
+  if (!isAbsolute(repoPathArg)) throw new FailClosed(`repo-add: --repo는 절대경로여야 함(${repoPathArg})`)
+  const ws = workspaceInfo(root)
+  if (!ws) throw new FailClosed("repo-add는 workspace run 전용 — 이 run의 active.json에 workspaceRoot 없음")
+  if (!existsSync(repoPathArg)) throw new FailClosed(`repo-add: 경로 없음(${repoPathArg})`)
+  const realRepo = realpathOf(repoPathArg)
+  const realWs = realpathOf(ws.workspaceRoot)
+  const rel = realRepo.startsWith(realWs + sep) ? realRepo.slice(realWs.length + 1) : null
+  if (rel == null) throw new FailClosed(`repo-add: repo가 워크스페이스(${ws.workspaceRoot}) 하위가 아님(${repoPathArg})`)
+  const key = rel.split(sep).join("/")
+  if (!REPO_KEY_RE.test(key)) throw new FailClosed(`repo-add: repo 키 형식 오류(${key})`)
+  let toplevel
+  try { toplevel = execFileSync("git", ["-C", realRepo, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() } catch { toplevel = null }
+  if (!toplevel || realpathOf(toplevel) !== realRepo)
+    throw new FailClosed(`repo-add: git repo toplevel이 아님(${repoPathArg}) — repo 루트 디렉터리를 지정하세요`)
+  const s0 = readJSONStrict(sentinelPath(root))
+  const branch = `harnie/${s0.slug}`
+  const { worktreePath, created } = createWorktree({ repo: realRepo, branch })
+  return withStateLock(root, () => {
+    const s = readJSONStrict(sentinelPath(root))
+    if (s.slug !== s0.slug || s.track !== s0.track) throw new FailClosed("repo-add 중 active run 변경됨(rollover) — fail-closed")
+    s.repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
+    const prev = s.repos[key]
+    if (prev && (prev.repo !== realRepo || prev.workroot !== worktreePath))
+      throw new FailClosed(`repo-add: key '${key}'가 이미 다른 경로로 등록됨(${JSON.stringify(prev)})`)
+    s.repos[key] = { repo: realRepo, workroot: worktreePath }
+    writeJSONAtomic(sentinelPath(root), s)
+    return { ok: true, key, repo: realRepo, workroot: worktreePath, created }
+  })
+}
+// realpath: macOS tmpdir symlink(/var→/private/var) 등으로 경로 문자열 비교가 어긋나는 것 방지
+function realpathOf(p) { return realpathSync(p) }
+
 export function registerReadonlyThread(root, track, slug, threadId) {
   return withStateLock(root, () => { // P1-3b: active.json RMW를 lock으로 직렬화 + rollover 감지
     const s = readJSONStrict(sentinelPath(root))
@@ -747,10 +852,13 @@ function cmdVerify({ flags }) {
   const state = readJSONOrNull(join(dir, "review", task.reviewUnit, "state.json"))
   const reviewedPostSHA = state && state.reviewedPostSHA
   if (!reviewedPostSHA) die(`task ${taskId}: reviewedPostSHA 없음(리뷰 APPROVE 후 검증) — fail-closed`)
-  const reviewedScopeHash = computeScopeHash(root, reviewedPostSHA, task.scope)
-  const preScope = computeScopeHash(root, captureTree(root), task.scope)
-  const results = task.verification.map((v) => runVerification(root, v))
-  const postScope = computeScopeHash(root, captureTree(root), task.scope)
+  // workspace run이면 이 task의 repo workroot가 git root(검증 cwd·scope 해시 기준)다.
+  const { gitRoot, reason } = resolveTaskGitRoot(root, task, workspaceInfo(root))
+  if (!gitRoot) die(`task ${taskId}: repo 바인딩 실패 — ${reason}`)
+  const reviewedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope)
+  const preScope = computeScopeHash(gitRoot, captureTree(gitRoot), task.scope)
+  const results = task.verification.map((v) => runVerification(gitRoot, v))
+  const postScope = computeScopeHash(gitRoot, captureTree(gitRoot), task.scope)
   if (preScope !== postScope) die(`task ${taskId}: 검증이 scope 소스를 변형함(scopeHash 불변 위반) — fail-closed`)
   const allPass = results.every((r) => r.exitCode === 0)
   const vacuousReasons = results.flatMap((r, i) => r.vacuousReasons.map((x) => `verification[${i}] ${r.executable} ${r.args.join(" ")}: ${x}`))
@@ -766,6 +874,10 @@ function cmdCompletion({ flags }) {
   const track = flags.track || "plan"
   const slug = flags.slug || die("--slug 필요")
   out(computeCompletion(root, track, slug))
+}
+
+function cmdRepoAdd({ flags }) {
+  out(repoAdd(flags.root || die("--root 필요"), flags.repo || die("--repo <레포 절대경로> 필요")))
 }
 
 function cmdSetTask({ flags }) {
@@ -816,6 +928,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "seal-verify": cmdSealVerify(args); break
       case "verify": cmdVerify(args); break
       case "completion": cmdCompletion(args); break
+      case "repo-add": cmdRepoAdd(args); break
       case "set-task": cmdSetTask(args); break
       case "watchdog-extend": cmdWatchdogExtend(args); break
       case "set-phase": cmdSetPhase(args); break

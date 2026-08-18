@@ -111,6 +111,15 @@ B6. Report + 완료 재도출 — manifest 순회로 완료 판정 + 완료 상�
 - **Final Wave 게이트**: **Coverage**(요구를 전부 충족했나 — under-build 차단) ↔ **Scope**(요청 범위만 — over-build 차단)가 대칭, **Quality**(정확성·안전성·과설계), **Runtime**(실제 실행 검증).
 - **승인 게이트 前에 코드를 쓰지 않는다** — 이 불변식은 plan 트랙의 강제 훅이 기계화한다([execution-state.md](execution-state.md)).
 
+### 워크스페이스 run (멀티레포, v0.4.0)
+
+plan 트랙은 **비-git 워크스페이스 디렉터리**(repo 여러 개를 담은 부모, 예: `~/Tradlinx`)에서도 시작할 수 있다. 이때 run root는 git worktree가 아니라 `<workspace>/.harnie-wt/harnie-<slug>/` **평범한 디렉터리**이고, sentinel에 `workspaceRoot`와 `repos`(키→`{repo, workroot}`) 레지스트리가 실린다. 핵심 결정:
+
+- **레포별 worktree**: 작업이 수정할 각 repo는 승인 게이트 前에 `execution.mjs repo-add`로 등록한다(워크스페이스 하위 + git toplevel 검증 → `<repo>/.harnie-wt/harnie-<slug>` worktree 생성 → sentinel 기록). manifest task는 `repo: "<key>"`로 자기 repo에 바인딩되고(all-or-none), scope 해시·verify cwd·빌더 cwd·capture/delta가 전부 그 workroot 기준이다.
+- **합성 전체-tree 아티팩트**: Final Wave 게이트의 whole-tree 바인딩은 단일 tree SHA 대신 등록된 멤버 workroot들의 captureTree를 키 정렬로 합성한 `ws:<sha256>`(delta.mjs `captureWorkspaceTree`). 어느 멤버가 변해도 값이 바뀌어 게이트 재실행이 강제된다. task 단위 CR 아티팩트는 자기 멤버 repo의 40-hex tree이며, loop.mjs는 신선도(현재 tree와 일치)만 보고 task↔repo 권위 바인딩은 execution.mjs가 manifest repo 키 + scope 해시로 재검증한다(소유권 분리, DR-011 연장).
+- **워크스페이스 root는 게이트 없음**: `<workspace>` 자체에는 `active.json`을 절대 만들지 않는다 — 남는 것은 세션→run 바인딩 포인터(`.harnie/sessions/`)와 세션-스코프 pending-route뿐이라, 같은 워크스페이스의 다른 세션·다른 작업은 이 run에 의해 잠기지 않는다.
+- **가드 확장**: sanctioned CLI의 loop/worktree 대상과 빌더 codex cwd 허용 집합에 등록 멤버 workroot(및 그 하위 task worktree)가 추가된다. `execution.mjs --root`는 여전히 run root만이다.
+
 ---
 
 ## 6. `/harnie:dev` 라우터 + 트랙 스킬

@@ -13,7 +13,7 @@ import {
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
   setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
-  detectVacuous, loadContext,
+  detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
 } from "./execution.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -788,4 +788,99 @@ test("verify: 등록 후 테스트가 사라지면 런타임에 vacuous → 완�
   const c = run(["completion", "--root", root, "--slug", "feat-x"])
   assert.equal(c.complete, false)
   assert.ok(c.blockers.some((b) => /공허함/.test(b)), c.blockers.join("; "))
+})
+
+// ── 워크스페이스 run(멀티레포) ────────────────────────────────────────────
+function childRepo(w, name) {
+  const repo = join(w, name)
+  execFileSync("git", ["init", "-q", repo])
+  execFileSync("git", ["-C", repo, "config", "user.email", "t@t"])
+  execFileSync("git", ["-C", repo, "config", "user.name", "t"])
+  mkdirSync(join(repo, "src"), { recursive: true })
+  writeFileSync(join(repo, "src", "a.txt"), "a\n")
+  execFileSync("git", ["-C", repo, "add", "."])
+  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "init"])
+  return repo
+}
+function workspaceRun(base = "ws-task") {
+  const w = mkdtempSync(join(tmpdir(), "harnie-ws-exec-"))
+  const repo = childRepo(w, "repoA")
+  const runRoot = join(w, ".harnie-wt", `harnie-${base}`)
+  mkdirSync(runRoot, { recursive: true })
+  const { slug } = bootstrapRun(runRoot, { base, track: "plan", sessionId: "s1", workspaceRoot: w })
+  return { w, repo, runRoot, slug }
+}
+function plainRun(base) {
+  const plain = gitRepo()
+  writeFileSync(join(plain, "f.txt"), "x\n")
+  execFileSync("git", ["-C", plain, "add", "."])
+  execFileSync("git", ["-C", plain, "commit", "-q", "-m", "init"])
+  bootstrapRun(plain, { base, track: "plan", sessionId: "s1" })
+  return plain
+}
+
+test("repoAdd: 검증(워크스페이스 하위·toplevel) 후 worktree 생성 + sentinel 등록(멱등)", () => {
+  const { w, repo, runRoot, slug } = workspaceRun()
+  const r1 = repoAdd(runRoot, repo)
+  assert.equal(r1.ok, true)
+  assert.equal(r1.key, "repoA")
+  assert.equal(r1.workroot, join(r1.repo, ".harnie-wt", `harnie-${slug}`))
+  assert.ok(existsSync(join(r1.workroot, ".git"))) // git worktree
+  const ws = workspaceInfo(runRoot)
+  assert.equal(ws.workspaceRoot, w)
+  assert.deepEqual(Object.keys(ws.repos), ["repoA"])
+  const r2 = repoAdd(runRoot, repo) // 재호출 = 멱등(attach)
+  assert.equal(r2.created, false)
+  assert.equal(r2.workroot, r1.workroot)
+})
+
+test("repoAdd: 비-workspace run·워크스페이스 밖·비-toplevel은 fail-closed", () => {
+  const plain = plainRun("t1")
+  assert.throws(() => repoAdd(plain, plain), /workspace run 전용/)
+
+  const { repo, runRoot } = workspaceRun("ws-neg")
+  const outside = gitRepo()
+  assert.throws(() => repoAdd(runRoot, outside), /하위가 아님/)
+  assert.throws(() => repoAdd(runRoot, join(repo, "src")), /toplevel이 아님/)
+})
+
+test("validateManifest: task.repo 형식·all-or-none", () => {
+  const t = (over) => ({ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/"], verification: VER(), ...over })
+  const t2 = (over) => ({ id: "T2", deps: [], reviewUnit: "task-b", scope: ["src/"], verification: VER(), ...over })
+  assert.deepEqual(validateManifest({ tasks: [t({ repo: "repoA" }), t2({ repo: "nested/repoB" })], gates: GATES }), [])
+  assert.ok(validateManifest({ tasks: [t({ repo: "../evil" }), t2({ repo: "x" })], gates: GATES }).some((e) => /repo 형식 오류/.test(e)))
+  assert.ok(validateManifest({ tasks: [t({ repo: "a/../b" }), t2({ repo: "x" })], gates: GATES }).some((e) => /repo 형식 오류/.test(e)))
+  assert.ok(validateManifest({ tasks: [t({ repo: "/abs" }), t2({ repo: "x" })], gates: GATES }).some((e) => /repo 형식 오류/.test(e)))
+  assert.ok(validateManifest({ tasks: [t({ repo: "repoA" }), t2({})], gates: GATES }).some((e) => /all-or-none/.test(e)))
+})
+
+test("validateRepoBinding: workspace run은 등록 repo와 정합해야, 비-workspace run은 repo 금지", () => {
+  const { repo, runRoot } = workspaceRun("ws-bind")
+  repoAdd(runRoot, repo)
+  const block = (repoKey) => ({ tasks: [{ id: "T1", repo: repoKey }], gates: [] })
+  assert.equal(validateRepoBinding(runRoot, block("repoA")), null)
+  assert.match(validateRepoBinding(runRoot, block("repoB")) || "", /미등록/)
+  assert.match(validateRepoBinding(runRoot, { tasks: [{ id: "T1" }], gates: [] }) || "", /repo 키 필수/)
+  const plain = plainRun("t2")
+  assert.match(validateRepoBinding(plain, block("repoA")) || "", /workspace run에서만/)
+})
+
+test("completion: workspace run — 멤버 repo 바인딩으로 스냅샷 산출, 미등록 repo는 바인딩 실패 blocker", () => {
+  const { repo, runRoot, slug } = workspaceRun("ws-comp")
+  repoAdd(runRoot, repo)
+  const manifest = {
+    tasks: [
+      { id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a.txt"], verification: VER(), repo: "repoA" },
+      { id: "T2", deps: [], reviewUnit: "task-b", scope: ["src/a.txt"], verification: VER(), repo: "ghost" },
+    ],
+    gates: GATES,
+    planHash: "PH",
+  }
+  const dir = join(runRoot, ".harnie", "plan", slug)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n")
+  const c = run(["completion", "--root", runRoot, "--slug", slug])
+  assert.equal(c.complete, false)
+  assert.ok(c.blockers.some((b) => /task T1: ledger 없음/.test(b)), c.blockers.join("; "))
+  assert.ok(c.blockers.some((b) => /task T2: repo 바인딩 실패/.test(b)), c.blockers.join("; "))
 })

@@ -2,9 +2,11 @@
 
 > `skills/dev-full/SKILL-ko.md`에서 PHASE A로 진입할 때 이 파일을 읽는다. 그 파일의 Step 0·상태 위치·위임 참조 규칙·실행 상태/강제 훅·Notepad 프로토콜 섹션은 이미 읽었다고 전제한다 — 여기서 재서술하지 않는다.
 
-**A0. 활성 run 채택(자체 init 금지).** bootstrap 훅의 컨텍스트 메시지에서 run 워크루트인 `<repo>`를 해석하고, 필요하면 `<main repo>/.harnie/sessions/<이 세션의 id>.json`에서 복구한다. bootstrap 훅이 그곳에 이미 이 호출의 `<repo>/.harnie/active.json`과 `execution.json`을 만들었다(phase=planning). 그 워크루트의 `.harnie/active.json`을 읽어 `track === "plan"` 확인 후 그 `slug`를 전 구간에 쓴다. 없거나 손상이면 **중단하고 bootstrap 실패 보고** — 절대 `execution.mjs init`으로 복구하지 않는다. sentinel이 있으므로 강제 훅이 승인 前 소스 쓰기·write 서브에이전트·workspace-write codex를 차단한다.
+**A0. 활성 run 채택(자체 init 금지).** bootstrap 훅의 컨텍스트 메시지에서 run 워크루트인 `<repo>`를 해석하고, 필요하면 `<main repo>/.harnie/sessions/<이 세션의 id>.json`에서 복구한다. bootstrap 훅이 그곳에 이미 이 호출의 `<repo>/.harnie/active.json`과 `execution.json`을 만들었다(phase=planning). 그 워크루트의 `.harnie/active.json`을 읽어 `track === "plan"` 확인 후 그 `slug`를 전 구간에 쓴다. 없거나 손상이면 **중단하고 bootstrap 실패 보고** — 절대 `execution.mjs init`으로 복구하지 않는다. sentinel이 있으므로 강제 훅이 승인 前 소스 쓰기·write 서브에이전트·workspace-write codex를 차단한다. bootstrap 컨텍스트 메시지가 WORKSPACE run으로 플래그되면, `SKILL.md`의 실행 상태 절에서 워크스페이스-run 규칙을 읽는다 — 그것이 이 전 단계와 다음 단계 양쪽에서 scope·검증·빌더·capture 대상을 어디로 두는지 바꾼다.
 
 마지막으로 **run 난이도**를 고정한다: `/harnie:dev` 라우터가 announce한 easy/medium/hard를 계승하거나, 직접 진입이면 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2의 rubric으로 지금 판정한다. announce하고 `plan.md`에 기록한다(예: `## Run Difficulty` 한 줄). run당 1회 판정 후 고정하며, 아래 **생산자 모델**(A4 디자이너, B2/B2′ 빌더)을 티어링한다 — **리뷰어 모델은 절대 티어링하지 않는다**.
+
+**A0.5 (워크스페이스 run에만 해당). A1이 판정하는 대로 이 task가 수정할 각 repo를 승인 gate 前에 등록한다.** A1의 grounding이 워크스페이스 아래 어느 repo를 실제로 수정할지 판정하면, 각각에 대해 `node <ROOT>/scripts/execution.mjs repo-add --root <repo> --repo <절대 repo 경로>`를 실행한다. 이 호출이 그 repo의 전용 worktree를 만들고, `{key, workroot}` 쌍을 run state의 `repos` registry에 기록한다. `plan.md`에 이 `{key, workroot}` 쌍들을 기록해라. 모든 manifest task는 나중에 이 집합에서 `"repo": "<key>"`를 지명해야 하고, `arm-approval`이 미등록 key를 감지하면 fail-closed된다. 같은 repo에 대해 재실행해도 멱등하다 — 기존 worktree에 attach된다.
 
 **A1. 범위비례 조사로 그라운딩.** `harnie-scout`(haiku)를 **병렬**로 스폰해 조사한다. 아래 각 항목에 대해 먼저 **존재·관련성**을 확인하고, **관련 있는 것만 충분히 깊게** 추적한다(무관한 영역까지 깊게 파는 건 scope inflation):
 

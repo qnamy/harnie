@@ -82,7 +82,7 @@ export function isActiveTaskWorktree(root, slug, candidate) {
   return dirname(target) === parent && new RegExp(`^harnie-${escapedSlug}-t[A-Za-z0-9._-]+$`).test(basename(target))
 }
 
-function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
+function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots = [] }) {
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return false
   const toks = String(cmd || "").trim().split(/\s+/)
   if (toks[0] !== "node") return false
@@ -91,11 +91,14 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
   if (!trustedClis.has(scriptAbs)) return false
   if (activeRoot == null) return true
   const root = resolve(activeRoot)
+  // workspace run(멀티레포): 등록된 멤버 repo workroot도 loop/worktree의 유효 대상이다(활성 run root 외).
+  const roots = [root, ...memberRoots.map((r) => resolve(r))]
   const rest = toks.slice(2)
   const flagVal = (name) => { const i = rest.lastIndexOf(name); return i >= 0 ? rest[i + 1] : undefined }
-  const isRepo = (v) => v !== undefined && resolve(root, v) === root
-  const isRepoOrTaskWt = (v) => isRepo(v) || (v !== undefined && activeSlug != null && isActiveTaskWorktree(root, activeSlug, resolve(root, v)))
-  if (scriptAbs.endsWith("execution.mjs")) return isRepo(flagVal("--root"))
+  const isActiveRoot = (v) => v !== undefined && resolve(root, v) === root
+  const isRepo = (v) => v !== undefined && roots.includes(resolve(root, v))
+  const isRepoOrTaskWt = (v) => isRepo(v) || (v !== undefined && activeSlug != null && roots.some((rt) => isActiveTaskWorktree(rt, activeSlug, resolve(root, v))))
+  if (scriptAbs.endsWith("execution.mjs")) return isActiveRoot(flagVal("--root"))
   if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRepoOrTaskWt(flagVal("--root")) : isRepoOrTaskWt(rest[1])
   if (scriptAbs.endsWith("worktree.mjs")) return isRepo(flagVal("--repo"))
   return false
@@ -112,9 +115,9 @@ function isAutoAllowSanctionedSub(cmd) {
   for (const [name, subs] of Object.entries(AUTO_ALLOW_SUB)) if (script.endsWith(name) && subs.has(sub)) return true
   return false
 }
-export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
+export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null, memberRoots = [] }) {
   const cmd = String(command || "")
-  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug })) {
+  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
   }
@@ -133,8 +136,8 @@ export function decideTask({ subagentType, phase }) {
   return { deny: false }
 }
 
-// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/task worktree cwd만 허용한다.
-export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false }) {
+// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/멤버 workroot/task worktree cwd만 허용한다.
+export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, memberRoots = [] }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
     if (!isReply) {
@@ -150,8 +153,11 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
     if (sandbox === "read-only") return { deny: false }
     if (sandbox !== "workspace-write")
       return { deny: true, reason: `빌더 codex sandbox는 정확히 "workspace-write"만(${JSON.stringify(sandbox)} 차단 — danger-full-access·미지정 불가)` }
-    if (cwd == null || root == null || (cwd !== root && !isActiveTaskWorktree(root, slug, cwd)))
-      return { deny: true, reason: `빌더 codex cwd는 활성 repo root 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)} 또는 그 task worktree)` }
+    const allowedCwd = cwd != null && root != null &&
+      (cwd === root || isActiveTaskWorktree(root, slug, cwd) ||
+        memberRoots.some((m) => cwd === m || isActiveTaskWorktree(m, slug, cwd)))
+    if (!allowedCwd)
+      return { deny: true, reason: `빌더 codex cwd는 활성 repo root·등록된 멤버 repo workroot 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)}·등록 멤버 workroot 또는 그 task worktree)` }
     if (!hasBuildingUnbound)
       return { deny: true, reason: "빌더 workspace-write 호출은 building·미바인딩 task가 있을 때만(set-task로 표시 후) — 임의 쓰기 차단" }
     return { deny: false }

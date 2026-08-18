@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { mkdtempSync, writeFileSync, rmSync, renameSync, mkdirSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { captureTree, computeDelta } from "./delta.mjs"
+import { captureTree, captureWorkspaceTree, computeDelta } from "./delta.mjs"
 
 const sh = (repo, ...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" })
 let pass = 0, fail = 0
@@ -52,6 +52,22 @@ writeFileSync(join(repo, "sneaky.txt"), "out of scope\n")
 const d2 = computeDelta(repo, baseline, { expectScope: ["tracked.txt"] })
 t("scope 밖 변경 감지(외부/동시 변경)", () => assert.ok(d2.outOfScope.includes("sneaky.txt")))
 
+// ── captureWorkspaceTree(워크스페이스 run 합성 아티팩트) ──
+const repoB = mkdtempSync(join(tmpdir(), "harnie-fx-b-"))
+sh(repoB, "init", "-q"); sh(repoB, "config", "user.email", "t@t"); sh(repoB, "config", "user.name", "t")
+writeFileSync(join(repoB, "b.txt"), "b\n")
+sh(repoB, "add", "-A"); sh(repoB, "commit", "-qm", "init")
+
+const reposMap = { "a": { workroot: repo }, "b": { workroot: repoB } }
+const ws1 = captureWorkspaceTree(reposMap)
+t("captureWorkspaceTree: ws:<sha256> 형식", () => assert.ok(/^ws:[0-9a-f]{64}$/.test(ws1)))
+t("captureWorkspaceTree: 키 순서 무관 결정적", () =>
+  assert.equal(captureWorkspaceTree({ "b": { workroot: repoB }, "a": { workroot: repo } }), ws1))
+writeFileSync(join(repoB, "b.txt"), "b\nCHANGED\n")
+t("captureWorkspaceTree: 멤버 repo 변경이 합성값을 바꿈", () => assert.notEqual(captureWorkspaceTree(reposMap), ws1))
+t("captureWorkspaceTree: 빈 repos는 null", () => assert.equal(captureWorkspaceTree({}), null))
+
 rmSync(repo, { recursive: true, force: true })
+rmSync(repoB, { recursive: true, force: true })
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail ? 1 : 0)

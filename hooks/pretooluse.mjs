@@ -58,7 +58,7 @@ try {
       const d = decideWriteEdit({ relPath: rel, phase, track, slug, outside })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, memberRoots: ctx.memberWorkroots || [] })
       if (d.deny) denyPreTool(d.reason)
       else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal-verify) — active repo 바인딩·경로 containment 검증됨")
       else allow()
@@ -72,6 +72,7 @@ try {
           isReply, sandbox: input.sandbox, cwd: input.cwd, root, slug, threadId: input.threadId, phase,
           readOnlyThreads: ctx.readOnlyThreads || [], builderThreads: ctx.builderThreads || [],
           hasBuildingUnbound: ctx.failClosed ? false : buildingUnboundTasks(root, slug).length > 0,
+          memberRoots: ctx.memberWorkroots || [],
         })
         if (d.deny) denyPreTool(d.reason)
         // 워치독은 advisory다. 자체 읽기·판정 오류가 권위 가드의 fail-closed 경로로 새지 않게 독립적으로 무시한다.

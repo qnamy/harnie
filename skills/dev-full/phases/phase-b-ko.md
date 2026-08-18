@@ -1,6 +1,8 @@
 # PHASE B — EXECUTE (실행 단계)
 
-> `skills/dev-full/SKILL-ko.md`에서 PHASE B로 진입할 때 이 파일을 읽는다. 그 파일의 Step 0·상태 위치·위임 참조 규칙·실행 상태/강제 훅·Notepad 프로토콜 섹션은 이미 읽었다고 전제한다 — 여기서 재서술하지 않는다. 이 파일은 B1과 **직렬 경로**(B2~B3), 그리고 **두 경로 공통** 단계(B4~B6)를 다룬다. **병렬 경로**(B2′~B3′)는 대신 `phases/phase-b-parallel.md`를 읽고, B4로 돌아올 때 이 파일로 복귀한다.
+> `skills/dev-full/SKILL-ko.md`에서 PHASE B로 진입할 때 이 파일을 읽는다. 그 파일의 Step 0·상태 위치·위임 참조 규칙·실행 상태/강제 훅·Notepad 프로토콜 섹션은 이미 읽었다고 전제한다 — 여기서 재서술하지 않는다. 이 파일은 B1과 **직렬 경로**(B2~B3), 그리고 **두 경로 공통** 단계(B4~B6)를 다룬다. **병렬 경로**(B2′~B3′)는 대신 `phases/phase-b-parallel-ko.md`를 읽고, B4로 돌아올 때 이 파일로 복귀한다.
+>
+> **워크스페이스 run(멀티레포):** 이 파일이 **git tree로서의 run worktree**를 언급할 때마다(빌더 `cwd`, `loop.mjs capture`/`delta` 대상, task-branch worktree) — **그 task의 멤버 repo workroot** (`<member repo>/.harnie-wt/harnie-<slug>`, sentinel의 `repos` registry에서) 로 대체한다. task가 어느 것인지는 manifest의 그 task `repo` key가 지명한다. 리뷰 상태 경로(`<repo>/.harnie/plan/<slug>/review/…`), 모든 `execution.mjs` 호출, `loop.mjs apply --root`는 run workroot `<repo>`를 계속 쓴다. 전체-run artifact는 B5 gate를 위해 `loop.mjs capture <repo>` → `ws:<sha256>` (모든 멤버 워크루트 합성). 다른 멤버 repo의 task는 구조상 disjoint scope를 갖으므로, B1의 겹침 검사는 각 repo 내에서만 적용된다.
 
 **B1. 플랜 파싱 → 작업별 파일 스코프 부여 → 실행 경로 선택.** manifest의 모든 태스크는 이미 `scope`(만질 경로, A4의 `harnie-manifest` 스키마)를 선언한다 — **경로만, glob 아님**: `loop.mjs delta`의 `outOfScope` 검사는 변경된 각 경로를 정확 일치 또는 디렉터리-접두어로만 대조하지 glob 확장을 하지 않으므로, 와일드카드 항목을 넣으면 실제 변경 전부가 범위 밖으로 오탐된다. 위임 前에 모든 태스크 쌍의 `scope`가 **비중첩**인지 확인한다 — 어떤 경로도 두 태스크의 `scope`에 동시에 나오거나(또는 한쪽의 상위/하위 디렉터리이거나) 하면 안 된다. 겹치면 분해 실패다: A4로 돌아가 겹치지 않게 manifest를 고치고 A5 승인을 다시 받은 뒤 진행한다. 비중첩 스코프는 병렬 실행의 **전제조건**이며, 여기서 한 번 확인하는 것이지 런타임 가드가 아니다.
 

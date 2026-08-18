@@ -864,6 +864,34 @@ test("PostToolUse: owner(sessionId 일치)의 등록·승인 흐름은 그대로
   assert.ok(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).readOnlyThreads.includes(rid))
 })
 
+// ── 워크스페이스 run 통합(멀티레포) ──────────────────────────────────────
+test("워크스페이스 run: 오너 세션 승인 전 멤버 repo 쓰기 deny·run 상태 쓰기 allow, 타 세션은 워크스페이스에서 게이트 없음", () => {
+  const w = mkdtempSync(join(tmpdir(), "harnie-hooks-ws-"))
+  const repoA = join(w, "repoA")
+  execFileSync("git", ["init", "-q", repoA])
+  execFileSync("git", ["-C", repoA, "config", "user.email", "t@t"])
+  execFileSync("git", ["-C", repoA, "config", "user.name", "t"])
+  mkdirSync(join(repoA, "src"), { recursive: true }); writeFileSync(join(repoA, "src", "x.js"), "x")
+  execFileSync("git", ["-C", repoA, "add", "."])
+  execFileSync("git", ["-C", repoA, "commit", "-q", "-m", "init"])
+  const own = { cwd: w, session_id: "s-ws" }
+  // 실제 bootstrap 훅으로 workspace run 생성(세션 바인딩 포함)
+  hook(BOOT, { hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full ws hook task", ...own })
+  const slug = slugify("ws hook task")
+  const runRoot = worktreeDirFor(w, `harnie/${slug}`)
+  assert.ok(existsSync(join(runRoot, ".harnie", "active.json")))
+  const added = exec(["repo-add", "--root", runRoot, "--repo", repoA])
+  assert.equal(added.key, "repoA")
+  // 오너 세션: 승인 전 멤버 workroot 소스 쓰기 deny(워크스페이스 안은 전부 승인-전 게이트)
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(added.workroot, "src", "n.js") }, ...own })))
+  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(w, "somewhere.txt") }, ...own })))
+  // 오너 세션: run 상태 산출물(plan.md)은 allow
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(runRoot, ".harnie", "plan", slug, "plan.md") }, ...own }), null)
+  // 다른 세션: 같은 워크스페이스 아무 데나 써도 게이트 없음(W에 active.json이 없으므로 비활성)
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(w, "other-session.txt") }, cwd: w, session_id: "s-other" }), null)
+  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(repoA, "src", "x.js") }, cwd: repoA, session_id: "s-other" }), null)
+})
+
 test("owner 미기록 sentinel(구버전·stale): 식별된 세션은 잠그지 않고, session_id 부재 payload만 fail-closed", () => {
   const { root } = setupRepo() // sentinel에 owner 기록 없음(구버전 스키마/stale run)
   // 실측 사고 회귀 감시: harnie를 실행한 적 없는 세션이 "빈 목록 = 전원 owner" 폴백으로
