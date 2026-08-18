@@ -14,6 +14,8 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 
 **`${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md`를 지금 Read한다** — 너(main)가 직접 조율하는 CLI/Codex 배선(R1~R5)을 이 세션에 올린다. 스키마·리뷰 기준·작성 프로필 문서는 미리 로드할 필요가 **없다**: `harnie-designer`·`harnie-reviewer`와 Codex 리뷰어/빌더는 각각 아래에서 넘기는 경로(A3/A4, B2/B2′, B3/B3′/B5 — 아래 phase 파일 참조)에서 자기 기준과 프로필을 직접 Read한다 — 그 파일들 내용을 위임 프롬프트에 인라인으로 싣지 않는다. `${CLAUDE_PLUGIN_ROOT}/instructions/loop.md`에 대해서는 `apply`의 출력(`machineState`, `needsReRequest`, `needsReentry`, `review-loop-driver.md` R4 참조)만 대응하면 되며, 전체 상태머신 유도를 로드할 필요는 없다.
 
+> **모델 배정**: 이 run의 모든 위임은 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md`를 따른다: **run 난이도**(easy/medium/hard — `/harnie:dev` 라우터가 announce하거나 직접 진입 시 A0에서 판정)가 **생산자 모델**(Codex 빌더, DETAIL 고도의 `harnie-designer`)을 티어링한다; 리뷰어 모델은 고정이다(설계 리뷰 = `gpt-5.6-sol`, 코드 리뷰 = opus로 고정된 `harnie-reviewer`); A3 정식 아키텍처 설계는 항상 **fable**을 쓴다(폴백 opus). phase 파일이 각 호출 지점의 구체값을 다시 적는다.
+
 > **대칭 크로스-모델**(각 단계 반대 프로바이더가 리뷰): **설계**(A3·A4) = Claude(`harnie-designer`) 산출 → **Codex** 리뷰 / **개발**(B2·B3·Final Wave) = **Codex** 빌더(codex MCP, `workspace-write`) 산출 → **Claude** 리뷰. codex MCP 툴명은 설치 형태에 따라 `mcp__plugin_harnie_codex__codex`/`mcp__codex__codex`, 재빌드·재리뷰는 `*__codex-reply`. 자세한 배선은 review-loop-driver.md.
 
 ## Phase 파일 — 그 phase에 진입할 때 해당 파일만 읽는다

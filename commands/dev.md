@@ -11,9 +11,13 @@ You are the harnie router. Classify the task's **size and risk** and select a tr
 - **quick track**: Incident fixes, small changes, and localized bug fixes. No new component or module, no boundary or contract change, and no architecture decision required.
 - **plan track**: New features or modules, changes across multiple boundaries or contracts, decisions about data ownership or technology selection, or an explicit request for "design."
 - When uncertain, favor the **larger plan track**. Catching design errors before implementation is central to harnie.
+- The track boundary is the **design altitude** (`${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1): any ARCH-altitude trigger — a new component/module, a boundary or contract change, a data-ownership or technology decision — belongs to the plan track; the quick track handles DETAIL-altitude design only.
+
+## Run Difficulty (judged once, alongside the track)
+Alongside the track, judge the run's difficulty — **easy / medium / hard** — using the rubric in `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2. Track and difficulty are independent axes: a quick-track bugfix can be medium. This judgment happens **once**, here; the track skill inherits it (announced in Action 1) instead of re-judging, and it selects **producer** models (Codex builder, designer) for the whole run per `model-matrix.md` §3 — reviewer models stay fixed.
 
 ## Actions
-1. Restate the task in one line and announce **the selected track and why**.
+1. Restate the task in one line and announce **the selected track, the run difficulty (easy/medium/hard), and why**.
 2. Explain the override path: "To force a different track, use `/harnie:dev-quick` or `/harnie:dev-full`."
 3. **Resolve the target repo (multi-repo entry).** If the current working directory is not itself a git repository — for example a parent workspace folder containing several repos (like `~/Tradlinx`) — do not guess a target:
    - List the immediate child directories (depth 1–2) that are git repositories.

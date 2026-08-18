@@ -28,11 +28,11 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 기준은 프로바이더와 무관하게 동일하다(이미 읽은 `loop.md` 스키마 + 해당 리뷰 기준: 코드는 `code-review.md`·`verification-tiers.md`, 설계는 `design-review.md`를 호출자가 명시한 고도로). 메커니즘만 다르다.
 
 **리뷰어가 Codex일 때(설계 루프):** 리뷰 대상이 설계 문서이므로 (R1에 따라) **git delta가 없다** — 경로를 전달한다, 내용을 전달하지 않고.
-- **첫 리뷰:** codex MCP `codex` 툴을 `sandbox:"read-only"`, `cwd:<repo>`, 고성능 모델로 호출한다. `developer-instructions`에 기준을 싣는다. 프롬프트에는 작업 의도·제약·**설계 파일의 절대경로**(`design.md`/`plan.md`의 해당 섹션), 읽기 前 리뷰하는 명시적 지시를 담는다 — `sandbox:"read-only"`는 쓰기만 거부하고, 읽기는 성공한다. 응답의 **threadId를 기록**한다.
+- **첫 리뷰:** codex MCP `codex` 툴을 `sandbox:"read-only"`, `cwd:<repo>`, 고정 리뷰 티어 모델(`model:"gpt-5.6-sol"` — **리뷰어 모델은 절대 티어링하지 않는다**, `model-matrix.md` §3; 모델 선택이 불가능하면 설치 기본값)로 호출한다. `developer-instructions`에 기준을 싣는다. 프롬프트에는 작업 의도·제약·**설계 파일의 절대경로**(`design.md`/`plan.md`의 해당 섹션), 읽기 前 리뷰하는 명시적 지시를 담는다 — `sandbox:"read-only"`는 쓰기만 거부하고, 읽기는 성공한다. 응답의 **threadId를 기록**한다.
 - **재리뷰:** 같은 threadId로 `codex-reply`를 호출한다. git delta가 아니라 **개정된 설계의 경로와 바뀐 섹션 이름 목록**을 준다 — 내용이 아니라, stateful thread가 이미 이전 리뷰를 갖고 있으므로. 루프 안에서 stateless `codex review`를 반복 실행하지 않는다 — 매번 전체 컨텍스트를 다시 읽으면 비용이 무한정 늘어난다.
 
 **리뷰어가 Claude일 때(코드 루프):**
-- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
+- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
 - 같은 방식으로 stateful하게 유지한다: 이전 ledger의 경로를 가리켜 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
 - REJECT 편향을 적용한다. 리뷰어는 빌더의 프로바이더와 달라야 하며 read-only여야 한다(쓸 수 있는 코드 리뷰어는 리뷰어가 아니다).
 
