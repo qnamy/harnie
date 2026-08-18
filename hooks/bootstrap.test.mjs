@@ -1,5 +1,5 @@
 // bootstrap.mjs 훅 통합 테스트 — stdin 이벤트로 구동, exit code(0=ok/no-op, 2=fail-closed)와 sentinel 효과 검증.
-// 설계: docs/bootstrap-adherence.md + T2(worktree-per-run, docs/plans/parallel-dev/design.md DEC-001).
+// 설계: docs/bootstrap-adherence.md + T2(worktree-per-run).
 // bootstrap은 stdout JSON이 아니라 exit code로 invocation을 통과/차단한다. dev-full의 run 상태는 이제 main
 // root가 아니라 `<root>/.harnie-wt/harnie-<slug>` worktree 안에 산다 — active()는 그 경로를 봐야 한다.
 import { test } from "node:test"

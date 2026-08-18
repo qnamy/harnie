@@ -45,6 +45,6 @@ harnie 구현이 의존하는 외부 메커니즘의 **확정 사실**. codex �
 - **이 스파이크가 Blocking #1도 재현**: `design.md`를 `.harnie/`에 두면 delta가 항상 빈값 → 설계 루프는 git-delta 대신 **설계 내용 주입**으로 계약 수정(review-loop-driver.md R1).
 
 ## 미검증 (다음)
-- **스왑 풀 루프 E2E (B, 다음 단계)**: Codex 빌더 REJECT→codex-reply 수정→Claude 리뷰 APPROVE 1사이클 end-to-end는 미실행(구성요소는 개별 검증). 이는 **배포(⑦) 前 반드시 통과해야 하는 P0 게이트**이며 **지금 다음 단계**다(PROJECT-STATUS §6과 일치).
+- **스왑 풀 루프 E2E (B)**: Codex 빌더 REJECT→codex-reply 수정→Claude 리뷰 APPROVE 1사이클 end-to-end. 이 문서 작성 시점에는 미실행이었으나 **2026-08-10 통과 완료**(배포 ⑦ 前 P0 게이트였음).
 - **플러그인 설치 검증(⑦)**: 위 E2E는 **로컬 .mcp.json**(툴명 `mcp__codex__codex`)로 수행하므로, 개인 GitHub push 후 **플러그인 설치** 시 `mcp__plugin_harnie_codex__*`로 뜨는지는 배포 단계(⑦)에서 별도 확인(B와 분리).
 - 스킬(`quick`/`plan`)이 플러그인 로드 상태에서 `${CLAUDE_PLUGIN_ROOT}` 치환·canonical Read 주입까지 포함해 end-to-end로 도는 라이브 실행도 ⑦에서 확인(현재는 스크립트·codex 메커니즘 단위로 검증).
