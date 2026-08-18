@@ -10,12 +10,12 @@
 
 **`<repo>`는 이번 호출의 루프가 관계하는 그 루트이지, 항상 활성 run의 루트인 것은 아니다.** quick·plan의 모든 호출은 단일 활성 run의 repo 루트를 쓴다. dev-full의 병렬 PHASE B가 유일한 예외다 — 태스크가 run 브랜치로 merge되기 前, 그 태스크의 머지 前 설계·코드 리뷰 루프는 `<repo>`를 그 태스크의 **격리된 git worktree**(`scripts/worktree.mjs`가 만든 별개의 repo 루트, run worktree 자신의 `.harnie/plan/<slug>/review/<unit>/`와는 별개)로 두고 돈다. 아래 R1~R5는 그 외엔 동일하며, `<repo>`에 대입되는 절대경로만 다르다. 언제 적용되는지는 `skills/dev-full/SKILL.md` PHASE B(B2′/B3′) 참조.
 
-**producer의 수정(라운드 사이):** 설계 루프에서는 Claude designer가 개정한다. 코드 루프에서는 **Codex 빌더**가 `codex-reply`(stateful, `workspace-write`)로 쓰고 개정한다 — 승인된 설계(`<dir>`의 `design.md` 또는 plan의 `plan.md`)를 프롬프트로 받아 리뷰된 설계대로 짓는다. R1은 프로바이더와 무관하게 producer가 쓴 것을 그대로 캡처한다.
+**producer의 수정(라운드 사이):** 설계 루프에서는 Claude designer가 개정한다. 코드 루프에서는 **Codex 빌더**가 `codex-reply`(stateful, `workspace-write`)로 쓰고 개정한다 — 승인된 설계(`<dir>`의 `design.md` 또는 plan의 `plan.md`)를 프롬프트로 받아 리뷰된 설계대로 짓는다. R1은 프로바이더와 무관하게 producer가 쓴 것을 그대로 캡처한다. **빌더의 응답은 짧게 유지한다**: 구현의 소스를 응답에 붙여넣으면 안 된다 — 변경은 디스크에서 검증하지, 응답 텍스트에서 하지 않는다 — 그래서 여섯 섹션 보고서가 대략 50줄 정도 유지되어야 한다.
 
 모든 codex/codex-reply MCP 호출은 `approval-policy:"never"`를 전제로 한다(서버 기동 오버라이드로 고정됨). 호출이 MCP idle timeout이나 `AbortError: remote-cancel`로 실패하면, 등록된 threadId로 `codex-reply`를 1회 재시도한다.
 
 ## R1. fix-delta 캡처 (오케스트레이터가 독립적으로 생성 — producer 자기보고 아님)
-**R1은 코드 루프에만 적용된다.** **설계 루프**의 리뷰 대상은 `.harnie/` 아래 문서(`design.md`/`plan.md`)이고, `delta.mjs`는 이를 의도적으로 제외하므로 거기서의 git delta는 항상 비어 있다. 그래서 설계 루프는 R1의 git delta를 쓰지 **않는다**: 대신 **설계 내용을 리뷰어에게 직접 주입**한다(첫 리뷰는 전체 설계, 재리뷰는 개정된 설계 — 바뀐 섹션이든 전체든 — stateful 리뷰어에게). 나머지(R2~R5, ledger, state)는 동일하다.
+**R1은 코드 루프에만 적용된다.** **설계 루프**의 리뷰 대상은 `.harnie/` 아래 문서(`design.md`/`plan.md`)이고, `delta.mjs`는 이를 의도적으로 제외하므로 거기서의 git delta는 항상 비어 있다. 그래서 설계 루프는 R1의 git delta를 쓰지 **않는다**: 대신 **설계 파일의 절대경로를 리뷰어에게 명시적 읽기 지시와 함께 전달**한다(첫 리뷰는 `design.md`/`rev-N.md` 경로, 재리뷰는 같은 경로와 바뀐 섹션 이름 목록 — stateful 리뷰어가 이미 이전 리뷰를 갖고 있으므로). 나머지(R2~R5, ledger, state)는 동일하다.
 
 코드 루프는 변경 **직전**에 baseline을 캡처하고, 변경 후 다음을 실행한다:
 ```
@@ -27,13 +27,13 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 ## R2. 리뷰어 호출
 기준은 프로바이더와 무관하게 동일하다(이미 읽은 `loop.md` 스키마 + 해당 리뷰 기준: 코드는 `code-review.md`·`verification-tiers.md`, 설계는 `design-review.md`를 호출자가 명시한 고도로). 메커니즘만 다르다.
 
-**리뷰어가 Codex일 때(설계 루프):** 리뷰 대상이 설계 문서이므로 (R1에 따라) **git delta가 없다** — 설계 내용을 주입한다.
-- **첫 리뷰:** codex MCP `codex` 툴을 `sandbox:"read-only"`, `cwd:<repo>`, 고성능 모델로 호출한다. `developer-instructions`에 기준을 싣는다. 프롬프트에는 작업 의도·제약·**전체 설계 내용**(`design.md`/`plan.md`의 해당 섹션)을 담는다. 응답의 **threadId를 기록**한다.
-- **재리뷰:** 같은 threadId로 `codex-reply`를 호출한다. git delta가 아니라 **개정된 설계**(바뀐 섹션, 또는 최신 전체 설계)를 준다. 루프 안에서 stateless `codex review`를 반복 실행하지 않는다 — 매번 전체 컨텍스트를 다시 읽으면 비용이 무한정 늘어난다.
+**리뷰어가 Codex일 때(설계 루프):** 리뷰 대상이 설계 문서이므로 (R1에 따라) **git delta가 없다** — 경로를 전달한다, 내용을 전달하지 않고.
+- **첫 리뷰:** codex MCP `codex` 툴을 `sandbox:"read-only"`, `cwd:<repo>`, 고성능 모델로 호출한다. `developer-instructions`에 기준을 싣는다. 프롬프트에는 작업 의도·제약·**설계 파일의 절대경로**(`design.md`/`plan.md`의 해당 섹션), 읽기 前 리뷰하는 명시적 지시를 담는다 — `sandbox:"read-only"`는 쓰기만 거부하고, 읽기는 성공한다. 응답의 **threadId를 기록**한다.
+- **재리뷰:** 같은 threadId로 `codex-reply`를 호출한다. git delta가 아니라 **개정된 설계의 경로와 바뀐 섹션 이름 목록**을 준다 — 내용이 아니라, stateful thread가 이미 이전 리뷰를 갖고 있으므로. 루프 안에서 stateless `codex review`를 반복 실행하지 않는다 — 매번 전체 컨텍스트를 다시 읽으면 비용이 무한정 늘어난다.
 
 **리뷰어가 Claude일 때(코드 루프):**
-- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). Task로 위임한다. 프롬프트에 기준·fix-delta·검증에 필요한 주변 문맥을 주입하고, **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
-- 같은 방식으로 stateful하게 유지한다: 이전 ledger를 주입해 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
+- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
+- 같은 방식으로 stateful하게 유지한다: 이전 ledger의 경로를 가리켜 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
 - REJECT 편향을 적용한다. 리뷰어는 빌더의 프로바이더와 달라야 하며 read-only여야 한다(쓸 수 있는 코드 리뷰어는 리뷰어가 아니다).
 
 어느 쪽이든, 리뷰는 R4 前에 canonical 스키마로 `<dir>/round-N.txt`에 쓰인다.

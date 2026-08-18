@@ -1,6 +1,6 @@
 # Verification Tiers (Canonical) — Single Definition for Builder and Reviewer
 
-This file is the **only definition of verification tiers**. The builder uses it to select the required verification set, and the reviewer **independently assesses** whether the selected tier is appropriate based on the diff and impact radius. Do not duplicate these rules by role; reference or inject this file instead.
+This file is the **only definition of verification tiers**. The builder uses it to select the required verification set, and the reviewer **independently assesses** whether the selected tier is appropriate based on the diff and impact radius. Do not duplicate these rules by role; each role's agent body instructs it to **Read this file directly** instead.
 
 Choose the tier based on the change's **actual risk**, not its file count or line count.
 

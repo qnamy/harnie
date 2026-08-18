@@ -26,7 +26,7 @@ Review the design or direction **before implementation begins**. Design mistakes
 - Document format, wording, section order, or other stylistic aspects of the design artifact.
 
 ## Output
-Follow the canonical **loop contract** in `loop.md` for the output schema, ledger, gate, and re-review scope; the skill injects it. Review-specific settings:
+Follow the canonical **loop contract** in `loop.md` for the output schema, ledger, gate, and re-review scope. The design-loop reviewer is Codex, so this file and `loop.md`'s schema section are provided once per thread via `developer-instructions` (see `review-loop-driver.md` R2) — not re-injected on every re-review. Review-specific settings:
 - **ID namespace:** `DR-NNN`
 - **Location:** a section, FR/NFR ID, decision ID, or short quotation when the design is not file-based
 - Ground every issue in the design's actual content. Do not impose heavyweight advice on a small design.

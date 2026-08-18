@@ -27,11 +27,11 @@
 - cleanSave(DELETE+INSERT) 류 = **부분 실패/중복 적재** 위험을 함께 본다. 멱등성·재처리 안전성·스키마 하위영향.
 
 ## 검증 적정성 게이트
-변경의 실제 위험을 **diff와 영향 범위로 독립적으로 판단**하고(tier 정의는 harnie canonical 검증-tier 규약 — 스킬이 주입), builder가 선언한 검증 tier 및 증거가 이에 부합하는지 확인한다. **실제 위험보다 낮은 tier를 선택했거나 필수 검증 증거가 누락·실패했다면, 필요한 검증을 구체적으로 명시하고 REJECT한다.**
+변경의 실제 위험을 **diff와 영향 범위로 독립적으로 판단**하고. `harnie-reviewer`의 agent body는 리뷰 前에 `verification-tiers.md`를 읽도록 지시된다 — canonical 검증-tier 규약. builder가 선언한 검증 tier 및 증거가 이에 부합하는지 확인한다. **실제 위험보다 낮은 tier를 선택했거나 필수 검증 증거가 누락·실패했다면, 필요한 검증을 구체적으로 명시하고 REJECT한다.**
 - **검증 불가 ≠ 검증 불필요**: 승인에 필요한 위험이 미검증 상태면, builder가 정직하게 공개했더라도 merge-ready 관점에서 REJECT다.
 
 ## 출력
-출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다(스킬이 주입). 이 리뷰의 고유 지정:
+출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다. 코드 루프 리뷰어는 항상 `harnie-reviewer`(Claude)이며, agent body가 이 파일과 `loop.md`를 직접 읽도록 지시한다 — 스킬이 주입하지 않는다. 이 리뷰의 고유 지정:
 - **ID namespace** = `CR-NNN`
 - **location** = `file:line`
 - 각 이슈는 이 diff의 **실제 코드 근거**로. 추측·일반론 금지.

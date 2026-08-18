@@ -11,15 +11,9 @@ You, the main agent, run a lightweight inline flow. There is **no interview, app
 
 When a new user message arrives, do **not** automatically carry forward the current execution mode. Reclassify it as `replace|add|status|question`. A **status, question, or simple add** does not cancel work already in progress. If the **scope or goal changes**, however—through `replace` or a scope-changing `add`—stop the current run, recompute the target and review scope, and then continue. This resets **message intent and scope**, not execution authority.
 
-## Step 0 — Inject Runtime Contracts (Required and First)
+## Step 0 — Read the Driver Contract (Required and First)
 
-**Read the canonical files below now.** A path reference is insufficient; load their actual contents into this session. They are the single source for the review schema, state transitions, verification tiers, review criteria, and loop driver. Do not restate them here; only orchestrate them.
-
-- `${CLAUDE_PLUGIN_ROOT}/instructions/loop.md` — Review-loop state machine, output schema, and ledger rules
-- `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md` — Loop CLI and Codex wiring (R1–R5)
-- `${CLAUDE_PLUGIN_ROOT}/instructions/code-review.md` — Code-review criteria (REJECT bias, in-loop)
-- `${CLAUDE_PLUGIN_ROOT}/instructions/verification-tiers.md` — Verification tiers
-- Only when Step 3 includes design: `${CLAUDE_PLUGIN_ROOT}/instructions/design-authoring-detail.md` — Lightweight detailed-authoring profile + `${CLAUDE_PLUGIN_ROOT}/instructions/design-review.md` — Detailed-altitude lens
+**Read `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md` now** — the CLI/Codex wiring (R1–R5) you execute directly, in your own context. You do **not** need to preload the schema, review criteria, or authoring-profile documents here: `harnie-designer`, `harnie-reviewer`, and the Codex reviewer/builder each Read their own criteria and profile files directly from the paths you pass them in Steps 3/4/6 below — do not inline those files' contents into delegation prompts. For `${CLAUDE_PLUGIN_ROOT}/instructions/loop.md`, you only need to act on `apply`'s output (`machineState`, `needsReRequest`, `needsReentry`, per `review-loop-driver.md` R4); you do not need to load its full state-machine derivation.
 
 > **Symmetric cross-model review** means each stage is reviewed by the opposite provider: **design** = Claude (`harnie-designer`) produces → **Codex** reviews; **development** = **Codex** builder (Codex MCP, `workspace-write`) produces → **Claude** reviews. Depending on installation, the Codex MCP tool is `mcp__plugin_harnie_codex__codex` or `mcp__codex__codex`; rebuilding and rereview use `*__codex-reply` with a stateful `threadId`. See `review-loop-driver.md` for wiring details.
 
@@ -39,9 +33,9 @@ For unfamiliar code, spawn `harnie-scout` (haiku) in parallel to locate the rele
 
 ### 3. Optional Lightweight Detailed Design + Design Review
 
-For non-obvious work, produce a **lightweight detailed design** with producer = Claude `harnie-designer`. The authoring contract is the lightweight profile in `design-authoring-detail.md`, loaded in Step 0. Main can write it for small work; delegate non-obvious work to `harnie-designer`. When delegating, **inline the profile contents in the prompt** and signal `detailed design, lightweight`, because subagents do not automatically receive the profile. Quick supports only the **DETAIL altitude** by construction; if the task requires a new component, boundary change, or architecture decision, it should already have been routed to `/harnie:dev-full` in Step 1. Do not ask for "formal" design; lightweight is the default, and depth should converge to a few lines for small changes.
+For non-obvious work, produce a **lightweight detailed design** with producer = Claude `harnie-designer`. The authoring contract is the lightweight profile in `${CLAUDE_PLUGIN_ROOT}/instructions/design-authoring-detail.md`. Main can write it for small work; delegate non-obvious work to `harnie-designer`. When delegating, **pass that file's absolute path** and signal `detailed design, lightweight`; the designer's agent body requires it to Read the profile before writing, so do not paste its contents into the prompt. Quick supports only the **DETAIL altitude** by construction; if the task requires a new component, boundary change, or architecture decision, it should already have been routed to `/harnie:dev-full` in Step 1. Do not ask for "formal" design; lightweight is the default, and depth should converge to a few lines for small changes.
 
-**Save the design to `.harnie/quick/<slug>/review/design/design.md`** as the single source read by Step 4 development and review. Then run the **design review loop** to APPROVE following `review-loop-driver.md`: reviewer = Codex; criteria = `design-review.md`; detailed-altitude lens; ID namespace `DR`; `<dir>` = `.harnie/quick/<slug>/review/design/`. Do **not** use the R1 git delta because `design.md` is under excluded `.harnie/` and its delta would always be empty. Instead put the `design.md` content directly in the reviewer prompt—full design for the first review, revised design for rereview—and run R2–R5. Skip all of Step 3 when the task is obvious.
+**Save the design to `.harnie/quick/<slug>/review/design/design.md`** as the single source read by Step 4 development and review. Then run the **design review loop** to APPROVE following `review-loop-driver.md`: reviewer = Codex; criteria = `design-review.md`; detailed-altitude lens; ID namespace `DR`; `<dir>` = `.harnie/quick/<slug>/review/design/`. Do **not** use the R1 git delta because `design.md` is under excluded `.harnie/` and its delta would always be empty. Instead pass the **absolute path** to `design.md` in the reviewer prompt with an instruction to read it before reviewing — the path alone for the first review; the path plus the list of changed section names for rereview — and run R2–R5. Skip all of Step 3 when the task is obvious.
 
 ### 4. Write (Development Producer = Codex)
 
@@ -51,7 +45,7 @@ Capture a baseline excluding `.harnie/` first:
 node ${CLAUDE_PLUGIN_ROOT}/scripts/loop.mjs capture <repo>   # → record baselineSHA
 ```
 
-Then delegate implementation to the **Codex builder** through Codex MCP with `sandbox:"workspace-write"`, `approval-policy:"never"`, and `cwd:<repo>`. Include the task intent and constraints in the prompt plus, when Step 3 ran, the contents of **`review/design/design.md`** so the builder follows the reviewed design. Keep the change **surgical**: preserve existing style and touch only requested scope. Record the threadId; use `codex-reply` for revisions. The code reviewer is Claude, so the builder must be Codex to preserve cross-model review.
+Then delegate implementation to the **Codex builder** through Codex MCP with `sandbox:"workspace-write"`, `approval-policy:"never"`, and `cwd:<repo>`. Include the task intent and constraints in the prompt plus, when Step 3 ran, the contents of **`review/design/design.md`** so the builder follows the reviewed design — **inline, not as a `.harnie/` path**: the builder's `cwd` is the whole repo, so (as in dev-full's B2) it must not be pointed at `.harnie/`, where authority and review state live. Keep the change **surgical**: preserve existing style and touch only requested scope. Record the threadId; use `codex-reply` for revisions. The code reviewer is Claude, so the builder must be Codex to preserve cross-model review.
 
 ### 5. Verify (Self)
 
@@ -59,7 +53,7 @@ Use `verification-tiers.md` to select a tier based on the change's **actual risk
 
 ### 6. Code Review Loop (`review-loop-driver.md`, ID Namespace `CR`, `<dir>` = `.harnie/quick/<slug>/review/code/`)
 
-Run R1–R5 from `review-loop-driver.md`. Producer = **Codex builder**. Reviewer = read-only **`harnie-reviewer` subagent**, not main inline, so the reviewer is the opposite model and cannot write. Delegate through Task and include `code-review.md`, `verification-tiers.md`, the fix delta, and the previous ledger in the prompt. Record the reviewer's `loop.md` VERDICT/ISSUES response in `round-N.txt`. Pass **that round's delta `postSHA` through `--artifact` to `apply`**; this is mandatory for CR. Ask the Codex builder for fixes through `codex-reply`. Even for trivial changes, do not abbreviate the stage review; focus on one or two dimensions, correctness and side effects.
+Run R1–R5 from `review-loop-driver.md`. Producer = **Codex builder**. Reviewer = read-only **`harnie-reviewer` subagent**, not main inline, so the reviewer is the opposite model and cannot write. Its agent body already instructs it to Read `code-review.md`, `verification-tiers.md`, and `loop.md`'s schema directly, so delegate through Task with only the delta's path, the previous ledger's path, and a short scope/intent summary. Record the reviewer's `loop.md` VERDICT/ISSUES response in `round-N.txt`. Pass **that round's delta `postSHA` through `--artifact` to `apply`**; this is mandatory for CR. Ask the Codex builder for fixes through `codex-reply`. Even for trivial changes, do not abbreviate the stage review; focus on one or two dimensions, correctness and side effects.
 
 ### 7. Report
 

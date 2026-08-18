@@ -1,6 +1,6 @@
 # Design Authoring Profile — Detailed-Design Altitude (Canonical, for Injection)
 
-This is the **output contract** used when `harnie-designer` produces a **detailed design**. The orchestrator injects this file inline into the delegation prompt. The agent body owns only the persona, entry gates, and working principles, so do not restate them here.
+This is the **output contract** used when `harnie-designer` produces a **detailed design**. The orchestrator passes this file's **absolute path** in the delegation prompt; the designer **MUST Read it** before writing, rather than receiving its contents inline. The agent body owns only the persona, entry gates, and working principles, so do not restate them here.
 
 **Altitude:** Translate architecture decisions into implementable code-level decisions. Make the design specific enough that a developer can **begin implementation without making additional core decisions**, while avoiding unnecessary classes and patterns.
 
