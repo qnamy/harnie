@@ -1,6 +1,6 @@
 # 검증 tier (canonical) — builder·reviewer 공통 단일 정의
 
-이 파일이 **유일한 tier 정의**다. builder는 이 tier로 필수 검증 세트를 정하고, reviewer는 diff·영향 범위로 tier의 적정성을 **독립 판정**한다. 두 역할에 따로 복제하지 말고 이 파일을 참조/주입한다.
+이 파일이 **유일한 tier 정의**다. builder는 이 tier로 필수 검증 세트를 정하고, reviewer는 diff·영향 범위로 tier의 적정성을 **독립 판정**한다. 두 역할에 따로 복제하지 말고, 각 역할의 에이전트 본문이 **이 파일을 직접 Read하도록** 지시한다.
 
 변경의 **실제 위험**으로 tier를 정한다 (파일 수·줄 수가 아님).
 

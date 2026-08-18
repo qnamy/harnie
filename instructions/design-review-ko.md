@@ -26,7 +26,7 @@
 - 문서 형식·표현·섹션 순서. 설계 산출물의 스타일.
 
 ## 출력
-출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다(스킬이 주입). 이 리뷰의 고유 지정:
+출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다. 설계 루프 리뷰어는 Codex이므로, 이 파일과 `loop.md`의 스키마 섹션은 스레드당 1회 `developer-instructions`로 제공되며(`review-loop-driver.md` R2 참조) — 재리뷰마다 다시 주입되지 않는다. 이 리뷰의 고유 지정:
 - **ID namespace** = `DR-NNN`
 - **location** = `section` / FR·NFR ID / 결정 ID / 짧은 인용 (설계는 파일이 아닐 수 있음)
 - 근거는 이 설계의 실제 내용으로. 작은 설계에 거창한 훈수 금지.

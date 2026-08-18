@@ -1,6 +1,6 @@
 # Harnie Review Loop State Machine (Canonical) — Shared by Quick and Plan
 
-This file is the **single definition** of the review loop and anti-stagnation behavior, and it **owns the review output schema**. Both track skills inject its contents into the prompt at runtime; a path reference alone does not guarantee that the model reads it. Agent bodies define stable, single-turn role rules; this file defines multi-step coordination.
+This file is the **single definition** of the review loop and anti-stagnation behavior, and it **owns the review output schema**. Both track skills instruct the model that will use this file — orchestrator, designer, or reviewer — to **Read it directly from its canonical path**, not to have its contents pasted into a delegation prompt. A path reference alone does not guarantee that the model reads it, so each consumer's own entry gate (agent body) or Step 0 (orchestrator) carries the Read instruction, and the consumer names what it read before acting. Agent bodies define stable, single-turn role rules; this file defines multi-step coordination.
 
 ## Role Binding: Producer-Neutral
 - **Producer:** The author of the artifact, independent of role. The quick and plan skills bind it at each stage:
