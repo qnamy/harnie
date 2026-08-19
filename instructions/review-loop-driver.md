@@ -12,6 +12,11 @@ The loop core (`loop.mjs`) is provider-agnostic: R1 and R3–R5 are identical fo
 
 **Producer's fix (between rounds):** In the design loop the Claude designer revises. In the code loop the **Codex builder** writes and revises via `codex-reply` (stateful, `workspace-write`); it receives the approved design (from `<dir>`'s `design.md` or the plan's `plan.md`) in its prompt so it builds against the reviewed design. R1 captures whatever the producer wrote, regardless of provider. **Keep the builder's response short**: it must not paste the implementation's source into its reply — the change is verified from disk, not from the response text — so its six-section report should stay around 50 lines.
 
+**Builder delegation contract (code loop) — include these standing rules in the initial `codex` prompt; they bind every subsequent `codex-reply` fix:**
+- **Baseline-relative test evidence:** before modifying code, run the relevant test set once to record the baseline failure set; report baseline vs. post-change failure counts and name any new failures, per `verification-tiers.md` Test Evidence Rules (pass the file's absolute path).
+- **Fail-capability proof for new tests:** per the same rules, include break→fail→restore→pass evidence for each new test or materially strengthened assertion.
+- **Build-tool caches stay out of the repo:** if the build tool writes caches or lock files under the home directory (which the sandbox denies), the **orchestrator preassigns a system-temp path in the prompt** (e.g., `GRADLE_USER_HOME` under the temp directory) — check the target repo's guidance (`AGENTS.md`/`CLAUDE.md`, or the personal untracked `CLAUDE.local.md`) for known tool-specific mappings. The builder must not invent cache directories inside the repo (they contaminate the R1 delta) or under `.harnie/`.
+
 All Codex `codex`/`codex-reply` MCP calls assume `approval-policy:"never"` (pinned via the server's startup override); if a call fails with an MCP idle timeout or `AbortError: remote-cancel`, retry once via `codex-reply` against the registered threadId.
 
 ## R1. Capture the Fix Delta (Generated Independently by the Orchestrator)

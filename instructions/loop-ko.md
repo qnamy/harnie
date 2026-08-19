@@ -52,6 +52,13 @@ STALLED   ─유효 재진입→ REVISING (stagnation = 0)
 - **STALLED**: 증거+blocker+미검증 범위 남기고 정지, 사용자 보고.
 - **유효 재진입**(넷 중 하나): 새 증거·외부 상태 변화·필요한 사용자 결정·범위 변경(사용자 승인된 것만).
 
+## human-gated blocking 이슈: 루프 돌리지 말고 escalate
+어떤 blocking 이슈는 런 내부의 어떤 코드·설계 수정으로도 해소될 수 없다 — 사람이나 외부 환경만이 제공할 수 있는 행동(실제 외부 시스템 대상 검증, 크리덴셜·계정, 수동 QA)을 요구한다. 이런 이슈를 상대로 반복 수정하는 것은 정의상 progress를 만들지 못한다.
+- **판별**: 리뷰 응답을 ledger에 적용한 후, 오케스트레이터는 각 open blocking 이슈의 fix direction을 확인한다. 해소에 런 밖 행동이 필요하면 **human-gated**로 분류하고 그 분류를 receipt에 기록한다.
+- **반복 금지**: human-gated 이슈를 겨냥한 재수정을 producer에게 지시하지 말고, 그 이슈로 stagnation 라운드를 소모하지 않는다. 이슈 ID, 필요한 외부 행동, 미루었을 때의 위험을 명시해 **즉시 사용자에게 escalate한다**. 이 규칙은 통상의 REVISING 루프보다 우선하며 stagnation limit을 기다리지 않는다.
+- **해제는 사용자만 할 수 있다.** 두 가지 중 하나다: ① 사용자가 그 행동을 수행하거나 위험 수용·유예를 명시적으로 결정 → 오케스트레이터는 그 결정을 receipt에 기록하고(`user-decision` 사유), 리뷰어에게 다음 응답에서 해당 ID를 `resolved`로 닫도록 요청하며, 최종 보고에는 **needs-human-action 섹션에 그 ID와 유예된 위험을 반드시 명시**한다; ② 사용자가 수용하지 않음 → 해당 이슈를 명시하고 `HARNIE_STATUS: INCOMPLETE`로 정직하게 종료한다. 오케스트레이터가 자기 권한으로 human-gated blocker를 닫는 것은 절대 금지다 — 미검증 위험의 자기승인이야말로 이 루프가 막으려는 것이다.
+- **스키마 변경 없음**: ledger는 여전히 `open|resolved`만 가진다. 여기서 `resolved`는 "사용자가 그 위험의 소유권을 인수했다"는 뜻이고, 증거는 receipt가 가진다.
+
 ## 재리뷰 범위 · diff 귀속 · read 규율
 - **재리뷰 대상 = open 이슈 + 새 fix-delta + 새 delta가 건드린 기존 승인 영역.**
 - **fix-delta는 orchestrator가 독립 생성**(producer 자기보고 아님): 수정 직전 기준점→직후 실제 증분. 신규 untracked·삭제·rename·binary 포함.

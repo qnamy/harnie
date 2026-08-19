@@ -29,6 +29,8 @@
 ## 검증 적정성 게이트
 변경의 실제 위험을 **diff와 영향 범위로 독립적으로 판단**하고. `harnie-reviewer`의 agent body는 리뷰 前에 `verification-tiers.md`를 읽도록 지시된다 — canonical 검증-tier 규약. builder가 선언한 검증 tier 및 증거가 이에 부합하는지 확인한다. **실제 위험보다 낮은 tier를 선택했거나 필수 검증 증거가 누락·실패했다면, 필요한 검증을 구체적으로 명시하고 REJECT한다.**
 - **검증 불가 ≠ 검증 불필요**: 승인에 필요한 위험이 미검증 상태면, builder가 정직하게 공개했더라도 merge-ready 관점에서 REJECT다.
+- **baseline 대조 필수**: tier가 테스트 증거를 요구할 때, baseline vs 변경 후 실패 대조(`verification-tiers.md` 테스트 증거 규칙) 없는 "테스트 통과" 주장은 증거 누락이다 — REJECT.
+- **위양성 테스트**: 구조적으로 실패할 수 없는 신규 테스트 — 대상 동작이 깨져도 assertion이 통과하는 — 는 커버리지가 아니라 미검증 범위다. 같은 규칙의 fail-capability 증거를 요구한다.
 
 ## 출력
 출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다. 코드 루프 리뷰어는 항상 `harnie-reviewer`(Claude)이며, agent body가 이 파일과 `loop.md`를 직접 읽도록 지시한다 — 스킬이 주입하지 않는다. 이 리뷰의 고유 지정:

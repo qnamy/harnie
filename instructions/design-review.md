@@ -10,6 +10,7 @@ Review the design or direction **before implementation begins**. Design mistakes
 
 ### Required: Potential Blockers
 - **Implementability (decision-complete gate):** Can a competent developer begin implementation from this design or plan **without making additional core decisions**? If not, identify the remaining `[UNRESOLVED]` decision and REJECT.
+- **Environment-fact grounding:** Verify the design's environment premises against the actual repo — the Environment Fact Sheet's claims (schema-migration head, test infrastructure, runtime configuration constraints, framework/build-tool behavior; see `design-authoring-detail.md`) and any decision that rests on them. A decision built on a false or missing environment fact is blocking. Report **every** fact error you find in the same round; do not mete them out one per round.
 - **Requirement coverage:** Does the design actually satisfy the stated FRs and NFRs? Identify any **uncovered requirement ID**.
 - **Data ownership and boundaries:** Which component owns which data? Look for duplicate ownership or boundary violations.
 - **Missing failure modes:** Does the design cover errors, duplicates, delays, timeouts, retries, partial success, and concurrent execution? Check transaction boundaries and idempotency.

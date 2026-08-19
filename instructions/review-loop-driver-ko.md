@@ -12,6 +12,11 @@
 
 **producer의 수정(라운드 사이):** 설계 루프에서는 Claude designer가 개정한다. 코드 루프에서는 **Codex 빌더**가 `codex-reply`(stateful, `workspace-write`)로 쓰고 개정한다 — 승인된 설계(`<dir>`의 `design.md` 또는 plan의 `plan.md`)를 프롬프트로 받아 리뷰된 설계대로 짓는다. R1은 프로바이더와 무관하게 producer가 쓴 것을 그대로 캡처한다. **빌더의 응답은 짧게 유지한다**: 구현의 소스를 응답에 붙여넣으면 안 된다 — 변경은 디스크에서 검증하지, 응답 텍스트에서 하지 않는다 — 그래서 여섯 섹션 보고서가 대략 50줄 정도 유지되어야 한다.
 
+**빌더 위임 계약 (code 루프) — 아래 상시 규칙을 최초 `codex` 프롬프트에 포함한다; 이후 모든 `codex-reply` 재수정에도 구속된다:**
+- **baseline 대비 테스트 증거**: 코드를 수정하기 전에 관련 테스트 세트를 한 번 실행해 baseline 실패 집합을 기록하고, baseline vs 변경 후 실패 수와 신규 실패 목록을 보고한다 — `verification-tiers.md` 테스트 증거 규칙 준수(파일 절대경로를 전달).
+- **신규 테스트의 fail-capability 증명**: 같은 규칙에 따라, 신규 테스트(또는 실질적으로 강화된 assertion)마다 깨뜨림→실패→복원→통과 증거를 포함한다.
+- **빌드 도구 캐시는 repo 밖으로**: 빌드 도구가 홈 디렉터리 아래에 캐시·락 파일을 쓰는 경우(샌드박스가 거부), **오케스트레이터가 프롬프트에서 시스템 temp 경로를 미리 지정한다**(예: temp 디렉터리 아래 `GRADLE_USER_HOME`) — 도구별 구체 매핑은 대상 레포의 지침(`AGENTS.md`/`CLAUDE.md`, 또는 개인용 미추적 `CLAUDE.local.md`)을 확인한다. 빌더는 repo 내부에 캐시 디렉터리를 임의로 만들면 안 되고(R1 delta를 오염시킴) `.harnie/` 아래도 안 된다.
+
 모든 codex/codex-reply MCP 호출은 `approval-policy:"never"`를 전제로 한다(서버 기동 오버라이드로 고정됨). 호출이 MCP idle timeout이나 `AbortError: remote-cancel`로 실패하면, 등록된 threadId로 `codex-reply`를 1회 재시도한다.
 
 ## R1. fix-delta 캡처 (오케스트레이터가 독립적으로 생성 — producer 자기보고 아님)

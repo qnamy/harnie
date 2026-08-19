@@ -38,7 +38,7 @@ description: 작은 작업(장애·국소 버그픽스·소규모 수정)을 인
 ```
 node ${CLAUDE_PLUGIN_ROOT}/scripts/loop.mjs capture <repo>   # → baselineSHA 기록
 ```
-그 다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `approval-policy:"never"`, `cwd:<repo>`, **run 난이도 모델**(`model-matrix.md` §3: easy = `gpt-5.6-luna`, 순수 기계적이면 `gpt-5.3-codex-spark`, medium = `gpt-5.6-terra`, hard = `gpt-5.6-sol`; 모델 선택이 불가능하면 설치 기본값))에게 구현을 위임한다 — 프롬프트에 작업 의도·제약 + (Step 3가 있었으면) **`review/design/design.md` 내용을 인라인**으로 실어 리뷰된 설계대로 짓게 한다(`.harnie/` 경로가 아니라 내용으로: 빌더의 `cwd`는 repo 전체인데 `.harnie/`는 권위와 리뷰 상태가 사는 곳이므로 경로로 지정하면 안 됨). **surgical**(기존 스타일 유지, 요청 범위만). threadId 기록(재수정은 codex-reply). 코드 리뷰어는 Claude이므로 빌더는 반드시 Codex(크로스-모델).
+그 다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `approval-policy:"never"`, `cwd:<repo>`, **run 난이도 모델**(`model-matrix.md` §3: easy = `gpt-5.6-luna`, 순수 기계적이면 `gpt-5.3-codex-spark`, medium = `gpt-5.6-terra`, hard = `gpt-5.6-sol`; 모델 선택이 불가능하면 설치 기본값))에게 구현을 위임한다 — 프롬프트에 작업 의도·제약 + (Step 3가 있었으면) **`review/design/design.md` 내용을 인라인**으로 실어 리뷰된 설계대로 짓게 한다(`.harnie/` 경로가 아니라 내용으로: 빌더의 `cwd`는 repo 전체인데 `.harnie/`는 권위와 리뷰 상태가 사는 곳이므로 경로로 지정하면 안 됨). **surgical**(기존 스타일 유지, 요청 범위만). 또한 `review-loop-driver.md`의 **빌더 위임 계약** 상시 규칙(baseline 대비 테스트 증거, 신규 테스트 fail-capability 증명, 홈 디렉터리 캐시 도구의 캐시 경로 사전 지정)을 프롬프트에 포함한다. threadId 기록(재수정은 codex-reply). 코드 리뷰어는 Claude이므로 빌더는 반드시 Codex(크로스-모델).
 
 ### 5. Verify (self)
 verification-tiers.md로 변경의 **실제 위험**에 맞는 tier를 정하고 그 필수 세트를 실행한다. "컴파일 통과"는 검증이 아니다. 미검증 위험은 정직하게 명시.

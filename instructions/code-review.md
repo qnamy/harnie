@@ -29,6 +29,8 @@ You review an AI teammate's diff **inside the build loop**. The objective is not
 ## Verification Adequacy Gate
 Independently assess the change's actual risk from the **diff and impact radius**. `harnie-reviewer`'s agent body already instructs it to read `verification-tiers.md` before reviewing — the canonical verification-tier rules. Confirm that the builder's declared tier and evidence match that risk. **If the selected tier is lower than the actual risk, or required evidence is missing or failed, specify the necessary verification and REJECT.**
 - **Unable to verify ≠ verification not required:** If a risk required for approval remains unverified, REJECT from a merge-readiness perspective even when the builder disclosed it honestly.
+- **Baseline comparison required:** When the tier requires test evidence, a "tests pass" claim without the baseline-vs-post failure comparison (`verification-tiers.md` Test Evidence Rules) is missing evidence — REJECT.
+- **False-positive tests:** A new test that structurally cannot fail — its assertion passes even when the target behavior is broken — is unverified scope, not coverage. Require fail-capability evidence per the same rules.
 
 ## Output
 Follow the canonical **loop contract** in `loop.md` for the output schema, ledger, gate, and re-review scope. The code-loop reviewer is always `harnie-reviewer` (Claude), whose agent body instructs it to read this file and `loop.md` directly — not injected by the skill. Review-specific settings:

@@ -10,6 +10,14 @@ This is the **output contract** used when `harnie-designer` produces a **detaile
 
 **Mode switch:** The default is **lightweight** and uses only the Lightweight Output section. Use the complete Formal Output section only when the caller explicitly signals **"formal"**. Both modes apply the agent body's rules for proportional depth, no speculation, duplication control, and a single source of truth for contracts.
 
+## Environment Fact Sheet (Both Modes)
+When the design depends on or constrains the runtime environment, open the design with an **Environment Fact Sheet**: the facts its decisions rest on, **each verified in the actual repo and cited with its source path** — never assumed. Wrong environment premises are the top source of wasted design-review rounds. Minimum categories, ecosystem-neutral (skip a category only when genuinely irrelevant):
+- **Schema-migration state** — the tool and its current head (e.g., the latest migration version identifier).
+- **Test infrastructure** — available runners, containers/fixtures, and the known baseline of already-failing tests.
+- **Runtime configuration that constrains the design** — timeouts, pools, and framework settings that bound what the design may assume.
+- **Framework/build-tool behavior the design assumes** — proxy/AOP semantics, whether the build's test task forwards required properties.
+Consult the target repo's own guidance first — committed (`AGENTS.md`/`CLAUDE.md`) or personal/untracked (`CLAUDE.local.md`, for facts that must not be committed to a shared repo); it may already record tool-specific facts. When the caller provides a fact sheet (e.g., from plan grounding), verify and reuse it instead of re-deriving. A decision resting on a fact you could not verify is `[UNRESOLVED]`, not a guess.
+
 ## Lightweight Output (Default)
 1. **Design Summary** — Target and responsibility; related FR/NFR IDs; position within the parent architecture; inputs, outputs, and dependencies; scope and non-scope. Reference the parent ADR when one exists; otherwise state `N/A`.
 2. **Requirement Traceability Matrix** — Columns: requirement ID, implementation module, API/event/data, validation rule, test, and monitoring metric. **Identify uncovered requirement IDs and elements without supporting requirements.**
