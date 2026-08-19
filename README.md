@@ -58,6 +58,15 @@ Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plug
 /plugin install harnie@harnie
 ```
 
+**업데이트:** 새 버전이 push되면 마켓플레이스 메타데이터를 갱신한 뒤 플러그인을 업데이트한다. 적용에는 Claude Code 재시작이 필요하다.
+
+```bash
+/plugin marketplace update harnie
+/plugin update harnie@harnie
+```
+
+터미널에서는 `claude plugin marketplace update harnie` · `claude plugin update harnie@harnie`로 동일하게 실행할 수 있다.
+
 **로컬 로드:** clone한 저장소에서 다음처럼 실행할 수도 있다.
 
 ```bash
