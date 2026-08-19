@@ -164,6 +164,15 @@ harnie/
 └── docs/                        # 설계·ADR 문서
 ```
 
+## 모델 교체
+
+스테이지별 모델 배정의 단일 정본은 [instructions/model-matrix.md](instructions/model-matrix.md) §3이다. 같은 provider 안에서 모델을 갈아끼우려면(예: Codex 빌더의 medium 티어 변경, 설계자 sonnet → opus) **이 파일의 표만 수정하면 된다** — 콜사이트는 이 파일을 참조할 뿐이며 충돌 시 이 파일이 이긴다. 수정 시 두 가지만 지킨다.
+
+- **리뷰어 모델은 티어링하지 않는다.** 리뷰는 품질 게이트라 난이도에 따라 낮추지 않는다(설계 리뷰어 Codex 고정, 코드 리뷰어 opus는 `agents/harnie-reviewer.md` frontmatter에 고정 — 이쪽을 바꾸려면 해당 frontmatter도 함께 수정).
+- **한국어 미러(`model-matrix-ko.md`)를 같이 갱신한다.**
+
+provider 자체를 바꾸는 것(다른 AI CLI 추가)은 이 범위가 아니다 — 루프 코어는 provider-agnostic이지만 리뷰어 호출과 빌더 호출 지점의 배선 작업이 필요하다.
+
 ## 문서
 
 - [docs/architecture.md](docs/architecture.md) — 스킬·에이전트·크로스-모델 리뷰 루프 설계
