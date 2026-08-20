@@ -130,14 +130,26 @@ function isAutoAllowSanctionedSub(cmd) {
   for (const [name, subs] of Object.entries(AUTO_ALLOW_SUB)) if (script.endsWith(name) && subs.has(sub)) return true
   return false
 }
+// 신뢰 CLI를 지목했는데 승인에 실패한 명령의 원인 진단. 이게 없으면 deny 이유가 "loop.mjs로만 하라"인데
+// 정작 loop.mjs를 쓰고 있는 자기모순 메시지가 되어, 실측에서 오케스트레이터가 .sh 우회로 빠졌다.
+function sanctionFailureWhy(cmd, { trustedClis, activeRoot, memberRoots = [] }) {
+  if (![...trustedClis].some((p) => cmd.includes(p))) return null
+  if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return "셸 메타문자·리다이렉션 포함(신뢰 CLI는 단일 평문 명령만 승인)"
+  const toks = cmd.trim().split(/\s+/)
+  if (toks[0] !== "node" || !isAbsolute(toks[1] || "") || !trustedClis.has(resolve(toks[1])))
+    return "`node <신뢰 CLI 절대경로> …` 형태가 아님"
+  return `root/repo 인자가 활성 run 바인딩과 불일치(활성 root ${activeRoot}, 등록 멤버 workroot ${memberRoots.length}개) — 인자 오타이거나, 훅이 이 세션의 run 문맥을 읽지 못해(비-owner 세션 등) 멤버 repo가 미등록으로 보이는 경우`
+}
 export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null, memberRoots = [] }) {
   const cmd = String(command || "")
   if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
   }
-  if (referencesHarnie(cmd))
-    return { deny: true, reason: "Bash로 .harnie 접근 금지 — 상태 접근은 loop.mjs·execution.mjs(신뢰 CLI)로만" }
+  if (referencesHarnie(cmd)) {
+    const why = sanctionFailureWhy(cmd, { trustedClis, activeRoot, memberRoots })
+    return { deny: true, reason: why ? `Bash로 .harnie 접근 금지 — 신뢰 CLI 형태이나 승인 실패: ${why}` : "Bash로 .harnie 접근 금지 — 상태 접근은 loop.mjs·execution.mjs(신뢰 CLI)로만" }
+  }
   return { deny: false, autoAllow: false }
 }
 

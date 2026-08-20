@@ -16,7 +16,8 @@ Finally, fix the **run difficulty**: inherit the easy/medium/hard the `/harnie:d
 - **data/schema and migrations**,
 - **external integrations and APIs**,
 - relevant **docs/ADRs and repo guidance** (`AGENTS.md`, `CLAUDE.md`, `README`, and team conventions),
-- **similar existing implementations** whose conventions to mirror.
+- **similar existing implementations** whose conventions to mirror,
+- **prior runs' design errata** (`design/errata.md` under earlier runs' `.harnie/plan/*/`, when present) — defects already found against approved designs of this area, especially `deferred-next-run` entries, so this run's design does not repeat them.
 
 Ground every decision in actual files, interfaces, dependencies, and conventions before assuming. Record the environment facts the design will depend on — the Environment Fact Sheet categories in `design-authoring-detail.md` (schema-migration head, test infrastructure and baseline test failures, runtime configuration constraints, framework/build-tool behavior) — in a `## Environment Fact Sheet` section of `plan.md`, each fact with its source path.
 

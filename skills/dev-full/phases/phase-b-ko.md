@@ -10,6 +10,24 @@
 - **직렬 경로 — 태스크 1개, 또는 총 규모가 작아 격리로 얻을 게 없을 때.** 아래 B2~B3를 그대로 진행: worktree 없이 빌더 1개, 리뷰 루프 1개, run worktree에서 직접.
 - **병렬 경로 — 태스크 ≥2개이고 스코프가 비중첩일 때.** `phases/phase-b-parallel.md`를 지금 읽어 B2′~B3′를 진행한다: 태스크마다 격리 worktree를 갖고 병렬로 빌드·리뷰한 뒤 하나씩 merge한다. manifest `deps`가 다른 태스크를 지정한 태스크는 그 의존 태스크의 B3′ **4단계 확인이 APPROVE된 후에만**(merge만으론 부족 — 거기서 REJECT되면 그 태스크의 코드가 다시 바뀔 수 있다) 시작한다 — 오케스트레이터가 손으로 적용하는 순서 규칙 한 줄이며, 이를 위한 스케줄러·의존 그래프 실행기·자동 재시도는 만들지 않는다. 모든 태스크의 B3′ 4단계가 APPROVE되면 이 파일로 돌아와 B4를 진행한다.
 
+### Design errata — 승인된 설계 결함의 run 내 정정 경로 (run 전역, 양 경로 공통)
+
+실행 중 **승인된 설계 자체**의 결함 — 설계 문서가 틀린 것을 서술하고 있음 — 이 드러나면, 설계에서 몰래 이탈하지도, run을 폐기하지도 않는다. (**manifest** 결함 — 잘못된 `timeout`·scope·verification 항목 — 은 A5.2 영역이지 errata가 아니다.) **append-only** errata 파일 `.harnie/plan/<slug>/design/errata.md`에 기록한다. 이걸 작동시키는 메커니즘: 항목의 처분이 사용자 승인되는 순간 **리뷰 기준 = 승인된 `design/rev-N.md` + 그 항목의 정정 서술**이 된다 — 리뷰어 agent body가 이 규칙을 갖고 있으므로, 승인된 항목이 커버하는 이탈은 더는 설계-이탈 이슈가 아니고, 커버하지 않는 이탈은 그대로 REJECT다.
+
+- **append-only, 오케스트레이터만 기록.** 결함 발견은 루프의 누구든(빌더 보고·리뷰어 이슈·오케스트레이터 관찰) 할 수 있지만 기록은 오케스트레이터만 한다. 새 발견은 새 `E-NNN` id — 기존 항목은 절대 수정하지 않는다(정정의 정정도 새 항목). 항목 스키마:
+  ```
+  ## E-NNN <한 줄 제목>
+  - found: <ISO 시각>, at <task/reviewUnit>
+  - severity: blocker | degrade | note
+  - design-ref: rev-N.md §<섹션>
+  - defect: 승인 설계가 틀린 지점 + 증거
+  - disposition: pending | approved-workaround (사용자 승인 <시각>) | deferred-next-run | superseded-by-A5.2
+  - correction: (처분 확정 시 추가) 설계 서술을 무엇으로 대체하는가 — 리뷰어가 이 텍스트를 기준으로 판정
+  ```
+- **심각도 라우팅.** `note`: 기록 후 계속. `degrade`/`blocker`: 결함 있는 서술에 기대는 빌드를 멈추고, 항목을 사용자에게 surface해 그 처분을 `AskUserQuestion`으로 승인받은 **후에만** 그에 의존하는 빌더 호출을 진행한다; 승인 전까지 관련 리뷰 이슈는 open 유지. (승인 게이트와 충돌 없음: `recordPendingApproval`은 A5.1 arm 없이는 no-op.)
+- **경성 경계 — errata는 manifest에 닿지 않는다.** task `scope` 확장, `verification`/`timeout` 변경, 태스크 추가·삭제 불가. 정정이 그중 하나라도 요구하는 순간 `disposition: superseded-by-A5.2`로 두고 사용자 게이트 manifest 개정으로 간다. errata는 **설계 산문만** 정정한다.
+- **run 종료 강제(v1, 게이트 ledger 경유):** B5가 게이트에 errata 경로를 전달하고, 게이트 리뷰어가 `pending`인 blocker/degrade 항목을 open blocking 이슈로 보고한다 — 미해소 errata는 새 엔진 능력 없이 기존 ledger 재도출을 통해 완료를 막는다. `deferred-next-run` 항목은 다음 run A1 grounding의 입력이다.
+
 ### 직렬 경로
 
 - **워치독 계약.** 워치독 deny를 받으면 즉시 진행 상황·블로커를 사용자에게 보고하고 지시를 기다린다. 연장은 사용자 동의 후 `execution.mjs watchdog-extend --reason`으로만 한다. task별 예산 기본값은 30분/빌더 15콜이며 manifest의 `difficulty` 필드로 티어링된다(`hard` = 60분/25콜) — 리뷰 라운드도 빌드와 같은 벽시계를 소모한다.
@@ -38,5 +56,6 @@
 - **Runtime** — 실제 실행 검증(verification-tiers.md, 통합 경계 포함). 미검증 위험 = REJECT.
 - **Scope** — 요청 범위만 완결, 요청 안 한 것 안 만듦(scope inflation = over-build 차단).
 - 리뷰어 = read-only **`harnie-reviewer`**(코드 단계이므로; 빌더=Codex의 반대). 각 게이트도 `apply`에 그 시점 tree의 `--artifact <postSHA>`를 넘긴다. 전부 APPROVE, **실패한 게이트만 재실행**. 기본 Claude 단독, 사용자가 "고정밀" 요청 시 dual(Codex 최종 사인오프 auxiliary 추가).
+- **Design errata 배선:** `design/errata.md`가 있으면 모든 게이트 프롬프트에 그 경로를 전달한다 — 승인된 항목은 리뷰 기준의 일부이고, 게이트 리뷰어는 `pending`인 blocker/degrade 항목을 open blocking 이슈로 보고해야 한다(위 Design errata 섹션 참조).
 
-**B6. Report + 완료 재도출.** `execution.mjs completion --root <repo> --slug <slug>`으로 manifest를 순회해 완료를 재도출한다(각 task = ledger APPROVE ∧ receipt pass ∧ 현재 scope==리뷰 scope, 각 gate = ledger approved ∧ 현재 전체 tree==리뷰 tree). 요약: 변경 파일 + 작업별 tier·검증 증거 + 각 리뷰 단위 최종 verdict(ledger·round) + Final Wave 4게이트 verdict. **최종 응답 말미에 machine-readable footer를 emit한다**: 재도출이 complete면 `HARNIE_STATUS: COMPLETE`, 아니면 `HARNIE_STATUS: INCOMPLETE — <남은 blocker 요약>`. Stop 훅이 같은 재도출로 판정하므로, 권위상 미완료인데 COMPLETE라 주장하거나 footer를 빠뜨리면 종료가 차단된다. 남은 blocking·STALLED 단위·미검증 범위는 정직하게 INCOMPLETE로 보고하고 제어권을 반환한다.
+**B6. Report + 완료 재도출.** `execution.mjs completion --root <repo> --slug <slug>`으로 manifest를 순회해 완료를 재도출한다(각 task = ledger APPROVE ∧ receipt pass ∧ 현재 scope==리뷰 scope, 각 gate = ledger approved ∧ 현재 전체 tree==리뷰 tree). 요약: 변경 파일 + 작업별 tier·검증 증거 + 각 리뷰 단위 최종 verdict(ledger·round) + Final Wave 4게이트 verdict. `design/errata.md`가 있으면 errata 다이제스트(id·심각도·처분)를 포함하고, `pending`인 blocker/degrade 항목은 정직한 INCOMPLETE 보고의 남은 blocker에 산입한다. **최종 응답 말미에 machine-readable footer를 emit한다**: 재도출이 complete면 `HARNIE_STATUS: COMPLETE`, 아니면 `HARNIE_STATUS: INCOMPLETE — <남은 blocker 요약>`. Stop 훅이 같은 재도출로 판정하므로, 권위상 미완료인데 COMPLETE라 주장하거나 footer를 빠뜨리면 종료가 차단된다. 남은 blocking·STALLED 단위·미검증 범위는 정직하게 INCOMPLETE로 보고하고 제어권을 반환한다.

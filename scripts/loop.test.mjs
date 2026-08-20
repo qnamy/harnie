@@ -445,3 +445,20 @@ test("capture: 등록 repo가 빈 workspace run root → die(repo-add 안내)", 
   }) + "\n")
   assert.equal(runFailRaw(["capture", runRoot]), 2)
 })
+
+// 실측 기록(관측 ⑥): 동결 manifest의 파일 수 추정 대비 실제 changedPaths를 사이드카로 남긴다.
+test("delta CLI: --out 기록 시 <out>.json 사이드카에 실측 changedCount 기록", () => {
+  const base = tmpBase()
+  writeFileSync(join(base, "a.js"), "1")
+  const baseline = captureTree(base)
+  writeFileSync(join(base, "a.js"), "2")
+  writeFileSync(join(base, "b.js"), "3")
+  const outp = join(base, ".harnie", "review", "u", "delta.patch")
+  const r = runRaw(["delta", base, baseline, "--out", outp])
+  assert.equal(r.changedPaths.length, 2)
+  const side = JSON.parse(readFileSync(outp + ".json", "utf8"))
+  assert.equal(side.changedCount, 2)
+  assert.deepEqual([...side.changedPaths].sort(), ["a.js", "b.js"])
+  assert.equal(side.postSHA, r.postSHA)
+  assert.deepEqual(side.outOfScope, [])
+})

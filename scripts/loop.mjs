@@ -122,6 +122,12 @@ function cmdDelta({ pos, flags }) {
     if (CONTROL_BASENAMES.has(outBase) || /^manifest\.v\d+\.json$/.test(outBase)) die(`--out은 harnie control 파일을 덮어쓸 수 없음: ${flags.out}`)
     mkdirSync(dirname(flags.out), { recursive: true })
     writeFileSync(flags.out, d.patch)
+    // 실측 기록: 동결 manifest/설계의 파일 수 추정은 승인 시점 값이라 실제와 어긋난다(실측 W6 18↔52 등).
+    // patch 옆 `<out>.json`에 라운드마다 실제 changedPaths를 남겨, 추정-실측 회귀를 잡을 근거를 기계가 보존한다.
+    const sidecar = flags.out + ".json"
+    const sideBase = basename(canonicalize(sidecar))
+    if (!CONTROL_BASENAMES.has(sideBase) && !/^manifest\.v\d+\.json$/.test(sideBase))
+      writeJSON(sidecar, { baselineSHA: d.baselineSHA, postSHA: d.postSHA, changedCount: d.changedPaths.length, changedPaths: d.changedPaths, outOfScope: d.outOfScope, at: new Date().toISOString() })
   }
   out({
     baselineSHA: d.baselineSHA,

@@ -16,7 +16,8 @@
 - **데이터/스키마·마이그레이션**,
 - **외부 연동·API**,
 - 관련 **문서/ADR·저장소 지침**(`AGENTS.md`·`CLAUDE.md`·`README`·팀 컨벤션),
-- 컨벤션을 따를 **유사 기존 구현**.
+- 컨벤션을 따를 **유사 기존 구현**,
+- **이전 run들의 design errata**(있다면 이전 run `.harnie/plan/*/` 아래 `design/errata.md`) — 이 영역의 승인 설계에서 이미 발견된 결함들, 특히 `deferred-next-run` 항목. 이번 run의 설계가 같은 결함을 반복하지 않게 한다.
 
 추정 전에 실제 파일·인터페이스·의존성·컨벤션을 근거로 잡는다. 설계가 딛고 설 환경 사실 — `design-authoring-detail.md`의 Environment Fact Sheet 카테고리(스키마 마이그레이션 head, 테스트 인프라와 baseline 테스트 실패, 런타임 설정 제약, 프레임워크/빌드 도구 동작) — 를 `plan.md`의 `## Environment Fact Sheet` 섹션에 사실별 출처 경로와 함께 기록한다.
 

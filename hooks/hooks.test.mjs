@@ -892,6 +892,30 @@ test("워크스페이스 run: 오너 세션 승인 전 멤버 repo 쓰기 deny·
   assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(repoA, "src", "x.js") }, cwd: repoA, session_id: "s-other" }), null)
 })
 
+// 실측 회귀(관측 ④): 세션 id 교체(재개·컴팩션)로 비-owner가 된 세션이 run root에서 신뢰 CLI를 부르면,
+// 저하 분기가 멤버 workroot 문맥을 안 넘겨 `loop.mjs delta <멤버 repo>`가 세션 중반부터 일제히 차단됐다.
+test("워크스페이스 run: 비-owner 세션도 멤버 repo 대상 신뢰 CLI(delta)는 차단하지 않음", () => {
+  const w = mkdtempSync(join(tmpdir(), "harnie-hooks-ws-nonowner-"))
+  const repoA = join(w, "repoA")
+  execFileSync("git", ["init", "-q", repoA])
+  execFileSync("git", ["-C", repoA, "config", "user.email", "t@t"])
+  execFileSync("git", ["-C", repoA, "config", "user.name", "t"])
+  writeFileSync(join(repoA, "x.js"), "x")
+  execFileSync("git", ["-C", repoA, "add", "."])
+  execFileSync("git", ["-C", repoA, "commit", "-q", "-m", "init"])
+  hook(BOOT, { hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev-full ws nonowner task", cwd: w, session_id: "s-ws-owner" })
+  const runRoot = worktreeDirFor(w, `harnie/${slugify("ws nonowner task")}`)
+  const added = exec(["repo-add", "--root", runRoot, "--repo", repoA])
+  const mid = { cwd: runRoot, session_id: "s-ws-midswap" } // owner 아님, cwd는 run root
+  const cmd = `node ${REAL_LOOP} delta ${added.workroot} 0123456789abcdef0123456789abcdef01234567 --out ${join(added.workroot, ".harnie", "review", "u", "delta.patch")}`
+  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: cmd }, ...mid }), null)
+  // 신뢰 CLI가 아닌 .harnie 접근은 비-owner에게도 계속 차단 + 신뢰 CLI 형태의 인자 오류엔 진단이 실린다
+  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: `cat ${join(runRoot, ".harnie", "active.json")}` }, ...mid })))
+  const bad = hook(PRE, { tool_name: "Bash", tool_input: { command: cmd.replace(added.workroot, join(w, "unregistered")) }, ...mid })
+  assert.ok(deny(bad))
+  assert.match(bad.hookSpecificOutput.permissionDecisionReason, /승인 실패/)
+})
+
 test("owner 미기록 sentinel(구버전·stale): 식별된 세션은 잠그지 않고, session_id 부재 payload만 fail-closed", () => {
   const { root } = setupRepo() // sentinel에 owner 기록 없음(구버전 스키마/stale run)
   // 실측 사고 회귀 감시: harnie를 실행한 적 없는 세션이 "빈 목록 = 전원 owner" 폴백으로

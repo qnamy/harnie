@@ -38,7 +38,10 @@ try {
   const ctx = loadContext(root)
   if (!ctx.active || !isOwnerSession(root, ctx, p.session_id)) {
     if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root })
+      // 비-owner 세션(세션 id 교체·재개 등)도 run의 slug·멤버 workroot는 넘긴다 — 권위 부여가 아니라 신뢰
+      // CLI **분류 입력**이다. 이게 빠지면 workspace run의 `loop.mjs delta <멤버 repo>`·`apply --root <멤버>`가
+      // 미등록으로 보여 세션 중반부터 일제히 차단되는 실측 회귀가 있었다(autoAllow는 track 미전달로 계속 꺼짐).
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null, memberRoots: ctx.memberWorkroots || [] })
       if (d.deny) denyPreTool(d.reason)
     }
     allow()

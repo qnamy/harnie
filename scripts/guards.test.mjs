@@ -227,3 +227,18 @@ test("decideWatchdog: difficulty 티어 — hard는 60분/25콜, 미지·미지�
   assert.equal(r.wallClockBudgetMs, 60 * 60_000)
   assert.equal(r.maxCodexCalls, 25)
 })
+
+// 실측 회귀(관측 ④): 신뢰 CLI를 쓰고 있는데 deny 이유가 "loop.mjs로만 하라"인 자기모순 메시지 →
+// 승인 실패 원인(인자 불일치·메타문자·형태 오류)을 이유에 실어 .sh 우회 대신 인자를 고치게 한다.
+test("decideBash: 신뢰 CLI 형태의 승인 실패는 원인 진단이 deny 이유에 실림", () => {
+  const mismatch = decideBash({ command: "node /plugin/scripts/loop.mjs delta /other abc --out /other/.harnie/review/u/delta.patch", ...ctx })
+  assert.equal(mismatch.deny, true)
+  assert.match(mismatch.reason, /승인 실패/)
+  assert.match(mismatch.reason, /불일치/)
+  const meta = decideBash({ command: "node /plugin/scripts/loop.mjs capture /repo && cat .harnie/active.json", ...ctx })
+  assert.equal(meta.deny, true)
+  assert.match(meta.reason, /메타문자/)
+  const generic = decideBash({ command: "cat .harnie/active.json", ...ctx })
+  assert.equal(generic.deny, true)
+  assert.doesNotMatch(generic.reason, /승인 실패/)
+})

@@ -28,6 +28,8 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 ```
 - 첫 리뷰: producer 착수 직전에 baseline을 캡처 — delta에 producer 변경 전체가 담긴다. 재리뷰: **이번 수정 직전**에 새 baseline을 캡처 — delta에는 그 증분만 담긴다.
 - 출력 JSON의 `outOfScope`가 비어있지 않으면 외부 또는 동시 변경이 발생한 것이다. producer 변경으로 귀속하지 말고, `loop.md`의 귀속 불변에 따라 중단·조정한다. delta는 **전체 tree를 비교**하므로 **진짜 동시 producer는 격리 worktree가 필요하고, 공유 worktree라면 각 producer의 write-and-capture 구간을 직렬화**해야 한다(비중첩 경로만으로는 오염을 막지 못한다).
+- **containment 기준이 서브커맨드마다 다르다(workspace run에서 중요):** `delta`의 `--out`은 **위치 인자 `<repo>`**(멤버 repo workroot 또는 task worktree)의 `.harnie` 안이어야 하고, R4 `apply`의 `--ledger`/`--state`/`--review`는 **`--root`**(run workroot)의 `.harnie` 안이어야 한다. 따라서 workspace run에서는 한 리뷰 유닛의 파일이 **설계상** 두 곳에 나뉜다 — `delta.patch`는 멤버 repo에, `ledger.json`/`state.json`/`round-N.txt`는 run root에. 이는 정상이지 오류가 아니다; `--out`을 run root로 향하게 하면 containment에 걸린다.
+- 모든 `--out` 쓰기는 **`<out>.json` 사이드카**도 함께 기록한다(라운드별 실제 `changedCount`/`changedPaths`/`outOfScope`). 동결 manifest/설계의 파일 수 추정과 실측의 괴리를 남기는 지속 기록이다 — 리뷰어에게 묻지 말고 이걸 참조하라(리뷰어 본문이 그 괴리를 지적하지 않도록 지시한다).
 
 ## R2. 리뷰어 호출
 기준은 프로바이더와 무관하게 동일하다(이미 읽은 `loop.md` 스키마 + 해당 리뷰 기준: 코드는 `code-review.md`·`verification-tiers.md`, 설계는 `design-review.md`를 호출자가 명시한 고도로). 메커니즘만 다르다.
@@ -37,8 +39,9 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 - **재리뷰:** 같은 threadId로 `codex-reply`를 호출한다. git delta가 아니라 **개정된 설계의 경로와 바뀐 섹션 이름 목록**을 준다 — 내용이 아니라, stateful thread가 이미 이전 리뷰를 갖고 있으므로. 루프 안에서 stateless `codex review`를 반복 실행하지 않는다 — 매번 전체 컨텍스트를 다시 읽으면 비용이 무한정 늘어난다.
 
 **리뷰어가 Claude일 때(코드 루프):**
-- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
+- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약 — 그리고 run에 있다면 `design/errata.md` **경로**(사용자 승인 항목은 리뷰 기준의 일부; 리뷰어 agent body 참조) — 만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
 - 같은 방식으로 stateful하게 유지한다: 이전 ledger의 경로를 가리켜 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
+- **새 유닛 / 확인 리뷰:** 리뷰 유닛의 ledger는 이전 run이나 다른 유닛에서 절대 이월되지 않는다 — 리뷰 대상 코드가 이전 run에서 만들어졌고 그때 이슈가 해소됐더라도, 새 유닛은 빈 ledger로 시작한다. 그 첫 라운드 프롬프트에 **이전 ledger가 없으며 모든 이슈는 `(open)`이어야 한다**고 명시하라: 이전 run의 해소 항목을 `(resolved)`로 보고하면 미지 ID 제출이 되어 `apply`가 거부하고(fail-closed) 라운드 하나를 낭비한다. 이미 고쳐진 항목은 아예 보고하지 않는다.
 - **재리뷰 비용 계약(직렬·병렬 경로 공통):** 각 재리뷰 라운드의 프롬프트는 아직 열린 ID들(이전 ledger에서)과 이번 라운드의 `delta.patch` 경로를 명시하고, 그 ID들을 delta로 판정하도록 지시한다 — patch 밖 Read는 delta가 지명한 파일만, 필요한 구간만. 뒤 라운드는 1라운드보다 싸야 한다; 새로 전체 스캔한 흔적(변경 없는 파일 전체 재읽기)이 보이면 계약 위반이다 — 비용을 흡수하지 말고 다음 라운드 프롬프트를 조인다.
 - REJECT 편향을 적용한다. 리뷰어는 빌더의 프로바이더와 달라야 하며 read-only여야 한다(쓸 수 있는 코드 리뷰어는 리뷰어가 아니다).
 
