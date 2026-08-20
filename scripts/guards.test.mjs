@@ -210,3 +210,20 @@ test("decideWatchdog: 시간 예산·누락 시간·비정수 호출은 advisory
   assert.equal(invalidCalls.calls, 0)
   assert.equal(invalidCalls.deny, false)
 })
+
+test("decideWatchdog: difficulty 티어 — hard는 60분/25콜, 미지·미지정은 기본 티어", () => {
+  const startedAt = "2026-08-18T00:00:00.000Z"
+  const base = Date.parse(startedAt)
+  // 기본(30분/15콜)이면 deny인 지점이 hard에선 예산 내
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 45 * 60_000 }).deny, true)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 45 * 60_000, difficulty: "hard" }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 20, now: base, difficulty: "hard" }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 25, now: base, difficulty: "hard" }).deny, true)
+  // easy/medium/미지 값은 기본 티어
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 15, now: base, difficulty: "medium" }).deny, true)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 15, now: base, difficulty: "nonsense" }).deny, true)
+  // 결과에 유효 예산이 실린다(훅 메시지용)
+  const r = decideWatchdog({ startedAt, codexCalls: 0, now: base, difficulty: "hard" })
+  assert.equal(r.wallClockBudgetMs, 60 * 60_000)
+  assert.equal(r.maxCodexCalls, 25)
+})

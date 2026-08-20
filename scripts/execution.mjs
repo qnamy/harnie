@@ -75,6 +75,9 @@ export function validateManifest(obj) {
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return ["manifest 최상위가 plain object 아님"]
   if (!Array.isArray(obj.tasks) || obj.tasks.length === 0) errors.push("tasks는 비어있지 않은 배열")
   if (!Array.isArray(obj.gates)) errors.push("gates는 배열")
+  // difficulty(선택): run 난이도 — 실행 워치독 예산 티어의 소스. A5에서 manifest와 함께 승인된다.
+  if (obj.difficulty != null && !["easy", "medium", "hard"].includes(obj.difficulty))
+    errors.push(`difficulty는 "easy"|"medium"|"hard" (선택; got ${JSON.stringify(obj.difficulty)})`)
   const taskIds = new Set()
   const reviewUnits = new Set()
   const claimUnit = (u, where) => {
@@ -101,8 +104,24 @@ export function validateManifest(obj) {
       const cwd = v.cwd == null ? "." : v.cwd
       try { if (cwd !== ".") assertContainedRel(cwd, `tasks[${i}].verification[${j}].cwd`) } catch (e) { errors.push(e.message) }
       if (!Number.isInteger(v.timeout) || v.timeout <= 0) errors.push(`tasks[${i}].verification[${j}].timeout 양의 정수(ms) 필요`)
+      // 단위 착오 가드: 초 단위로 적으면(예: 60) spawnSync에 60ms로 전달돼 전 항목 영구 실패한다. 1초 미만에 유의미한 검증은 없다.
+      else if (v.timeout < 1000) errors.push(`tasks[${i}].verification[${j}].timeout ${v.timeout}ms — 1000ms 미만 거부(밀리초 단위; 초로 적은 단위 착오 의심)`)
       if (v.evidencePolicy != null && v.evidencePolicy !== "output-required" && v.evidencePolicy !== "exit-code-only")
         errors.push(`tasks[${i}].verification[${j}].evidencePolicy는 "output-required"|"exit-code-only" (기본 output-required)`)
+    }
+    // setup(선택): verification 前 1회 실행하는 웜업 argv(의존성 설치·콜드-스타트 컴파일). 증거가 아니므로 evidencePolicy 불가.
+    if (t.setup != null) {
+      if (!Array.isArray(t.setup) || t.setup.length === 0) errors.push(`tasks[${i}].setup은 생략 또는 비어있지 않은 배열(웜업 argv)`)
+      else for (const [j, s] of t.setup.entries()) {
+        if (!s || typeof s !== "object") { errors.push(`tasks[${i}].setup[${j}] 객체 아님`); continue }
+        if (typeof s.executable !== "string" || !s.executable) errors.push(`tasks[${i}].setup[${j}].executable 필요`)
+        if (!Array.isArray(s.args) || !s.args.every((a) => typeof a === "string")) errors.push(`tasks[${i}].setup[${j}].args 문자열 배열`)
+        const scwd = s.cwd == null ? "." : s.cwd
+        try { if (scwd !== ".") assertContainedRel(scwd, `tasks[${i}].setup[${j}].cwd`) } catch (e) { errors.push(e.message) }
+        if (!Number.isInteger(s.timeout) || s.timeout <= 0) errors.push(`tasks[${i}].setup[${j}].timeout 양의 정수(ms) 필요`)
+        else if (s.timeout < 1000) errors.push(`tasks[${i}].setup[${j}].timeout ${s.timeout}ms — 1000ms 미만 거부(밀리초 단위; 초로 적은 단위 착오 의심)`)
+        if (s.evidencePolicy != null) errors.push(`tasks[${i}].setup[${j}]: evidencePolicy 불가(웜업은 검증 증거가 아님)`)
+      }
     }
   }
   for (const [i, t] of (Array.isArray(obj.tasks) ? obj.tasks : []).entries())
@@ -112,6 +131,21 @@ export function validateManifest(obj) {
     const withRepo = obj.tasks.filter((t) => t && t.repo != null).length
     if (withRepo !== 0 && withRepo !== obj.tasks.length)
       errors.push(`tasks의 repo 키는 all-or-none — ${withRepo}/${obj.tasks.length}개만 지정됨(워크스페이스 run이면 전부, 아니면 전부 생략)`)
+  }
+  // task 간 scope disjoint 강제(같은 repo 안에서): 동일 경로 또는 디렉터리 부모/자식이면 병렬 격리와 delta 귀속이 깨진다.
+  // 승인 후 manifest는 immutable이라 B1에서 발견하면 복구 경로가 없으므로, 여기(arm-approval 경유)에서 fail-closed로 걸어야 한다.
+  if (Array.isArray(obj.tasks)) {
+    const normScope = (p) => String(p).replace(/\/+$/, "")
+    const scopeEntries = []
+    for (const [i, t] of obj.tasks.entries())
+      if (t && Array.isArray(t.scope)) for (const s of t.scope) if (typeof s === "string") scopeEntries.push({ i, repo: t.repo == null ? "" : t.repo, path: normScope(s) })
+    for (let a = 0; a < scopeEntries.length; a++)
+      for (let b = a + 1; b < scopeEntries.length; b++) {
+        const A = scopeEntries[a], B = scopeEntries[b]
+        if (A.i === B.i || A.repo !== B.repo) continue
+        if (A.path === B.path || A.path.startsWith(B.path + "/") || B.path.startsWith(A.path + "/"))
+          errors.push(`tasks[${A.i}]·tasks[${B.i}] scope 겹침(${A.path} ↔ ${B.path}) — task scope는 쌍마다 disjoint 필요(A4에서 분해 수정)`)
+      }
   }
   const gateNames = []
   for (const [i, g] of (Array.isArray(obj.gates) ? obj.gates : []).entries()) {
@@ -131,7 +165,8 @@ export function validateManifest(obj) {
 }
 
 export function canonicalManifest(obj) {
-  return { tasks: obj.tasks, gates: obj.gates }
+  // difficulty는 있을 때만 포함 — 기존(필드 없는) manifest의 planHash를 바꾸지 않는다.
+  return { tasks: obj.tasks, gates: obj.gates, ...(obj.difficulty != null ? { difficulty: obj.difficulty } : {}) }
 }
 
 const SEARCH_BASENAMES = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack"])
@@ -632,7 +667,16 @@ export function bindApproval(root, slug, toolUseId, response) {
   const manifest = { ...canonicalManifest(d.block), planHash: d.planHash }
   if (existsSync(manifestPath)) {
     const prev = readJSONStrict(manifestPath)
-    if (prev.planHash !== d.planHash) throw new FailClosed("manifest.json이 이미 다른 planHash로 존재 — immutable 위반")
+    if (prev.planHash !== d.planHash) {
+      // manifest 개정 — 실제 사용자 재승인을 통과한 뒤에만 도달한다(approve 선택 + 새 planHash 일치).
+      // 이전 정본은 감사용으로 manifest.v<n>.json에 아카이브하고 교체한다. 이 분기 밖에서 manifest를
+      // 바꾸는 경로는 없다: 직접 쓰기는 훅이, set-phase 역전이는 CLI가 여전히 차단한다.
+      // 기존 receipt는 옛 planHash로 남아 completion이 재검증을 강제한다(verify 재실행 필요, 리뷰 ledger는 유지).
+      let n = 1
+      while (existsSync(join(dir, `manifest.v${n}.json`))) n++
+      writeJSONAtomic(join(dir, `manifest.v${n}.json`), { ...prev, supersededAt: new Date().toISOString(), supersededBy: d.planHash })
+      writeJSONAtomic(manifestPath, manifest)
+    }
   } else {
     writeJSONAtomic(manifestPath, manifest)
   }
@@ -716,7 +760,10 @@ export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null }
       : taskId != null && ex.tasks[taskId] ? [taskId, ex.tasks[taskId]] : null
     if (!found) return null
     const [id, task] = found
-    return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt }
+    // manifest의 difficulty(A5에서 함께 승인)로 워치독 예산 티어를 결정한다 — 없으면 기본 티어.
+    const manifest = readJSONOrNull(join(planDir(root, "plan", slug), "manifest.json"))
+    const difficulty = manifest && typeof manifest.difficulty === "string" ? manifest.difficulty : undefined
+    return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt, ...(difficulty ? { difficulty } : {}) }
   } catch { return null } // advisory 읽기 실패는 훅 차단 근거가 아니다.
 }
 
@@ -841,6 +888,17 @@ function runVerification(execRoot, v) {
   }
 }
 
+// 웜업(setup) 실행 — 검증 증거가 아니므로 vacuous 판정 없음. exitCode만 기록한다.
+function runSetup(execRoot, s) {
+  const cwd = s.cwd && s.cwd !== "." ? join(execRoot, s.cwd) : execRoot
+  const r = spawnSync(s.executable, s.args, { cwd, timeout: s.timeout, encoding: "utf8", maxBuffer: VERIFY_MAX_OUT, env: verifyEnv() })
+  const exitCode = typeof r.status === "number" ? r.status : (r.signal ? 124 : 1)
+  return {
+    executable: s.executable, args: s.args, cwd: s.cwd == null ? "." : s.cwd, timeout: s.timeout, exitCode,
+    ...(r.error ? { spawnError: String(r.error.message).slice(0, 200) } : {}),
+  }
+}
+
 function cmdVerify({ flags }) {
   const root = flags.root || die("--root 필요")
   const slug = flags.slug || die("--slug 필요")
@@ -857,14 +915,19 @@ function cmdVerify({ flags }) {
   if (!gitRoot) die(`task ${taskId}: repo 바인딩 실패 — ${reason}`)
   const reviewedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope)
   const preScope = computeScopeHash(gitRoot, captureTree(gitRoot), task.scope)
-  const results = task.verification.map((v) => runVerification(gitRoot, v))
+  // 웜업: verification 前 순차 1회(의존성 설치·콜드-스타트 컴파일이 verification timeout을 먹지 않게).
+  // setup 실패 시 verification을 돌리지 않고 receipt에 실패로 기록한다. setup도 scope 소스 불변 검사에 포함된다.
+  const setupResults = (Array.isArray(task.setup) ? task.setup : []).map((s) => runSetup(gitRoot, s))
+  const setupFail = setupResults.find((r) => r.exitCode !== 0)
+  const results = setupFail ? [] : task.verification.map((v) => runVerification(gitRoot, v))
   const postScope = computeScopeHash(gitRoot, captureTree(gitRoot), task.scope)
   if (preScope !== postScope) die(`task ${taskId}: 검증이 scope 소스를 변형함(scopeHash 불변 위반) — fail-closed`)
-  const allPass = results.every((r) => r.exitCode === 0)
+  const allPass = !setupFail && results.every((r) => r.exitCode === 0)
   const vacuousReasons = results.flatMap((r, i) => r.vacuousReasons.map((x) => `verification[${i}] ${r.executable} ${r.args.join(" ")}: ${x}`))
   const vacuous = vacuousReasons.length > 0
-  const receipt = { taskId, results, exitCode: allPass ? 0 : (results.find((r) => r.exitCode !== 0)?.exitCode ?? 1), vacuous, vacuousReasons, scopeHash: reviewedScopeHash, planHash: manifest.planHash, at: new Date().toISOString() }
+  const receipt = { taskId, ...(setupResults.length ? { setupResults } : {}), results, exitCode: setupFail ? setupFail.exitCode : (allPass ? 0 : (results.find((r) => r.exitCode !== 0)?.exitCode ?? 1)), vacuous, vacuousReasons, scopeHash: reviewedScopeHash, planHash: manifest.planHash, at: new Date().toISOString() }
   writeJSONAtomic(join(dir, "review", task.reviewUnit, "receipt.json"), receipt)
+  if (setupFail) process.stderr.write(`harnie-exec: SETUP FAILED — 웜업 실패(exitCode ${setupFail.exitCode}): ${setupFail.executable} ${setupFail.args.join(" ")} — verification 미실행\n`)
   if (vacuous) process.stderr.write(`harnie-exec: VACUOUS VERIFICATION — exitCode 0이지만 검증 증거 없음: ${vacuousReasons.join(" | ")}\n`)
   out({ ok: allPass && !vacuous, receipt })
 }

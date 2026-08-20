@@ -4,7 +4,7 @@ import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
-import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, WATCHDOG_DEFAULTS } from "../scripts/guards.mjs"
+import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
 const TRUSTED_CLIS = new Set([join(SCRIPTS, "loop.mjs"), join(SCRIPTS, "execution.mjs"), join(SCRIPTS, "worktree.mjs")])
@@ -87,8 +87,8 @@ try {
           if (usage) {
             const watchdog = decideWatchdog(usage)
             if (watchdog.deny) {
-              const elapsed = watchdog.elapsedMs == null ? "시간 정보 없음" : `${Math.floor(watchdog.elapsedMs / 60_000)}분/${WATCHDOG_DEFAULTS.wallClockBudgetMs / 60_000}분`
-              denyPreTool(`워치독 예산 초과: task ${usage.taskId}, 경과 ${elapsed}, 빌더 codex 호출 ${watchdog.calls}/${WATCHDOG_DEFAULTS.maxCodexCalls}. 추가 빌더 호출 중단 — 진행 상황과 블로커를 사용자에게 보고하라(정직 종료는 HARNIE_STATUS: INCOMPLETE — <blocker> footer). 사용자 동의 후 계속하려면: node ${join(SCRIPTS, "execution.mjs")} watchdog-extend --root ${root} --slug ${slug} --task ${usage.taskId} --reason "<사용자 승인 근거>"`)
+              const elapsed = watchdog.elapsedMs == null ? "시간 정보 없음" : `${Math.floor(watchdog.elapsedMs / 60_000)}분/${watchdog.wallClockBudgetMs / 60_000}분`
+              denyPreTool(`워치독 예산 초과: task ${usage.taskId}, 경과 ${elapsed}, 빌더 codex 호출 ${watchdog.calls}/${watchdog.maxCodexCalls}. 추가 빌더 호출 중단 — 진행 상황과 블로커를 사용자에게 보고하라(정직 종료는 HARNIE_STATUS: INCOMPLETE — <blocker> footer). 사용자 동의 후 계속하려면: node ${join(SCRIPTS, "execution.mjs")} watchdog-extend --root ${root} --slug ${slug} --task ${usage.taskId} --reason "<사용자 승인 근거>"`)
             }
           }
         } catch { /* advisory 워치독 오류는 fail-open */ }

@@ -118,7 +118,8 @@ function cmdDelta({ pos, flags }) {
   const d = computeDelta(repo, baseline, { expectScope })
   if (flags.out) {
     assertUnderHarnie(flags.out, "out", repo) // delta의 root = positional repo
-    if (CONTROL_BASENAMES.has(basename(canonicalize(flags.out)))) die(`--out은 harnie control 파일을 덮어쓸 수 없음: ${flags.out}`)
+    const outBase = basename(canonicalize(flags.out))
+    if (CONTROL_BASENAMES.has(outBase) || /^manifest\.v\d+\.json$/.test(outBase)) die(`--out은 harnie control 파일을 덮어쓸 수 없음: ${flags.out}`)
     mkdirSync(dirname(flags.out), { recursive: true })
     writeFileSync(flags.out, d.patch)
   }
@@ -131,6 +132,31 @@ function cmdDelta({ pos, flags }) {
     patchFile: flags.out || null,
     empty: d.changedPaths.length === 0,
   })
+}
+
+// Read-only export of a .harnie artifact. The Bash guard blanket-blocks any command whose text
+// references `.harnie` (reads included — read-only shell commands can't be classified reliably),
+// so design docs and receipts leave .harnie through this sanctioned subcommand, never via cp/grep.
+// Writes nothing under .harnie; --out must land outside it so this can't become a state-write primitive.
+function cmdExport({ pos, flags }) {
+  const repo = pos[0] || die("export <repo> <rel> 필요 — <rel>은 .harnie/ 기준 상대경로(예: plan/<slug>/design/rev-3.md)")
+  const rel = pos[1] || die("export: .harnie/ 기준 상대경로 필요(예: plan/<slug>/design/rev-3.md)")
+  const src = join(repo, ".harnie", rel)
+  assertUnderHarnie(src, "export", repo)
+  if (!existsSync(src)) die(`export 대상 없음: ${src}`)
+  const content = readFileSync(src, "utf8")
+  if (flags.out) {
+    const dest = canonicalize(flags.out)
+    const realRepo = existsSync(repo) ? realpathSync(repo) : resolve(repo)
+    const relOut = relative(join(realRepo, ".harnie"), dest)
+    if (!(relOut.startsWith(".." + sep) || relOut === ".." || isAbsolute(relOut)))
+      die(`--out은 .harnie 밖이어야 함(상태 쓰기 프리미티브 전용 방지): ${flags.out}`)
+    mkdirSync(dirname(dest), { recursive: true })
+    writeFileSync(dest, content)
+    out({ ok: true, src, out: dest, bytes: Buffer.byteLength(content) })
+  } else {
+    process.stdout.write(content)
+  }
 }
 
 // Only qualitative progress remains model-supplied; counters and transitions are deterministic.
@@ -261,6 +287,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
     case "capture": cmdCapture(args); break
     case "delta": cmdDelta(args); break
     case "apply": cmdApply(args); break
-    default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"} — capture|delta|apply`)
+    case "export": cmdExport(args); break
+    default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"} — capture|delta|apply|export`)
   }
 }

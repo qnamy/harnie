@@ -11,29 +11,44 @@ export function isControlPath(relPath) {
   if (p.startsWith(".harnie/pending-route/")) return true
   if (p.startsWith(".harnie/sessions/")) return true // 세션→run(worktree) 바인딩 보호(T2 DEC-001)
   if (p === ".harnie/state.lock") return true
-  return CONTROL_BASENAMES.has(p.split("/").pop())
+  const base = p.split("/").pop()
+  if (/^manifest\.v\d+\.json$/.test(base)) return true // 재승인으로 교체된 manifest 아카이브(감사 기록) 보호
+  return CONTROL_BASENAMES.has(base)
 }
 
 const PLANNING_PHASES = new Set(["planning", "awaiting-approval"])
 
 // 실행 워치독은 권위가 아닌 advisory 예산이다. 상태가 불완전하면 시간을 근거로 막지 않는다.
 export const WATCHDOG_DEFAULTS = { wallClockBudgetMs: 30 * 60_000, maxCodexCalls: 15 }
+// 벽시계 예산은 빌더뿐 아니라 리뷰 라운드까지 먹는다 — hard run은 리뷰 라운드 수가 많아 기본 예산을 상향한다.
+export const WATCHDOG_TIERS = {
+  easy: WATCHDOG_DEFAULTS,
+  medium: WATCHDOG_DEFAULTS,
+  hard: { wallClockBudgetMs: 60 * 60_000, maxCodexCalls: 25 },
+}
+export function watchdogBudget(difficulty) {
+  return WATCHDOG_TIERS[difficulty] || WATCHDOG_DEFAULTS
+}
 
 export function decideWatchdog({
   startedAt,
   codexCalls,
   now = Date.now(),
-  wallClockBudgetMs = WATCHDOG_DEFAULTS.wallClockBudgetMs,
-  maxCodexCalls = WATCHDOG_DEFAULTS.maxCodexCalls,
+  difficulty,
+  wallClockBudgetMs,
+  maxCodexCalls,
 } = {}) {
+  const tier = watchdogBudget(difficulty)
+  const budgetMs = wallClockBudgetMs == null ? tier.wallClockBudgetMs : wallClockBudgetMs
+  const maxCalls = maxCodexCalls == null ? tier.maxCodexCalls : maxCodexCalls
   const calls = Number.isInteger(codexCalls) && codexCalls >= 0 ? codexCalls : 0
   const parsed = typeof startedAt === "string" ? Date.parse(startedAt) : NaN
   const elapsedMs = Number.isFinite(parsed) ? now - parsed : null
-  const elapsedMinutes = elapsedMs == null ? "시간 정보 없음" : `${Math.floor(elapsedMs / 60_000)}분/${wallClockBudgetMs / 60_000}분`
-  const reason = `경과 ${elapsedMinutes}, 빌더 codex 호출 ${calls}/${maxCodexCalls}`
-  const deny = calls >= maxCodexCalls || (elapsedMs != null && elapsedMs >= wallClockBudgetMs)
-  const warn = !deny && (calls >= Math.ceil(maxCodexCalls * 0.8) || (elapsedMs != null && elapsedMs >= wallClockBudgetMs * 0.8))
-  return { deny, warn, elapsedMs, calls, reason }
+  const elapsedMinutes = elapsedMs == null ? "시간 정보 없음" : `${Math.floor(elapsedMs / 60_000)}분/${budgetMs / 60_000}분`
+  const reason = `경과 ${elapsedMinutes}, 빌더 codex 호출 ${calls}/${maxCalls}`
+  const deny = calls >= maxCalls || (elapsedMs != null && elapsedMs >= budgetMs)
+  const warn = !deny && (calls >= Math.ceil(maxCalls * 0.8) || (elapsedMs != null && elapsedMs >= budgetMs * 0.8))
+  return { deny, warn, elapsedMs, calls, reason, wallClockBudgetMs: budgetMs, maxCodexCalls: maxCalls }
 }
 
 // control 파일은 항상 보호하고, 승인 전에는 활성 run 디렉터리 밖 Write/Edit를 막는다.
@@ -104,7 +119,7 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots
   return false
 }
 
-const AUTO_ALLOW_SUB = { "loop.mjs": new Set(["capture", "delta"]), "execution.mjs": new Set(["completion", "seal-verify"]) }
+const AUTO_ALLOW_SUB = { "loop.mjs": new Set(["capture", "delta", "export"]), "execution.mjs": new Set(["completion", "seal-verify"]) }
 function hasValidActiveContext(root, slug, track) {
   return typeof root === "string" && root.length > 0 && typeof slug === "string" && slug.length > 0 && (track === "plan" || track === "quick")
 }
@@ -126,6 +141,9 @@ export function decideBash({ command, trustedClis = new Set(), activeRoot = null
   return { deny: false, autoAllow: false }
 }
 
+// harnie-designer는 Write를 가지지만(설계 산출물 직접 기록) 여기 남는다: 이 집합은 planning 단계에
+// 스폰 가능한 에이전트를 정하는 것이고, designer의 Write는 decideWriteEdit가 승인 前
+// `.harnie/<track>/<slug>/` 안으로 제한한다(소스 쓰기 불가). 빌더류는 여전히 제외.
 const READONLY_AGENTS = new Set(["harnie-scout", "harnie-reviewer", "harnie-designer", "Explore", "Plan"])
 function normalizeAgentType(t) {
   return typeof t === "string" && t.startsWith("harnie:") ? t.slice("harnie:".length) : t

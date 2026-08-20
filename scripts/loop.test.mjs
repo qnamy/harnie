@@ -114,6 +114,31 @@ test("apply CLI: 2라운드 — blocker 해소 후 APPROVE로 승인", () => {
   assert.equal(r.openBlocking, 0)
 })
 
+// ── export: .harnie 산출물 읽기 전용 반출 ─────────────────────────────
+test("export CLI: .harnie 하위 파일을 stdout·--out으로 반출", () => {
+  const base = tmpBase()
+  const designDir = join(base, ".harnie", "plan", "feat-x", "design")
+  mkdirSync(designDir, { recursive: true })
+  writeFileSync(join(designDir, "rev-3.md"), "# 설계 rev-3\n본문")
+  const stdout = execFileSync("node", [CLI, "export", base, "plan/feat-x/design/rev-3.md"], { encoding: "utf8" })
+  assert.equal(stdout, "# 설계 rev-3\n본문")
+  const dest = join(base, "exported-design.md")
+  const r = JSON.parse(execFileSync("node", [CLI, "export", base, "plan/feat-x/design/rev-3.md", "--out", dest], { encoding: "utf8" }))
+  assert.equal(r.ok, true)
+  assert.equal(readFileSync(dest, "utf8"), "# 설계 rev-3\n본문")
+})
+
+test("export CLI: traversal로 .harnie 밖 읽기 거부, --out으로 .harnie 안 쓰기 거부, 부재 파일 die", () => {
+  const base = tmpBase()
+  const designDir = join(base, ".harnie", "plan", "feat-x", "design")
+  mkdirSync(designDir, { recursive: true })
+  writeFileSync(join(designDir, "rev-1.md"), "x")
+  writeFileSync(join(base, "secret.txt"), "밖")
+  assert.notEqual(runFailRaw(["export", base, "../secret.txt"]), 0)                                        // .harnie 밖 읽기
+  assert.notEqual(runFailRaw(["export", base, "plan/feat-x/design/rev-1.md", "--out", join(base, ".harnie", "plan", "feat-x", "design", "rev-2.md")]), 0) // .harnie 안 쓰기
+  assert.notEqual(runFailRaw(["export", base, "plan/feat-x/design/rev-9.md"]), 0)                          // 부재
+})
+
 // ── 입력 검증 + STALLED 래치 + 명시적 재진입 ──────────────────────────
 function runFailRaw(args) {
   try { execFileSync("node", [CLI, ...args], { encoding: "utf8", stdio: "pipe" }); return 0 }

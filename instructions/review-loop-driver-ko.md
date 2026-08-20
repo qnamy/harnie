@@ -39,6 +39,7 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 **리뷰어가 Claude일 때(코드 루프):**
 - 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
 - 같은 방식으로 stateful하게 유지한다: 이전 ledger의 경로를 가리켜 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
+- **재리뷰 비용 계약(직렬·병렬 경로 공통):** 각 재리뷰 라운드의 프롬프트는 아직 열린 ID들(이전 ledger에서)과 이번 라운드의 `delta.patch` 경로를 명시하고, 그 ID들을 delta로 판정하도록 지시한다 — patch 밖 Read는 delta가 지명한 파일만, 필요한 구간만. 뒤 라운드는 1라운드보다 싸야 한다; 새로 전체 스캔한 흔적(변경 없는 파일 전체 재읽기)이 보이면 계약 위반이다 — 비용을 흡수하지 말고 다음 라운드 프롬프트를 조인다.
 - REJECT 편향을 적용한다. 리뷰어는 빌더의 프로바이더와 달라야 하며 read-only여야 한다(쓸 수 있는 코드 리뷰어는 리뷰어가 아니다).
 
 어느 쪽이든, 리뷰는 R4 前에 canonical 스키마로 `<dir>/round-N.txt`에 쓰인다.
@@ -63,9 +64,11 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> \
   - `needsReRequest: true`: 파싱 실패, verdict 불일치, 또는 blocking 이슈 누락. ledger·state 불변. 리뷰어에게 스키마 오류·누락을 지적해 재요청(Codex는 `codex-reply`, Claude는 리뷰 재실행).
   - `needsReentry: true`: 이전 state가 STALLED이고 `--reentry`가 주어지지 않음. ledger·state **불변**, 리뷰 미적용 — **이번 라운드의 gate progress나 APPROVE조차 STALLED를 자동으로 풀지 않는다.** 사용자에게 보고 후 `--reentry <reason>`로 `apply`를 재실행.
   - `machineState: APPROVED`: 이 리뷰 유닛 통과.
-  - `machineState: REVISING`: producer가 open 이슈를 고친 뒤 R2로 재리뷰. **코드 루프:** 먼저 R1로 돌아가 수정 前 새 baseline(git delta)을 캡처한다. **설계 루프:** R1이 없다 — designer가 설계를 개정해 개정 내용을 재주입한다(baseline·delta 없음).
+  - `machineState: REVISING`: producer가 open 이슈를 고친 뒤 R2로 재리뷰. **코드 루프:** 먼저 R1로 돌아가 수정 前 새 baseline(git delta)을 캡처한다. **설계 루프:** R1이 없다 — designer가 개정된 설계를 오케스트레이터가 지명한 다음 산출물 경로에 직접 쓴다(baseline·delta 없음).
   - `machineState: STALLED`: 정지하고 증거·blocker·미검증 범위를 사용자에게 보고한다. 명시적 `--reentry` 주장으로만 재개한다.
 - 생략된 non-blocking 이슈에 대한 `protocolViolations` 항목은 진행을 막지는 않지만 receipt에 반드시 기록한다.
+
+**순서 경성 규칙 — 라운드 N의 `apply`를 다음 producer 호출보다 먼저.** 현재 라운드의 `apply`를 실행해 `committed: true`를 확인한 **뒤에만** 다음 producer 호출(`codex-reply` 수정, 다음 라운드 리뷰 요청, 다음 태스크 빌더)을 보낸다. 건너뛴 `apply`는 소급 기록이 불가능하다: 트리가 이미 전진해 그 라운드의 `--artifact` postSHA가 어떤 현재 트리와도 일치하지 않고, 다음 라운드 리뷰어 응답은 ledger에 등록된 적 없는 ID를 표기하게 되므로 `apply`가 "미지 ID를 처음부터 resolved로 제출"로 거부한다(설계상 fail-closed이며, 그 시점엔 시점 바인딩을 복원할 수 없다). 라운드 하나가 apply되지 않은 채 지나갔음을 발견하면 사후 재구성하지 말고, 새 델타를 캡처해 그 리뷰를 새 라운드로 다시 돈다. (`needsReRequest`에 따른 리뷰어 재요청은 producer 호출이 아니므로 예외다.)
 
 ## R5. (옵션) 최종 사인오프
 규모가 크거나 사용자가 요청하면, 신선하고 git-aware한 최종 사인오프를 **1회** 돈다 — 단 **producer와 크로스-모델을 유지**해야 한다. **코드 루프**(producer = Codex)에서는 사인오프가 uncommitted diff에 대한 **신선한 Claude 리뷰**(기준을 적용하는 read-only Claude 에이전트)다. `codex review --uncommitted`를 추가하는 것은 명시적인 **dual/auxiliary** 패스로서만 허용되며, 유일한 사인오프로는 안 된다. **설계 루프**(producer = Claude)에서는 신선한 Codex 리뷰가 크로스-모델 사인오프다. 반복 루프 안에서 stateless 사인오프를 쓰지 않는다.

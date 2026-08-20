@@ -2,9 +2,9 @@
 
 > `skills/dev-full/SKILL-ko.md`에서 PHASE B로 진입할 때 이 파일을 읽는다. 그 파일의 Step 0·상태 위치·위임 참조 규칙·실행 상태/강제 훅·Notepad 프로토콜 섹션은 이미 읽었다고 전제한다 — 여기서 재서술하지 않는다. 이 파일은 B1과 **직렬 경로**(B2~B3), 그리고 **두 경로 공통** 단계(B4~B6)를 다룬다. **병렬 경로**(B2′~B3′)는 대신 `phases/phase-b-parallel-ko.md`를 읽고, B4로 돌아올 때 이 파일로 복귀한다.
 >
-> **워크스페이스 run(멀티레포):** 이 파일이 **git tree로서의 run worktree**를 언급할 때마다(빌더 `cwd`, `loop.mjs capture`/`delta` 대상, task-branch worktree) — **그 task의 멤버 repo workroot** (`<member repo>/.harnie-wt/harnie-<slug>`, sentinel의 `repos` registry에서) 로 대체한다. task가 어느 것인지는 manifest의 그 task `repo` key가 지명한다. 리뷰 상태 경로(`<repo>/.harnie/plan/<slug>/review/…`), 모든 `execution.mjs` 호출, `loop.mjs apply --root`는 run workroot `<repo>`를 계속 쓴다. 전체-run artifact는 B5 gate를 위해 `loop.mjs capture <repo>` → `ws:<sha256>` (모든 멤버 워크루트 합성). 다른 멤버 repo의 task는 구조상 disjoint scope를 갖으므로, B1의 겹침 검사는 각 repo 내에서만 적용된다.
+> **워크스페이스 run(멀티레포):** 이 파일이 **git tree로서의 run worktree**를 언급할 때마다(빌더 `cwd`, `loop.mjs capture`/`delta` 대상, task-branch worktree) — **그 task의 멤버 repo workroot** (`<member repo>/.harnie-wt/harnie-<slug>`, sentinel의 `repos` registry에서) 로 대체한다. task가 어느 것인지는 manifest의 그 task `repo` key가 지명한다. 리뷰 상태 경로(`<repo>/.harnie/plan/<slug>/review/…`), 모든 `execution.mjs` 호출, `loop.mjs apply --root`는 run workroot `<repo>`를 계속 쓴다. 전체-run artifact는 B5 gate를 위해 `loop.mjs capture <repo>` → `ws:<sha256>` (모든 멤버 워크루트 합성). 다른 멤버 repo의 task는 구조상 disjoint scope를 갖으므로, manifest의 scope-disjoint 검증(arm-approval에서 강제)은 각 repo 내에서만 적용된다.
 
-**B1. 플랜 파싱 → 작업별 파일 스코프 부여 → 실행 경로 선택.** manifest의 모든 태스크는 이미 `scope`(만질 경로, A4의 `harnie-manifest` 스키마)를 선언한다 — **경로만, glob 아님**: `loop.mjs delta`의 `outOfScope` 검사는 변경된 각 경로를 정확 일치 또는 디렉터리-접두어로만 대조하지 glob 확장을 하지 않으므로, 와일드카드 항목을 넣으면 실제 변경 전부가 범위 밖으로 오탐된다. 위임 前에 모든 태스크 쌍의 `scope`가 **비중첩**인지 확인한다 — 어떤 경로도 두 태스크의 `scope`에 동시에 나오거나(또는 한쪽의 상위/하위 디렉터리이거나) 하면 안 된다. 겹치면 분해 실패다: A4로 돌아가 겹치지 않게 manifest를 고치고 A5 승인을 다시 받은 뒤 진행한다. 비중첩 스코프는 병렬 실행의 **전제조건**이며, 여기서 한 번 확인하는 것이지 런타임 가드가 아니다.
+**B1. 플랜 파싱 → 작업별 파일 스코프 부여 → 실행 경로 선택.** manifest의 모든 태스크는 이미 `scope`(만질 경로, A4의 `harnie-manifest` 스키마)를 선언한다 — **경로만, glob 아님**: `loop.mjs delta`의 `outOfScope` 검사는 변경된 각 경로를 정확 일치 또는 디렉터리-접두어로만 대조하지 glob 확장을 하지 않으므로, 와일드카드 항목을 넣으면 실제 변경 전부가 범위 밖으로 오탐된다. 태스크 scope는 이미 **쌍마다 disjoint**임이 보장된다 — 같은 repo 안에서 어떤 경로도 다른 태스크 `scope` 항목과 동일하거나 상위/하위 디렉터리가 아니다 — `validateManifest`가 `arm-approval`(A5) 시점, 즉 manifest를 아직 고칠 수 있는 시점에 fail-closed로 강제하기 때문이다. 승인된 manifest는 겹침을 가질 수 없으므로 B1은 재검사하지 않는다. (검사가 여기가 아니라 A5에 있는 이유: 승인 후 manifest는 A5.2의 사용자 게이트 개정으로만 바뀌므로, B1 시점 발견은 그 전면 재승인을 강제하게 된다.) 비중첩 스코프는 병렬 실행의 **전제조건**이며, 승인 게이트가 보장하는 것이지 런타임 가드가 아니다.
 
 그다음 경로를 고른다:
 - **직렬 경로 — 태스크 1개, 또는 총 규모가 작아 격리로 얻을 게 없을 때.** 아래 B2~B3를 그대로 진행: worktree 없이 빌더 1개, 리뷰 루프 1개, run worktree에서 직접.
@@ -12,7 +12,7 @@
 
 ### 직렬 경로
 
-- **워치독 계약.** 워치독 deny를 받으면 즉시 진행 상황·블로커를 사용자에게 보고하고 지시를 기다린다. 연장은 사용자 동의 후 `execution.mjs watchdog-extend --reason`으로만 한다.
+- **워치독 계약.** 워치독 deny를 받으면 즉시 진행 상황·블로커를 사용자에게 보고하고 지시를 기다린다. 연장은 사용자 동의 후 `execution.mjs watchdog-extend --reason`으로만 한다. task별 예산 기본값은 30분/빌더 15콜이며 manifest의 `difficulty` 필드로 티어링된다(`hard` = 60분/25콜) — 리뷰 라운드도 빌드와 같은 벽시계를 소모한다.
 
 **B2. 작업 → Codex 빌더 위임 (개발 producer = Codex).** 위임 직전 순서로: ① `execution.mjs set-task --root <repo> --slug <slug> --task <id> --run-status building`(빌더 workspace-write codex 부트스트랩을 훅이 이걸로 게이트) → ② `loop.mjs capture <repo>`로 baseline 캡처(B3 R1 fix-delta 기준점) → ③ `execution.mjs seal --root <repo> --slug <slug>`(권위 스냅샷). 그다음 **Codex 빌더**(codex MCP, `sandbox:"workspace-write"`, `approval-policy:"never"`, `cwd:<repo>`, **run 난이도 모델**(`model-matrix.md` §3: easy = `gpt-5.6-luna`, 순수 기계적이면 `gpt-5.3-codex-spark`, medium = `gpt-5.6-terra`, hard = `gpt-5.6-sol`; 모델 선택이 불가능하면 설치 기본값))에게 위임 — 프롬프트에 작업 지시 + **승인된 `plan.md`의 해당 설계 섹션**을 실어 리뷰된 설계대로 짓게 한다. 6-section 계약(요구/설계간단/구현/견고함/테스트/검증) — 요약이며 구현 소스 전문이 아님(review-loop-driver.md 참조). 또한 `review-loop-driver.md`의 **빌더 위임 계약** 상시 규칙(baseline 대비 테스트 증거, 신규 테스트 fail-capability 증명, 홈 디렉터리 캐시 도구의 캐시 경로 사전 지정)을 프롬프트에 포함한다. surgical scope. **빌더는 `.harnie/`에 접근하지 않는다**(권위 상태는 오케스트레이터·CLI 소유). threadId는 PostToolUse 훅이 성공한 codex를 관찰해 등록(재수정은 codex-reply).
 
@@ -26,7 +26,7 @@
   - **seal-verify 반복 금지:** 이 라운드 서두에 `execution.mjs seal-verify`를 다시 돌리지 않는다 — B3′ 3단계가 아직 어떤 리뷰 라운드 파일도 없을 때 이미 한 번 돌렸다. 여기서 또 돌리면 그 단계가 정당하게 써 넣은 `merge-t<id>` ledger·state를 훼손으로 오판한다.
   - **REJECT 시:** 태스크 worktree와 그 빌더 스레드가 **아직 존재한다**(B3′가 정확히 이걸 위해 이 라운드 이후로 제거를 미룬다 — 5단계 참조). 그 자리에서 같은 Codex 빌더에게 `codex-reply`로 수정을 요청하고, `harnie/<slug>-t<id>`에 커밋(B2′ 6단계와 동일)한 뒤 — merge 前에 캡처, B3′ 1단계와 같은 순서 — 새 `mergeBaselineSHA`를 먼저 캡처하고 `worktree.mjs merge`를 **다시**(같은 브랜치의 새 커밋만 들여오는 두 번째, 증분 merge) 돌려 그 새 baseline부터의 delta만 재리뷰한다. 이미 등록된 빌더 스레드만 재사용하며, 이미 바인딩된 태스크에 두 번째 빌더를 새로 부트스트랩하는 것과 달리 엔진에 없는 능력이 필요 없다.
 
-뒤 태스크의 델타가 앞서 이미 merge된 태스크가 만졌던 경로를 건드리는 경우(B1 검사는 선언된 `scope`만 대조했지 실제 diff는 아니므로 여기서 놓칠 수 있음) — B1 겹침과 똑같이 처리한다: 뒤 태스크의 빌드를 반려하고, 그 worktree를 갱신된 run 브랜치 위로 rebase한 뒤 merge 前 재리뷰한다.
+뒤 태스크의 델타가 앞서 이미 merge된 태스크가 만졌던 경로를 건드리는 경우(manifest의 disjoint 검증은 선언된 `scope`만 대조했지 실제 diff는 아니므로 여기서 놓칠 수 있음) — 이것도 scope 겹침 위반으로 똑같이 처리한다: 뒤 태스크의 빌드를 반려하고, 그 worktree를 갱신된 run 브랜치 위로 rebase한 뒤 merge 前 재리뷰한다.
 
 ### 두 경로 공통
 

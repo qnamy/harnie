@@ -98,6 +98,42 @@ test("validateManifest: evidencePolicy는 선택이지만 값이 규약 밖이�
   assert.ok(validateManifest(withVer({ ...base, evidencePolicy: "whatever" })).some((e) => /evidencePolicy/.test(e)))
 })
 
+test("validateManifest: difficulty는 선택 — easy|medium|hard 외 값은 거부", () => {
+  const withDiff = (difficulty) => ({ ...GOOD_MANIFEST, ...(difficulty === undefined ? {} : { difficulty }) })
+  assert.deepEqual(validateManifest(withDiff(undefined)), [])
+  assert.deepEqual(validateManifest(withDiff("hard")), [])
+  assert.ok(validateManifest(withDiff("extreme")).some((e) => /difficulty/.test(e)))
+  // canonicalManifest: difficulty 있을 때만 포함(기존 manifest planHash 불변)
+  assert.deepEqual(Object.keys(canonicalManifest(GOOD_MANIFEST)), ["tasks", "gates"])
+  assert.equal(canonicalManifest(withDiff("hard")).difficulty, "hard")
+})
+
+test("validateManifest: timeout 1000ms 미만은 단위 착오 의심으로 거부", () => {
+  const withTimeout = (timeout) => ({ tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["s/"], verification: [{ executable: "node", args: ["--version"], cwd: ".", timeout }] }], gates: GATES })
+  assert.ok(validateManifest(withTimeout(60)).some((e) => /1000ms 미만 거부/.test(e)))   // 초 단위로 적은 실수
+  assert.ok(validateManifest(withTimeout(999)).some((e) => /1000ms 미만 거부/.test(e)))
+  assert.deepEqual(validateManifest(withTimeout(1000)), [])
+  assert.deepEqual(validateManifest(withTimeout(60000)), [])
+  assert.ok(validateManifest(withTimeout(0)).some((e) => /양의 정수/.test(e)))           // 기존 검사 유지
+})
+
+test("validateManifest: task 간 scope 겹침(동일·부모/자식)은 거부, 다른 repo 간은 허용", () => {
+  const mk = (scopes, repos = [null, null]) => ({
+    tasks: [
+      { id: "T1", deps: [], reviewUnit: "task-a", scope: scopes[0], verification: VER(), ...(repos[0] ? { repo: repos[0] } : {}) },
+      { id: "T2", deps: [], reviewUnit: "task-b", scope: scopes[1], verification: VER(), ...(repos[1] ? { repo: repos[1] } : {}) },
+    ],
+    gates: GATES,
+  })
+  assert.ok(validateManifest(mk([["src/a/"], ["src/a/"]])).some((e) => /scope 겹침/.test(e)))          // 동일 경로
+  assert.ok(validateManifest(mk([["src/"], ["src/a/x.mjs"]])).some((e) => /scope 겹침/.test(e)))       // 부모/자식
+  assert.ok(validateManifest(mk([["src/a/x.mjs"], ["src/"]])).some((e) => /scope 겹침/.test(e)))       // 자식/부모(순서 무관)
+  assert.deepEqual(validateManifest(mk([["src/a/"], ["src/b/"]])), [])                                  // disjoint
+  assert.deepEqual(validateManifest(mk([["src/ab/"], ["src/a/"]])), [])                                 // 접두 문자열이지만 디렉터리 경계 밖
+  assert.deepEqual(validateManifest(mk([["src/"], ["src/"]], ["repoA", "repoB"])), [])                  // 다른 repo면 겹침 아님
+  assert.ok(validateManifest(mk([["src/"], ["src/"]], ["repoA", "repoA"])).some((e) => /scope 겹침/.test(e)))
+})
+
 test("validateManifest: Final Wave 4게이트 강제(누락·추가 거부)", () => {
   const oneTask = [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["s/"], verification: VER() }]
   assert.ok(validateManifest({ tasks: oneTask, gates: [{ name: "coverage", reviewUnit: "g1" }] }).some((e) => /게이트 누락/.test(e)))
@@ -241,6 +277,34 @@ function approveFlow(root, slug = "feat-x", tuid = "tu-1") {
   recordPendingApproval(root, slug, tuid)
   return bindApproval(root, slug, tuid, { answers: { [AQ]: "승인" } })
 }
+
+test("bindApproval: 재승인으로 manifest 개정 — 이전 정본 아카이브, planHash 일관 갱신", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const r1 = approveFlow(root, "feat-x", "tu-1")
+  assert.equal(r1.ok, true)
+  const firstHash = r1.planHash
+  // 같은 planHash 재승인은 멱등(아카이브 없음)
+  const rSame = approveFlow(root, "feat-x", "tu-2")
+  assert.equal(rSame.ok, true)
+  assert.equal(existsSync(join(dir, "manifest.v1.json")), false)
+  // manifest 결함 발견 → plan.md의 블록을 고치고(예: timeout 정정) 재승인
+  const revised = JSON.parse(JSON.stringify(GOOD_MANIFEST))
+  revised.tasks[0].verification[0].timeout = 600000
+  writePlan(root, "feat-x", revised)
+  const r2 = approveFlow(root, "feat-x", "tu-3")
+  assert.equal(r2.ok, true)
+  assert.notEqual(r2.planHash, firstHash)
+  const cur = JSON.parse(readFileSync(join(dir, "manifest.json"), "utf8"))
+  assert.equal(cur.planHash, r2.planHash)
+  assert.equal(cur.tasks[0].verification[0].timeout, 600000)
+  const v1 = JSON.parse(readFileSync(join(dir, "manifest.v1.json"), "utf8"))
+  assert.equal(v1.planHash, firstHash)                    // 감사용 아카이브
+  assert.equal(v1.supersededBy, r2.planHash)
+  assert.equal(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).planHash, r2.planHash)
+  assert.equal(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).planHash, r2.planHash)
+})
 
 test("init: sentinel-first 부트스트랩", () => {
   const root = gitRepo()
@@ -758,6 +822,43 @@ function readyForVerify(root, manifest, slug = "feat-x", unit = "task-a") {
   return dir
 }
 const oneTaskManifest = (verification) => ({ tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a/"], verification }], gates: GATES })
+
+test("validateManifest: setup은 선택 — shape·timeout 하한 검증, evidencePolicy 금지", () => {
+  const withSetup = (setup) => ({ tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["s/"], setup, verification: VER() }], gates: GATES })
+  assert.deepEqual(validateManifest(withSetup([{ executable: "uv", args: ["run", "pytest", "--collect-only"], cwd: ".", timeout: 300000 }])), [])
+  assert.ok(validateManifest(withSetup([])).some((e) => /setup은 생략 또는 비어있지 않은 배열/.test(e)))
+  assert.ok(validateManifest(withSetup([{ executable: "uv", args: [], cwd: ".", timeout: 60 }])).some((e) => /setup\[0\].timeout.*1000ms 미만/.test(e)))
+  assert.ok(validateManifest(withSetup([{ executable: "uv", args: [], cwd: ".", timeout: 60000, evidencePolicy: "exit-code-only" }])).some((e) => /evidencePolicy 불가/.test(e)))
+})
+
+test("verify: setup 성공 시 verification 진행, setup 실패 시 verification 미실행·receipt 실패", () => {
+  const okRoot = gitRepo()
+  mkdirSync(join(okRoot, "src", "a"), { recursive: true })
+  writeFileSync(join(okRoot, "src", "a", "x.test.mjs"), 'import {test} from "node:test"\ntest("alpha",()=>{})\n')
+  readyForVerify(okRoot, {
+    tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a/"], setup: [{ executable: "node", args: ["--version"], cwd: ".", timeout: 30000 }], verification: [{ executable: "node", args: ["--test", "src/a/x.test.mjs"], cwd: ".", timeout: 60000 }] }],
+    gates: GATES,
+  })
+  const ok = run(["verify", "--root", okRoot, "--slug", "feat-x", "--task", "T1"])
+  assert.equal(ok.ok, true, JSON.stringify(ok.receipt))
+  assert.equal(ok.receipt.setupResults.length, 1)
+  assert.equal(ok.receipt.setupResults[0].exitCode, 0)
+
+  const failRoot = gitRepo()
+  mkdirSync(join(failRoot, "src", "a"), { recursive: true })
+  writeFileSync(join(failRoot, "src", "a", "x.test.mjs"), 'import {test} from "node:test"\ntest("alpha",()=>{})\n')
+  readyForVerify(failRoot, {
+    tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a/"], setup: [{ executable: "node", args: ["-e", "process.exit(7)"], cwd: ".", timeout: 30000 }], verification: [{ executable: "node", args: ["--test", "src/a/x.test.mjs"], cwd: ".", timeout: 60000 }] }],
+    gates: GATES,
+  })
+  const bad = run(["verify", "--root", failRoot, "--slug", "feat-x", "--task", "T1"])
+  assert.equal(bad.ok, false)
+  assert.equal(bad.receipt.exitCode, 7)             // setup의 exitCode가 receipt에 실림
+  assert.deepEqual(bad.receipt.results, [])          // verification 미실행
+  assert.equal(bad.receipt.vacuous, false)           // 웜업 실패는 vacuous가 아니라 실패
+  const c = run(["completion", "--root", failRoot, "--slug", "feat-x"])
+  assert.equal(c.complete, false)
+})
 
 test("verify: 실제로 테스트가 통과하는 명령은 vacuous 아님(등록·검증 모두 통과)", () => {
   const root = gitRepo()
