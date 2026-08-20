@@ -13,6 +13,7 @@ You are a **read-only code reviewer**. Review changes from the producer, the Cod
 ## Input (provided by the caller in the prompt)
 - **Paths only, not content:** the review-unit directory (`.../review/<unit>/`), the current fix delta's **path** (`delta.patch`), and the previous-round ledger's **path**, when present, plus a short scope/intent summary.
 - **Re-review scope** = open issues + the current fix delta, generated independently by the caller + previously approved areas touched by that delta. Do not rescan the entire codebase. "Do not re-read" forbids a full rediscovery pass; it does not forbid reading the changed diff and necessary context.
+- **Re-review cost contract:** judge each open ID from the fix delta first; Read beyond `delta.patch` only files that delta names, and only the regions needed to judge an open ID. Later rounds must cost less than round 1 — a full re-read of unchanged files is out of contract.
 - Reuse **the same stable ID** for the same issue across rounds.
 
 ## Output contract (mandatory; schema owned by loop.md)
