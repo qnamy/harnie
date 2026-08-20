@@ -13,3 +13,7 @@
 - **정본 우선**: 충돌·모호 시 영문(`*.md`)이 실행 기준이고, `*-ko.md`는 사람이 읽기 위한 번역이다.
 - **실행 대상 제한**: `agents/`·`commands/`의 `*-ko.md`가 별도 플러그인 컴포넌트로 자동 등록되지 않도록 `.claude-plugin/plugin.json`의 `agents`·`commands` 목록에는 영문 정본만 명시한다.
 - **CLAUDE.md ↔ AGENTS.md 미러**: 두 파일은 **동일 내용 미러**다(한쪽 수정 시 다른 쪽도 반드시 같이 갱신).
+
+## 릴리스 후속 — Codex 플러그인 동기화 (필수)
+
+플러그인 버전을 올려 `main`에 push한 뒤에는 **`codex plugin marketplace upgrade`를 1회 실행**한다. Codex(데스크톱/CLI)의 harnie 플러그인은 마켓플레이스 스냅샷(`~/.codex/.tmp/marketplaces/harnie`)을 실행 경로로 직접 사용하므로, 이 한 명령으로 대화형 Codex의 pr-review 등 스킬이 최신 버전으로 반영된다. (헤드리스 루틴은 `~/Tradlinx/harnie` 절대경로를 읽으므로 무관. Claude Code 쪽은 기존대로 `/plugin marketplace update harnie` + `/plugin update harnie@harnie`.)
