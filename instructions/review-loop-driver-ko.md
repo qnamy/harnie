@@ -32,14 +32,14 @@ node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <touched,paths> 
 - 모든 `--out` 쓰기는 **`<out>.json` 사이드카**도 함께 기록한다(라운드별 실제 `changedCount`/`changedPaths`/`outOfScope`). 동결 manifest/설계의 파일 수 추정과 실측의 괴리를 남기는 지속 기록이다 — 리뷰어에게 묻지 말고 이걸 참조하라(리뷰어 본문이 그 괴리를 지적하지 않도록 지시한다).
 
 ## R2. 리뷰어 호출
-기준은 프로바이더와 무관하게 동일하다(이미 읽은 `loop.md` 스키마 + 해당 리뷰 기준: 코드는 `code-review.md`·`verification-tiers.md`, 설계는 `design-review.md`를 호출자가 명시한 고도로). 메커니즘만 다르다.
+기준은 프로바이더와 무관하게 동일하다(`review-schema.md` 출력 스키마 + 해당 리뷰 기준: 코드는 `code-review.md`·`verification-tiers.md`, 설계는 `design-review.md`를 호출자가 명시한 고도로). 메커니즘만 다르다.
 
 **리뷰어가 Codex일 때(설계 루프):** 리뷰 대상이 설계 문서이므로 (R1에 따라) **git delta가 없다** — 경로를 전달한다, 내용을 전달하지 않고.
 - **첫 리뷰:** codex MCP `codex` 툴을 `sandbox:"read-only"`, `cwd:<repo>`, 고정 리뷰 티어 모델(`model:"gpt-5.6-sol"` — **리뷰어 모델은 절대 티어링하지 않는다**, `model-matrix.md` §3; 모델 선택이 불가능하면 설치 기본값)로 호출한다. `developer-instructions`에 기준을 싣는다. 프롬프트에는 작업 의도·제약·**설계 파일의 절대경로**(`design.md`/`plan.md`의 해당 섹션), 읽기 前 리뷰하는 명시적 지시를 담는다 — `sandbox:"read-only"`는 쓰기만 거부하고, 읽기는 성공한다. 응답의 **threadId를 기록**한다.
 - **재리뷰:** 같은 threadId로 `codex-reply`를 호출한다. git delta가 아니라 **개정된 설계의 경로와 바뀐 섹션 이름 목록**을 준다 — 내용이 아니라, stateful thread가 이미 이전 리뷰를 갖고 있으므로. 루프 안에서 stateless `codex review`를 반복 실행하지 않는다 — 매번 전체 컨텍스트를 다시 읽으면 비용이 무한정 늘어난다.
 
 **리뷰어가 Claude일 때(코드 루프):**
-- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`loop.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약 — 그리고 run에 있다면 `design/errata.md` **경로**(사용자 승인 항목은 리뷰 기준의 일부; 리뷰어 agent body 참조) — 만 주입한다. **정확히 `loop.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
+- 리뷰어는 read-only **`harnie-reviewer` 서브에이전트**(tools = Read, Grep, Glob; frontmatter에서 opus로 모델 고정)다 — 오케스트레이터 인라인이 아니고, 변경을 만든 것과 같은 행위자도 아니다(여기서는 producer가 Codex이므로 Claude는 크로스-모델이다). agent body가 이미 기준과 출력 스키마를 갖고 있으므로(`code-review.md`/`verification-tiers.md`/`review-schema.md` 읽기 지시), Task로 위임할 때는 오직: `<dir>/delta.patch` **경로**, 이전 ledger **경로**, 짧은 scope/intent 요약, 설계 참조로 `design/rev-N.md`(또는 `plan.md`) **경로 + 이 유닛에 해당하는 섹션 이름들**(빌더 프롬프트에 준 것과 같은 섹션) — 그리고 run에 있다면 `design/errata.md` **경로**(사용자 승인 항목은 리뷰 기준의 일부; 리뷰어 agent body 참조) — 만 주입한다. 설계 섹션 이름은 반드시 명시한다: 섹션 없이 남겨진 리뷰어는 매 라운드 설계 문서 전체를 재독하며, 실측 run에서 이것이 리뷰어의 단일 최대 읽기 비용이었다. **정확히 `review-schema.md`의 VERDICT/ISSUES 스키마**로 응답하게 한다. 그 응답을 `<dir>/round-N.txt`에 쓴다 — Codex 리뷰어가 내는 것과 같은 스키마이므로 `apply`가 동일하게 파싱한다.
 - 같은 방식으로 stateful하게 유지한다: 이전 ledger의 경로를 가리켜 라운드 간 기존 발견사항을 보존하고, **증분 delta + 필요한 문맥만** 리뷰한다(전체 코드베이스 재스캔 금지).
 - **새 유닛 / 확인 리뷰:** 리뷰 유닛의 ledger는 이전 run이나 다른 유닛에서 절대 이월되지 않는다 — 리뷰 대상 코드가 이전 run에서 만들어졌고 그때 이슈가 해소됐더라도, 새 유닛은 빈 ledger로 시작한다. 그 첫 라운드 프롬프트에 **이전 ledger가 없으며 모든 이슈는 `(open)`이어야 한다**고 명시하라: 이전 run의 해소 항목을 `(resolved)`로 보고하면 미지 ID 제출이 되어 `apply`가 거부하고(fail-closed) 라운드 하나를 낭비한다. 이미 고쳐진 항목은 아예 보고하지 않는다.
 - **재리뷰 비용 계약(직렬·병렬 경로 공통):** 각 재리뷰 라운드의 프롬프트는 아직 열린 ID들(이전 ledger에서)과 이번 라운드의 `delta.patch` 경로를 명시하고, 그 ID들을 delta로 판정하도록 지시한다 — patch 밖 Read는 delta가 지명한 파일만, 필요한 구간만. 뒤 라운드는 1라운드보다 싸야 한다; 새로 전체 스캔한 흔적(변경 없는 파일 전체 재읽기)이 보이면 계약 위반이다 — 비용을 흡수하지 말고 다음 라운드 프롬프트를 조인다.
@@ -66,7 +66,7 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> \
 - 출력 해석:
   - `needsReRequest: true`: 파싱 실패, verdict 불일치, 또는 blocking 이슈 누락. ledger·state 불변. 리뷰어에게 스키마 오류·누락을 지적해 재요청(Codex는 `codex-reply`, Claude는 리뷰 재실행).
   - `needsReentry: true`: 이전 state가 STALLED이고 `--reentry`가 주어지지 않음. ledger·state **불변**, 리뷰 미적용 — **이번 라운드의 gate progress나 APPROVE조차 STALLED를 자동으로 풀지 않는다.** 사용자에게 보고 후 `--reentry <reason>`로 `apply`를 재실행.
-  - `machineState: APPROVED`: 이 리뷰 유닛 통과.
+  - `machineState: APPROVED`: 이 리뷰 유닛 통과. 출력에는 `completedUnits`(같은 `review/` 부모 아래 APPROVED 유닛 수)와 `sessionSplitRecommended`(완료 유닛 4의 배수째마다 true)도 실린다 — 권장이 켜지면 **다음 유닛 시작 전에** dev-full 컨텍스트 예산 계약을 따른다: `notepad.md`에 인계 항목을 append하고 사용자에게 세션 분할을 제안한다. 이 플래그는 advisory이자 기계적이라 세션 상태가 어떻게 "느껴지든" 발화한다 — 그게 존재 이유다.
   - `machineState: REVISING`: producer가 open 이슈를 고친 뒤 R2로 재리뷰. **코드 루프:** 먼저 R1로 돌아가 수정 前 새 baseline(git delta)을 캡처한다. **설계 루프:** R1이 없다 — designer가 개정된 설계를 오케스트레이터가 지명한 다음 산출물 경로에 직접 쓴다(baseline·delta 없음).
   - `machineState: STALLED`: 정지하고 증거·blocker·미검증 범위를 사용자에게 보고한다. 명시적 `--reentry` 주장으로만 재개한다.
 - 생략된 non-blocking 이슈에 대한 `protocolViolations` 항목은 진행을 막지는 않지만 receipt에 반드시 기록한다.

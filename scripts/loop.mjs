@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic review-state transitions around the model-produced verdict.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, readdirSync } from "node:fs"
 import { dirname, resolve, basename, join, sep, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
 import { captureTree, captureWorkspaceTree, computeDelta } from "./delta.mjs"
@@ -199,6 +199,24 @@ export function computeTransition(prevState, merged, verdict, { limit = 3, progr
   }
 }
 
+// Advisory context-budget signal: count APPROVED sibling units under the same review/ parent.
+// Every 4th completed unit re-raises the dev-full SKILL's session-split proposal mechanically —
+// the guideline lives there; this is only the backstop that keeps firing when context judgment degrades.
+function countApprovedUnits(statePath) {
+  let count = 0
+  try {
+    const reviewDir = dirname(dirname(statePath))
+    for (const entry of readdirSync(reviewDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      try {
+        const s = JSON.parse(readFileSync(join(reviewDir, entry.name, "state.json"), "utf8"))
+        if (s.machineState === "APPROVED") count++
+      } catch { /* advisory only — an unreadable sibling never affects the apply */ }
+    }
+  } catch { /* advisory only */ }
+  return count
+}
+
 function cmdApply({ flags }) {
   const ledgerPath = flags.ledger || die("--ledger 필요")
   const reviewPath = flags.review || die("--review 필요")
@@ -268,8 +286,15 @@ function cmdApply({ flags }) {
   if (reentry) persisted.reentry = reentry
   if (artifact) persisted.reviewedPostSHA = artifact
   writeJSON(statePath, persisted)
+  const contextBudget = {}
+  if (nextState.machineState === "APPROVED") {
+    const completedUnits = countApprovedUnits(statePath)
+    contextBudget.completedUnits = completedUnits
+    contextBudget.sessionSplitRecommended = completedUnits > 0 && completedUnits % 4 === 0
+  }
   out({
     committed: true,
+    ...contextBudget,
     needsReRequest: false,
     needsReentry: false,
     machineState: nextState.machineState,

@@ -33,7 +33,7 @@ Independently assess the change's actual risk from the **diff and impact radius*
 - **False-positive tests:** A new test that structurally cannot fail — its assertion passes even when the target behavior is broken — is unverified scope, not coverage. Require fail-capability evidence per the same rules.
 
 ## Output
-Follow the canonical **loop contract** in `loop.md` for the output schema, ledger, gate, and re-review scope. The code-loop reviewer is always `harnie-reviewer` (Claude), whose agent body instructs it to read this file and `loop.md` directly — not injected by the skill. Review-specific settings:
+Follow the canonical **loop contract** in `loop.md` for the ledger, gate, and re-review scope, and `review-schema.md` for the output schema. The code-loop reviewer is always `harnie-reviewer` (Claude), whose agent body instructs it to read this file and `review-schema.md` directly — not injected by the skill. Review-specific settings:
 - **ID namespace:** `CR-NNN`
 - **Location:** `file:line`
 - Ground every issue in **actual code evidence from this diff**. Do not report speculation or general advice.

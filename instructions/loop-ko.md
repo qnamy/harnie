@@ -1,24 +1,14 @@
 # harnie 루프 상태머신 (canonical) — quick·plan 공통
 
-리뷰 루프·정체 방지의 **단일 정의**이자 **출력 스키마의 소유자**. 두 트랙 스킬은 이 파일을 사용할 모델(오케스트레이터, 디자이너, 리뷰어)에게 **canonical path에서 직접 Read하도록 지시한다** — 위임 프롬프트에 내용을 붙여넣지 않고. 경로 참조만으로는 읽힘이 보장되지 않으므로, 각 소비자의 자체 진입점(agent body) 또는 Step 0(오케스트레이터)이 Read 지시를 담고, 소비자가 자신이 읽은 것을 행동 전에 명명한다. agent body = 1회 역할 불변규칙, 이 파일 = 다단계 조율.
+리뷰 루프·정체 방지의 **단일 정의**이자 **출력 스키마의 소유자**(스키마 텍스트는 리뷰어의 저비용 읽기를 위해 `review-schema.md`로 추출). 두 트랙 스킬은 이 파일을 사용할 모델(오케스트레이터, 디자이너, 리뷰어)에게 **canonical path에서 직접 Read하도록 지시한다** — 위임 프롬프트에 내용을 붙여넣지 않고. 경로 참조만으로는 읽힘이 보장되지 않으므로, 각 소비자의 자체 진입점(agent body) 또는 Step 0(오케스트레이터)이 Read 지시를 담고, 소비자가 자신이 읽은 것을 행동 전에 명명한다. agent body = 1회 역할 불변규칙, 이 파일 = 다단계 조율.
 
 ## 역할 바인딩 (producer는 중립)
 - **producer** = 산출물 저자(역할 중립). quick/plan 스킬이 단계별 바인딩:
   - 코드 리뷰 루프 → producer = **builder** / 설계 리뷰 루프 → producer = **designer**
 - **reviewer** = producer의 **반대 프로바이더**(v0: Codex).
 
-## 리뷰 출력 스키마 (canonical — 이 파일이 소유)
-리뷰어는 **전역 VERDICT** + **이슈 목록**을 반환한다. 이슈가 없으면 `ISSUES: []`.
-```
-VERDICT: APPROVE | REJECT
-ISSUES:
-- [ID] (blocking|non-blocking) (open|resolved) [location] 무엇이 문제 → 왜 → 수정 방향
-```
-- **ID**: 라운드 간 동일 이슈는 동일 stable ID. namespace는 리뷰 종류별(각 criteria 파일이 명시).
-- **location**: 리뷰 종류별 형식(각 criteria 파일이 명시).
-- **status**: 이번 응답에서 확인한 open|resolved.
-- **severity는 ID 수명 동안 고정한다.** `resolved`로 보고할 때도 **원래 심각도로 emit**한다 — 같은 ID의 `blocking` ↔ `non-blocking` 전환은 병합에서 거부된다. 심각도 판단 자체가 바뀌었으면 그 ID를 `resolved`로 닫고 **새 ID를 새 심각도로** 연다.
-- code/design-review는 이 스키마를 복제하지 않고 ID namespace·location 형식만 둔다.
+## 리뷰 출력 스키마 — 텍스트는 `review-schema.md`로 추출
+스키마 텍스트(VERDICT/ISSUES 형식, ID 안정성, 상태, 심각도 규칙)는 **`review-schema.md`** 한 파일에 있다 — 리뷰어의 매 기동 읽기를 싸게 유지하려고 추출했다: 리뷰어는 그 파일만 읽고 이 파일은 읽지 않는다. 이 파일은 그 스키마를 둘러싼 루프 계약(아래의 ledger 규칙·상태 전이·progress·재리뷰 범위)의 정본으로 남는다.
 
 ## Aggregate issue ledger (승인 게이트의 근거)
 승인은 단일 응답이 아니라 **누적 receipt의 issue ledger**로 계산한다. ledger는 **orchestrator(스킬)가 소유**한다.

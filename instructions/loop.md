@@ -1,6 +1,6 @@
 # Harnie Review Loop State Machine (Canonical) — Shared by Quick and Plan
 
-This file is the **single definition** of the review loop and anti-stagnation behavior, and it **owns the review output schema**. Both track skills instruct the model that will use this file — orchestrator, designer, or reviewer — to **Read it directly from its canonical path**, not to have its contents pasted into a delegation prompt. A path reference alone does not guarantee that the model reads it, so each consumer's own entry gate (agent body) or Step 0 (orchestrator) carries the Read instruction, and the consumer names what it read before acting. Agent bodies define stable, single-turn role rules; this file defines multi-step coordination.
+This file is the **single definition** of the review loop and anti-stagnation behavior, and it **owns the review output schema** (schema text extracted to `review-schema.md` for cheap reviewer reads). Both track skills instruct the model that will use this file — orchestrator, designer, or reviewer — to **Read it directly from its canonical path**, not to have its contents pasted into a delegation prompt. A path reference alone does not guarantee that the model reads it, so each consumer's own entry gate (agent body) or Step 0 (orchestrator) carries the Read instruction, and the consumer names what it read before acting. Agent bodies define stable, single-turn role rules; this file defines multi-step coordination.
 
 ## Role Binding: Producer-Neutral
 - **Producer:** The author of the artifact, independent of role. The quick and plan skills bind it at each stage:
@@ -8,18 +8,8 @@ This file is the **single definition** of the review loop and anti-stagnation be
   - Design review loop → producer = **designer**
 - **Reviewer:** The producer's **opposite provider** (cross-model blind spot). Caller binding: **design loop = Claude producer → Codex reviewer**; **code loop = Codex producer → Claude reviewer**. The reviewer is always read-only.
 
-## Review Output Schema: Owned Here
-The reviewer returns one **global VERDICT** and an **issue list**. When there are no issues, return `ISSUES: []`.
-```
-VERDICT: APPROVE | REJECT
-ISSUES:
-- [ID] (blocking|non-blocking) (open|resolved) [location] what is wrong → why it matters → fix direction
-```
-- **ID:** Reuse the same stable ID for the same issue across rounds. Each review-criteria file defines its namespace.
-- **Location:** Each review-criteria file defines its location format.
-- **Status:** Report `open` or `resolved` as verified in the current response.
-- **Severity is fixed for the lifetime of an ID.** Emit the original severity even when reporting the issue as `resolved` — an ID that switches between `blocking` and `non-blocking` is rejected on merge. If the severity assessment itself changed, close the ID as `resolved` and open a new ID at the new severity.
-- `code-review.md` and `design-review.md` do not duplicate this schema; they define only their ID namespace and location format.
+## Review Output Schema: Text Extracted to `review-schema.md`
+The schema text (VERDICT/ISSUES format, ID stability, status, severity rules) lives in **`review-schema.md`** — a single small file, extracted so a reviewer's per-invocation read stays cheap: reviewers read only that file, never this one. This file remains the loop contract around the schema — ledger rules, state transitions, progress, and re-review scope below all apply to responses in that schema.
 
 ## Aggregate Issue Ledger: Evidence for the Approval Gate
 Approval is computed from the **aggregate issue ledger across all receipts**, not from one response. The **orchestrator skill owns the ledger**.

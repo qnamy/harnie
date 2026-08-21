@@ -114,6 +114,39 @@ test("apply CLI: 2라운드 — blocker 해소 후 APPROVE로 승인", () => {
   assert.equal(r.openBlocking, 0)
 })
 
+// ── 컨텍스트 예산 advisory: APPROVED 시 완료 유닛 카운트·세션 분할 권장 ──
+test("apply CLI: APPROVED면 completedUnits 포함, 4의 배수째 유닛에서 sessionSplitRecommended", () => {
+  const base = tmpBase()
+  const APPROVE = ["VERDICT: APPROVE", "ISSUES: []"].join("\n")
+  // 형제 유닛 3개를 이미 APPROVED로 배치
+  for (const tag of ["u1", "u2", "u3"]) {
+    const d = unitOf(base, tag)
+    writeFileSync(S(d), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", lastVerdict: "APPROVE", openBlocking: 0 }))
+    writeFileSync(L(d), "{}")
+  }
+  const dir = unitOf(base, "u4")
+  writeFileSync(R(dir), APPROVE)
+  const r = run(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir)])
+  assert.equal(r.machineState, "APPROVED")
+  assert.equal(r.completedUnits, 4)
+  assert.equal(r.sessionSplitRecommended, true)
+  // 5번째 유닛은 카운트만 오르고 권장은 꺼진다
+  const dir5 = unitOf(base, "u5")
+  writeFileSync(R(dir5), APPROVE)
+  const r5 = run(["apply", "--ledger", L(dir5), "--review", R(dir5), "--ns", "CR", "--state", S(dir5)])
+  assert.equal(r5.completedUnits, 5)
+  assert.equal(r5.sessionSplitRecommended, false)
+})
+
+test("apply CLI: APPROVED 아니면(REVISING) completedUnits 미포함", () => {
+  const dir = tmpUnit()
+  writeFileSync(R(dir), ["VERDICT: REJECT", "ISSUES:", "- [CR-001] (blocking) (open) [a.ts:1] x → y → z"].join("\n"))
+  const r = run(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir)])
+  assert.equal(r.machineState, "REVISING")
+  assert.equal("completedUnits" in r, false)
+  assert.equal("sessionSplitRecommended" in r, false)
+})
+
 // ── export: .harnie 산출물 읽기 전용 반출 ─────────────────────────────
 test("export CLI: .harnie 하위 파일을 stdout·--out으로 반출", () => {
   const base = tmpBase()
