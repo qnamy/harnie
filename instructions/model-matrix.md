@@ -30,7 +30,7 @@ Rubric (pick the highest tier any signal justifies):
 - **medium** — multi-file change; new logic within existing patterns; some judgment calls; moderate blast radius.
 - **hard** — new module or complex logic; concurrency, security, or data-integrity concerns; many open design decisions; high blast radius or costly rollback.
 
-Difficulty tiers **producer models only**. **Reviewer models are never tiered** — reviews are quality gates, and lowering a gate's model weakens exactly what it exists to catch.
+Difficulty tiers **producer models, and — conservatively — the Claude code reviewer** (§3). Review gates are never lowered below sonnet, and the top tier is retained exactly where a miss is most expensive: hard runs, Final Wave gates, and design review. (Measured runs put 22+ opus reviewer invocations among the top cost drivers; a gate should be proportionate to what it guards, not uniformly maximal.)
 
 ## 3. Model Assignment
 
@@ -44,17 +44,26 @@ Difficulty tiers **producer models only**. **Reviewer models are never tiered** 
 
 > ARCH-altitude design always uses the top tier (fable) regardless of run difficulty: A3 exists precisely for the highest-cost decisions in the system, and a run that triggers A3 at all has already crossed that cost line.
 
+**Reviewers (quality gates — tiered conservatively, never below sonnet):**
+
+| Reviewer role | easy | medium | hard |
+|---|---|---|---|
+| Code reviewer (`harnie-reviewer`) — **unit reviews** (first review + re-review rounds: quick Step 4, full B3, parallel pre-merge) | sonnet | opus | opus |
+| Code reviewer — **confirmation reviews** (fresh empty-ledger re-check of already-approved code, e.g. post-merge B3 confirmation) | sonnet | sonnet | opus |
+| Code reviewer — **Final Wave gates** (B5 `final-*`) | **opus** | **opus** | **opus** |
+| Design reviewer (Codex, `DR` loops) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` |
+
+> Why these lines sit where they do: a **confirmation review** re-checks code a tier-model review already approved — it verifies the merge, not the logic — so it needs less than the original gate. **Final Wave** is the last line of defense over the whole tree and is bounded at 4 units, so it always gets the top tier regardless of difficulty. **Design review** volume is small and design defects are the costliest class, so it stays fixed at the top Codex tier.
+
 **Fixed roles (never tiered):**
 
 | Role | Model |
 |---|---|
-| Design reviewer (Codex, `DR` loops) | `gpt-5.6-sol` |
-| Code reviewer (`harnie-reviewer`, `CR` loops incl. Final Wave) | opus (pinned in agent frontmatter) |
 | Scout (`harnie-scout`) | haiku (pinned in agent frontmatter) |
 
 **Selection mechanics and fallbacks:**
 
 - **Codex models:** set the `model` parameter on the Codex MCP `codex` call (`codex-reply` continues the thread's model). If the installation does not expose model selection, the installation default applies — do not fail the stage over it.
-- **Claude subagent models:** `harnie-reviewer` and `harnie-scout` are pinned by agent frontmatter. For `harnie-designer` (frontmatter default `opus`), pass the tier's model as the Task-call model override where the installation supports it; where it does not, the frontmatter default applies.
+- **Claude subagent models:** `harnie-scout` is pinned by agent frontmatter. For `harnie-designer` and `harnie-reviewer` (frontmatter defaults `opus` — the safe fallback), pass the tier's model as the Task-call model override where the installation supports it; where it does not, the frontmatter default applies. The orchestrator picks the reviewer row (unit / confirmation / Final Wave) per delegation.
 - **fable fallback:** if this installation cannot select fable for a subagent, use `opus` for A3 and note the substitution in `plan.md`.
 - **Orchestrator (main loop) — not assigned here:** the session model applies; harnie does not control it. Orchestration itself (routing, CLI wiring, ledger bookkeeping, delegation) does not require the top tier — **sonnet is sufficient and recommended as the session model for the execution phase**, since every quality-bearing role above (designer, both reviewers, builder) is pinned or tiered independently of the session model. Measured runs put the orchestrator's own calls at well over half of total run tokens, so the session-model choice is the single largest cost lever.

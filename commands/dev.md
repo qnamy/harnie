@@ -14,7 +14,7 @@ You are the harnie router. Classify the task's **size and risk** and select a tr
 - The track boundary is the **design altitude** (`${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1): any ARCH-altitude trigger — a new component/module, a boundary or contract change, a data-ownership or technology decision — belongs to the plan track; the quick track handles DETAIL-altitude design only.
 
 ## Run Difficulty (judged once, alongside the track)
-Alongside the track, judge the run's difficulty — **easy / medium / hard** — using the rubric in `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2. Track and difficulty are independent axes: a quick-track bugfix can be medium. This judgment happens **once**, here; the track skill inherits it (announced in Action 1) instead of re-judging, and it selects **producer** models (Codex builder, designer) for the whole run per `model-matrix.md` §3 — reviewer models stay fixed.
+Alongside the track, judge the run's difficulty — **easy / medium / hard** — using the rubric in `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2. Track and difficulty are independent axes: a quick-track bugfix can be medium. This judgment happens **once**, here; the track skill inherits it (announced in Action 1) instead of re-judging, and it selects **producer** models (Codex builder, designer) and the conservatively tiered code-reviewer model for the whole run per `model-matrix.md` §3 (Final Wave gates and design review stay top-tier).
 
 ## Actions
 1. Restate the task in one line and announce **the selected track, the run difficulty (easy/medium/hard), and why**.

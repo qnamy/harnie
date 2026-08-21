@@ -14,7 +14,7 @@ argument-hint: "<작업 설명>"
 - 트랙 경계는 **설계 고도**(`${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1)다: ARCH-altitude 트리거(새 컴포넌트/모듈, 경계·계약 변경, 데이터 소유권·기술 결정)는 plan 트랙에 속하고, quick 트랙은 DETAIL 고도 설계만 처리한다.
 
 ## run 난이도 (트랙과 함께 1회 판정)
-트랙과 함께 run의 난이도 — **easy / medium / hard** — 를 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2의 rubric으로 판정한다. 트랙과 난이도는 독립 축이다: quick 트랙 버그픽스가 medium일 수 있다. 이 판정은 여기서 **1회**만 하며, Action 1에서 announce한다; 트랙 스킬은 다시 판정하지 않고 이를 계승하며, `model-matrix.md` §3에 따라 전체 run의 **생산자 모델**(Codex 빌더, 디자이너)을 선택한다 — **리뷰어 모델은 절대 티어링하지 않는다**.
+트랙과 함께 run의 난이도 — **easy / medium / hard** — 를 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §2의 rubric으로 판정한다. 트랙과 난이도는 독립 축이다: quick 트랙 버그픽스가 medium일 수 있다. 이 판정은 여기서 **1회**만 하며, Action 1에서 announce한다; 트랙 스킬은 다시 판정하지 않고 이를 계승하며, `model-matrix.md` §3에 따라 전체 run의 **생산자 모델**(Codex 빌더, 디자이너)과 보수적으로 티어링되는 코드 리뷰어 모델을 선택한다(Final Wave 게이트·설계 리뷰는 최상위 티어 유지).
 
 ## 행동
 1. 한 줄로 작업을 재진술하고 **선택한 트랙, run 난이도(easy/medium/hard), 그리고 그 이유**를 announce 한다.
