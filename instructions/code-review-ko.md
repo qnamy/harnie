@@ -33,7 +33,7 @@
 - **위양성 테스트**: 구조적으로 실패할 수 없는 신규 테스트 — 대상 동작이 깨져도 assertion이 통과하는 — 는 커버리지가 아니라 미검증 범위다. 같은 규칙의 fail-capability 증거를 요구한다.
 
 ## 출력
-출력 스키마·ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을 따른다. 코드 루프 리뷰어는 항상 `harnie-reviewer`(Claude)이며, agent body가 이 파일과 `loop.md`를 직접 읽도록 지시한다 — 스킬이 주입하지 않는다. 이 리뷰의 고유 지정:
+ledger·게이트·재리뷰 범위는 canonical **loop 계약**(loop.md)을, 출력 스키마는 `review-schema.md`를 따른다. 코드 루프 리뷰어는 항상 `harnie-reviewer`(Claude)이며, agent body가 이 파일과 `review-schema.md`를 직접 읽도록 지시한다 — 스킬이 주입하지 않는다. 이 리뷰의 고유 지정:
 - **ID namespace** = `CR-NNN`
 - **location** = `file:line`
 - 각 이슈는 이 diff의 **실제 코드 근거**로. 추측·일반론 금지.

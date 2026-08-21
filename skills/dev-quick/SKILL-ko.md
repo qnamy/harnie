@@ -44,7 +44,7 @@ node ${CLAUDE_PLUGIN_ROOT}/scripts/loop.mjs capture <repo>   # → baselineSHA �
 verification-tiers.md로 변경의 **실제 위험**에 맞는 tier를 정하고 그 필수 세트를 실행한다. "컴파일 통과"는 검증이 아니다. 미검증 위험은 정직하게 명시.
 
 ### 6. 코드 리뷰 루프 (review-loop-driver.md, ID namespace `CR`, `<dir>` = `.harnie/quick/<slug>/review/code/`)
-review-loop-driver.md의 R1~R5를 구동한다. producer = **Codex 빌더**, **리뷰어 = read-only `harnie-reviewer` 서브에이전트**(frontmatter에서 opus로 모델 고정 — 품질 게이트의 **리뷰어 모델은 절대 티어링하지 않는다**; main 인라인 아님 — 빌더가 Codex라 크로스-모델, 리뷰어는 쓰기 불가). Task로 위임하되 delta의 경로·이전 ledger의 경로·스코프/의도 요약만 제공한다(harnie-reviewer의 에이전트 본문이 code-review.md·verification-tiers.md·loop.md 스키마를 경로에서 직접 Read하도록 정해져 있으므로). 리뷰어의 loop.md VERDICT/ISSUES 스키마 응답을 `round-N.txt`에 기록한다. `apply`엔 **이 라운드 delta의 `postSHA`를 `--artifact`로** 넘긴다(CR 필수). 수정은 Codex 빌더가 codex-reply로. trivial이라도 **축약 없이** 단계별 리뷰하되 1~2차원(correctness + side-effect)에 집중한다.
+review-loop-driver.md의 R1~R5를 구동한다. producer = **Codex 빌더**, **리뷰어 = read-only `harnie-reviewer` 서브에이전트**(frontmatter에서 opus로 모델 고정 — 품질 게이트의 **리뷰어 모델은 절대 티어링하지 않는다**; main 인라인 아님 — 빌더가 Codex라 크로스-모델, 리뷰어는 쓰기 불가). Task로 위임하되 delta의 경로·이전 ledger의 경로·스코프/의도 요약만 제공한다(harnie-reviewer의 에이전트 본문이 code-review.md·verification-tiers.md·review-schema.md를 경로에서 직접 Read하도록 정해져 있으므로). 리뷰어의 review-schema.md VERDICT/ISSUES 스키마 응답을 `round-N.txt`에 기록한다. `apply`엔 **이 라운드 delta의 `postSHA`를 `--artifact`로** 넘긴다(CR 필수). 수정은 Codex 빌더가 codex-reply로. trivial이라도 **축약 없이** 단계별 리뷰하되 1~2차원(correctness + side-effect)에 집중한다.
 
 ### 7. Report
 변경 요약 + 선택 tier·통과한 검증 세트 + 리뷰 verdict(최종 ledger·round 수). open blocking 0이 아니면 "done"이라 하지 않는다. STALLED면 남은 blocker·미검증 범위와 함께 사용자에게 보고.
