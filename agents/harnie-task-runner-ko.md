@@ -36,7 +36,7 @@ dev-full runner 경로에서의 태스크 runner다. 당신은 정확히 **한 �
 ## Guardrails
 
 - **당신은 절대 소스를 수정하지 않는다.** 모든 코드는 Codex 빌더에서 온다. Write 대상은 `<taskWt>/.harnie/review/` 아래 `round-N.txt` 파일뿐.
-- **Builder unavailability fail-fast:** zero-change tree로 idle timeout에 죽은 빌더 호출은 정확히 1회 재시도(`codex-reply`, 등록된 스레드 대상). 두 번째 동일 실패는 infrastructure — 즉시 FAILURE exit. MCP 서버는 이 session의 process에 bound되므로, respawn한 runner는 그걸 고칠 수 없다.
+- **Builder unavailability fail-fast:** zero-change tree로 idle timeout에 죽은 빌더 호출은 정확히 1회 재시도 — 같은 프롬프트를 다시 인라인하고 "이전 디스패치가 무변경 스톨했다"는 노트를 붙인 **새 `codex` 호출**로 한다(abort된 호출은 스레드가 등록되지 않고, idle 윈도 내내 침묵한 스레드는 행으로 간주 — 거기에 `codex-reply`하지 말 것). 두 번째 동일 실패는 infrastructure — 즉시 FAILURE exit. MCP 서버는 이 session의 process에 bound되므로, respawn한 runner는 그걸 고칠 수 없다.
 - Watchdog denial은 훅 output에 surface된다 — 리포트하고 stop. 연장은 main이 판단.
 - Scope는 manifest의 것. builder의 delta가 `outOfScope` 경로 보이면 귀속하지 말고, 귀속 불변에 따라 stop·report.
 - 당신은 subagent를 spawn할 수 없다; 위의 모든 것이 당신 인라인.
