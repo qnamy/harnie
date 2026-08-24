@@ -173,7 +173,7 @@ export function decideTask({ subagentType, phase }) {
 }
 
 // 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/멤버 workroot/task worktree cwd만 허용한다.
-export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {}, memberRoots = [] }) {
+export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {}, taskWorktreeExists = {}, memberRoots = [] }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
     if (!isReply) {
@@ -199,10 +199,14 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
       if (taskId != null && !buildingUnboundTasks.includes(taskId))
         return { deny: true, reason: `task worktree cwd의 task ${taskId}가 building·미바인딩 상태 아님` }
       if (directRoot) {
-        if (!pendingRunRootBootstrap)
-          return { deny: true, reason: "run-root 빌더 부트스트랩은 pendingRunRootBootstrap marker 필요 — building task 추측 금지" }
-        if (!buildingUnboundTasks.includes(pendingRunRootBootstrap) || taskRepoWorkroots[pendingRunRootBootstrap] !== cwd)
-          return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
+        if (pendingRunRootBootstrap) {
+          if (!buildingUnboundTasks.includes(pendingRunRootBootstrap) || taskRepoWorkroots[pendingRunRootBootstrap] !== cwd)
+            return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
+        } else {
+          const serialTaskId = buildingUnboundTasks.length === 1 ? buildingUnboundTasks[0] : null
+          if (!serialTaskId || taskRepoWorkroots[serialTaskId] !== cwd || taskWorktreeExists[serialTaskId] !== false)
+            return { deny: true, reason: "run-root 빌더 부트스트랩은 marker 필요 — marker 없는 serial 예외는 단일 building-unbound·task worktree 부재일 때만" }
+        }
       }
     } else if (!hasBuildingUnbound)
       return { deny: true, reason: "빌더 workspace-write 호출은 building·미바인딩 task가 있을 때만(set-task로 표시 후) — 임의 쓰기 차단" }

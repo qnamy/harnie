@@ -2,7 +2,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, renameSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -169,6 +169,24 @@ test("remove --archive-to: single-repo review 이관 후 멱등 재호출", () =
   assert.equal(readFileSync(join(first.archive, "code", "ledger.json"), "utf8"), "evidence\n")
   const second = removeWorktree({ repo, branch, archiveTo: repo })
   assert.equal(second.archive, first.archive)
+})
+
+test("remove --archive-to: temp-only crash 상태를 canonical archive로 복구", () => {
+  const repo = gitRepo()
+  activeRun(repo, "run")
+  const branch = "harnie/run-t1"
+  const wt = createWorktree({ repo, branch }).worktreePath
+  const review = join(wt, ".harnie", "review")
+  const ledger = join(review, "code", "ledger.json")
+  mkdirSync(dirname(ledger), { recursive: true }); writeFileSync(ledger, "evidence\n")
+  const destination = join(repo, ".harnie", "plan", "run", "review-archive", "t1")
+  const temp = destination + ".tmp"
+  mkdirSync(dirname(destination), { recursive: true })
+  renameSync(review, temp)
+  const result = removeWorktree({ repo, branch, archiveTo: repo })
+  assert.equal(result.archive, destination)
+  assert.equal(readFileSync(join(destination, "code", "ledger.json"), "utf8"), "evidence\n")
+  assert.equal(existsSync(temp), false)
 })
 
 test("remove CLI: --archive-to 배선", () => {

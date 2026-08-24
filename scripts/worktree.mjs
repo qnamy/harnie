@@ -147,6 +147,10 @@ export function removeWorktree({ repo, branch, deleteBranch = false, archiveTo =
   if (archiveTo) {
     archive = archiveTarget({ repo, branch, archiveTo })
     const temp = archive.destination + ".tmp"
+    if (existsSync(temp)) {
+      if (existsSync(archive.destination)) rmSync(temp, { recursive: true, force: true })
+      else renameSync(temp, archive.destination)
+    }
     if (existsSync(reviewPath)) {
       rmSync(temp, { recursive: true, force: true })
       if (existsSync(archive.destination)) rmSync(archive.destination, { recursive: true, force: true })

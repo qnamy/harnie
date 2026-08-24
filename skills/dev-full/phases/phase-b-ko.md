@@ -14,17 +14,8 @@
 
 실행 중 **승인된 설계 자체**의 결함 — 설계 문서가 틀린 것을 서술하고 있음 — 이 드러나면, 설계에서 몰래 이탈하지도, run을 폐기하지도 않는다. (**manifest** 결함 — 잘못된 `timeout`·scope·verification 항목 — 은 A5.2 영역이지 errata가 아니다.) **append-only** errata 파일 `.harnie/plan/<slug>/design/errata.md`에 기록한다. 이걸 작동시키는 메커니즘: 항목의 처분이 사용자 승인되는 순간 **리뷰 기준 = 승인된 `design/rev-N.md` + 그 항목의 정정 서술**이 된다 — 리뷰어 agent body가 이 규칙을 갖고 있으므로, 승인된 항목이 커버하는 이탈은 더는 설계-이탈 이슈가 아니고, 커버하지 않는 이탈은 그대로 REJECT다.
 
-- **append-only, 오케스트레이터만 기록.** 결함 발견은 루프의 누구든(빌더 보고·리뷰어 이슈·오케스트레이터 관찰) 할 수 있지만 기록은 오케스트레이터만 한다. 새 발견은 새 `E-NNN` id — 기존 항목은 절대 수정하지 않는다(정정의 정정도 새 항목). 항목 스키마:
-  ```
-  ## E-NNN <한 줄 제목>
-  - found: <ISO 시각>, at <task/reviewUnit>
-  - severity: blocker | degrade | note
-  - design-ref: rev-N.md §<섹션>
-  - defect: 승인 설계가 틀린 지점 + 증거
-  - disposition: pending | approved-workaround (사용자 승인 <시각>) | deferred-next-run | superseded-by-A5.2
-  - correction: (처분 확정 시 추가) 설계 서술을 무엇으로 대체하는가 — 리뷰어가 이 텍스트를 기준으로 판정
-  ```
-- **심각도 라우팅.** `note`: 기록 후 계속. `degrade`/`blocker`: 결함 있는 서술에 기대는 빌드를 멈추고, 항목을 사용자에게 surface해 그 처분을 `AskUserQuestion`으로 승인받은 **후에만** 그에 의존하는 빌더 호출을 진행한다; 승인 전까지 관련 리뷰 이슈는 open 유지. (승인 게이트와 충돌 없음: `recordPendingApproval`은 A5.1 arm 없이는 no-op.)
+- **Engine-owned (v2).** `design/errata.md`는 **control file**이다: hooks가 직접 Edit/Write/Bash 쓰기를 거부하고, 모든 mutation은 `execution.mjs`를 통한다. 루프의 누구든 결함을 surface한다(runner의 `errata-candidate` report, 리뷰어 이슈, 오케스트레이터 관찰); 기록은 오케스트레이터만: `node <ROOT>/scripts/execution.mjs errata-add --root <repo> --slug <slug> --severity <blocker|degrade|note> --design-ref "rev-N.md §<section>" --defect "<what + evidence>"` (다음 `E-NNN`을 할당, append). Query: `errata-list --root <repo> --slug <slug> [--pending]`.
+- **Disposition routing.** `note`: `node <ROOT>/scripts/execution.mjs errata-set-disposition --root <repo> --slug <slug> --id E-NNN --disposition <value> --correction <text|@file>` (CLI 전용, note만). `blocker`/`degrade`: 결함 있는 서술에 기대는 빌드를 멈추고 처분을 **사용자 승인**으로: ① `node <ROOT>/scripts/execution.mjs errata-arm --root <repo> --slug <slug> --id E-NNN --disposition <value> --correction <text|@file> --approve-option "Approve"` 제안 transition과 correction을 함께 lock; ② 그 다음 question으로 `AskUserQuestion`을 보내되 값이 정확히 `--approve-option`과 같은 option(A5.1처럼 한 번 binding)을 포함. CLI는 blocker/degrade를 transition할 수 없고, arming은 pending A5 approval과 상호배제다(한 번에 one one-shot binding). 승인까지 관련 review 이슈는 open.
 - **경성 경계 — errata는 manifest에 닿지 않는다.** task `scope` 확장, `verification`/`timeout` 변경, 태스크 추가·삭제 불가. 정정이 그중 하나라도 요구하는 순간 `disposition: superseded-by-A5.2`로 두고 사용자 게이트 manifest 개정으로 간다. errata는 **설계 산문만** 정정한다.
 - **run 종료 강제(v1, 게이트 ledger 경유):** B5가 게이트에 errata 경로를 전달하고, 게이트 리뷰어가 `pending`인 blocker/degrade 항목을 open blocking 이슈로 보고한다 — 미해소 errata는 새 엔진 능력 없이 기존 ledger 재도출을 통해 완료를 막는다. `deferred-next-run` 항목은 다음 run A1 grounding의 입력이다.
 

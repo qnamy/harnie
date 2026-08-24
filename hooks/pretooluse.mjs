@@ -77,6 +77,7 @@ try {
           buildingUnboundTasks: ctx.failClosed ? [] : ctx.buildingUnboundTaskIds || [],
           pendingRunRootBootstrap: ctx.pendingRunRootBootstrap || null,
           taskRepoWorkroots: ctx.taskRepoWorkroots || {},
+          taskWorktreeExists: ctx.taskWorktreeExists || {},
           memberRoots: ctx.memberWorkroots || [],
         })
         if (d.deny) denyPreTool(d.reason)

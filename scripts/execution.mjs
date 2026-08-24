@@ -418,8 +418,13 @@ export function loadContext(root) {
   const buildingUnboundTaskIds = Object.entries(ex.tasks || {}).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
   const manifest = readJSONOrNull(join(dir, "manifest.json"))
   const taskRepoWorkroots = {}
-  for (const task of manifest?.tasks || []) taskRepoWorkroots[task.id] = s.workspaceRoot ? repos[task.repo]?.workroot : root
-  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
+  const taskWorktreeExists = {}
+  for (const task of manifest?.tasks || []) {
+    const workroot = s.workspaceRoot ? repos[task.repo]?.workroot : root
+    taskRepoWorkroots[task.id] = workroot
+    taskWorktreeExists[task.id] = typeof workroot === "string" && existsSync(join(workroot, ".harnie-wt", `harnie-${s.slug}-t${task.id}`))
+  }
+  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots, taskWorktreeExists }
 }
 
 export function computeCompletion(root, track, slug) {
@@ -801,13 +806,21 @@ export function registerBuilderAuto(root, slug, threadId, cwd = null) {
     const directRoot = typeof cwd === "string" && existsSync(cwd) && roots.some((r) => existsSync(r) && realpathOf(r) === realpathOf(cwd))
     if (directRoot) {
       const taskId = ex.pendingRunRootBootstrap
-      if (!taskId) return { ok: false, reason: "run-root 부트스트랩 marker 없음 — building task 추측 금지", candidates: cands }
-      const task = manifest.tasks.find((t) => t.id === taskId)
-      const expectedRoot = task && taskWorkroot(root, task, sentinel)
-      if (!task || !expectedRoot || gitRootOf(cwd) !== realpathOf(expectedRoot))
-        return { ok: false, reason: `pendingRunRootBootstrap task ${taskId}의 repo workroot와 cwd git root 불일치` }
-      if (!cands.includes(taskId)) return { ok: false, reason: `marker task ${taskId}가 building-unbound 아님`, candidates: cands }
-      return registerBuilderThreadLocked(root, slug, taskId, threadId, { clearBootstrap: true })
+      if (taskId) {
+        const task = manifest.tasks.find((t) => t.id === taskId)
+        const expectedRoot = task && taskWorkroot(root, task, sentinel)
+        if (!task || !expectedRoot || gitRootOf(cwd) !== realpathOf(expectedRoot))
+          return { ok: false, reason: `pendingRunRootBootstrap task ${taskId}의 repo workroot와 cwd git root 불일치` }
+        if (!cands.includes(taskId)) return { ok: false, reason: `marker task ${taskId}가 building-unbound 아님`, candidates: cands }
+        return registerBuilderThreadLocked(root, slug, taskId, threadId, { clearBootstrap: true })
+      }
+      const serialTaskId = cands.length === 1 ? cands[0] : null
+      const serialTask = manifest.tasks.find((t) => t.id === serialTaskId)
+      const serialRoot = serialTask && taskWorkroot(root, serialTask, sentinel)
+      const serialWorktree = serialRoot && join(serialRoot, ".harnie-wt", `harnie-${slug}-t${serialTaskId}`)
+      if (!serialTask || !serialRoot || gitRootOf(cwd) !== realpathOf(serialRoot) || existsSync(serialWorktree))
+        return { ok: false, reason: "run-root 부트스트랩 marker 필요 — marker 없는 serial 예외는 단일 building-unbound·task worktree 부재일 때만", candidates: cands }
+      return registerBuilderThreadLocked(root, slug, serialTaskId, threadId)
     }
     if (cwd != null) return { ok: false, reason: `codex cwd가 활성 task worktree·run/member root 패턴과 불일치: ${cwd}`, candidates: cands }
     if (cands.length !== 1) return { ok: false, reason: `building-unbound task ${cands.length}개 — 자동 귀속 모호`, candidates: cands }
@@ -928,7 +941,7 @@ function correctionText(arg) {
   return text.trim()
 }
 
-export function errataArm(root, slug, { id, disposition, correction }) {
+export function errataArm(root, slug, { id, disposition, correction, approveOption = "승인" }) {
   if (!ERRATA_DISPOSITIONS.has(disposition)) throw new FailClosed(`errata-arm: --disposition은 ${[...ERRATA_DISPOSITIONS].join("|")}`)
   const text = correctionText(correction)
   return withStateLock(root, () => {
@@ -941,7 +954,7 @@ export function errataArm(root, slug, { id, disposition, correction }) {
     if (entry.disposition !== "pending") throw new FailClosed(`errata-arm: ${id} disposition이 pending 아님`)
     const path = join(dir, ".arm-errata.json")
     if (existsSync(path)) throw new FailClosed("errata-arm: 이미 무장된 errata 승인 있음")
-    writeJSONAtomic(path, { id, disposition, correction: text, approveOption: "승인", at: new Date().toISOString() })
+    writeJSONAtomic(path, { id, disposition, correction: text, approveOption, at: new Date().toISOString() })
     return { ok: true, id, disposition }
   })
 }
@@ -1195,7 +1208,7 @@ function cmdErrataAdd({ flags }) {
 }
 
 function cmdErrataArm({ flags }) {
-  out(errataArm(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
+  out(errataArm(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요"), approveOption: flags["approve-option"] || "승인" }))
 }
 
 function cmdErrataSetDisposition({ flags }) {

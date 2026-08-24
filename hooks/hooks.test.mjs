@@ -193,6 +193,16 @@ test("codex: executing 첫 빌더 호출은 building task 자신의 worktree cwd
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, cwd: root })))
 })
 
+test("codex: serial single-task run-root bootstrap을 허용하고 귀속", () => {
+  const { root, dir } = setupRepo()
+  toExecuting(root)
+  exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  const input = { sandbox: "workspace-write", cwd: root }
+  assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: input, cwd: root }), null)
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: input, tool_response: '{"threadId":"serial-thread"}', cwd: root })
+  assert.equal(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).tasks.T1.builderThreadId, "serial-thread")
+})
+
 test("codex-reply: executing 미등록 스레드 deny", () => {
   const { root } = setupRepo()
   toExecuting(root)

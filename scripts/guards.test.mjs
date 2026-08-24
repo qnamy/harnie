@@ -184,6 +184,13 @@ test("decideCodex: 복수 building 중 cwd가 가리키는 task의 첫 호출을
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
 })
 
+test("decideCodex: marker 없는 root cwd는 단일 serial·task worktree 부재일 때만 허용", () => {
+  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", buildingUnboundTasks: ["1"], taskRepoWorkroots: { "1": "/repo" } }
+  assert.equal(decideCodex({ ...base, taskWorktreeExists: { "1": false } }).deny, false)
+  assert.equal(decideCodex({ ...base, taskWorktreeExists: { "1": true } }).deny, true)
+  assert.equal(decideCodex({ ...base, buildingUnboundTasks: ["1", "2"], taskWorktreeExists: { "1": false, "2": false } }).deny, true)
+})
+
 test("decideCodex: workspace run — 멤버 workroot·그 하위 task worktree cwd 허용, 미등록 deny", () => {
   const member = "/ws/repoA/.harnie-wt/harnie-x"
   const base = { isReply: false, sandbox: "workspace-write", root: "/ws/.harnie-wt/harnie-x", slug: "x", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": member }, memberRoots: [member] }

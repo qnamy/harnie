@@ -544,6 +544,24 @@ test("registerBuilderAuto: plan execution 상태가 없으면 quick-track 호출
   })
 })
 
+test("registerBuilderAuto: marker 없는 root cwd는 단일 serial·task worktree 부재일 때만 귀속", () => {
+  const serial = gitRepo()
+  writePlan(serial, "feat-x"); run(["init", "--root", serial, "--slug", "feat-x"]); approveFlow(serial)
+  setTaskRunStatus(serial, "feat-x", "T1", "building")
+  assert.equal(registerBuilderAuto(serial, "feat-x", "serial-thread", serial).taskId, "T1")
+
+  const runner = gitRepo()
+  writePlan(runner, "feat-x"); run(["init", "--root", runner, "--slug", "feat-x"]); approveFlow(runner)
+  setTaskRunStatus(runner, "feat-x", "T1", "building")
+  mkdirSync(join(runner, ".harnie-wt", "harnie-feat-x-tT1"), { recursive: true })
+  assert.equal(registerBuilderAuto(runner, "feat-x", "root-thread", runner).ok, false)
+
+  const parallel = gitRepo()
+  writePlan(parallel, "feat-x"); run(["init", "--root", parallel, "--slug", "feat-x"]); approveFlow(parallel)
+  setTaskRunStatus(parallel, "feat-x", "T1", "building"); setTaskRunStatus(parallel, "feat-x", "T2", "building")
+  assert.equal(registerBuilderAuto(parallel, "feat-x", "ambiguous-thread", parallel).ok, false)
+})
+
 test("워치독 상태: building 진입은 예산을 재시작하고 built 전이는 유지", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
@@ -648,6 +666,18 @@ test("errata v2: one-shot 승인 훅 경로가 disposition+correction을 함께 
   const entry = listErrata(root, "feat-x").find((e) => e.id === id)
   assert.equal(entry.disposition, "approved-workaround")
   assert.equal(entry.correction, "새 기준")
+})
+
+test("errata-arm: custom approve option은 exact match로만 바인딩", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const { id } = errataAdd(root, "feat-x", { severity: "degrade", designRef: "rev-1.md §D3", defect: "정정 필요" })
+  const arm = () => run(["errata-arm", "--root", root, "--slug", "feat-x", "--id", id, "--disposition", "approved-workaround", "--correction", "새 기준", "--approve-option", "확인"])
+  arm(); recordPendingErrata(root, "feat-x", "ask-1")
+  assert.equal(bindErrata(root, "feat-x", "ask-1", { answers: { q: "승인" } }).ok, false)
+  arm(); recordPendingErrata(root, "feat-x", "ask-2")
+  assert.equal(bindErrata(root, "feat-x", "ask-2", { answers: { q: "확인" } }).ok, true)
 })
 
 test("계획 승인 arm은 arm·pending errata 승인과 상호 배타", () => {
