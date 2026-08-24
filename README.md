@@ -85,8 +85,10 @@
 | `comment-resolve` | 내가 남긴 리뷰 지적에 대한 응답이 실제로 해소인지 검증해 resolve·재투표를 권고한다 |
 | `deploy-approval` | 배포 승인 요청의 대상 변경을 검토해 승인/보류를 판정하고 정족수 도달 시 전진을 권고한다 |
 | `quality-digest` | 누적된 리뷰 지적을 클러스터링해 lint·CI·리뷰 기준으로 승격할 후보를 제안한다 (제안만, 자동 변경 없음) |
+| `harness-digest` | 완료된 dev-full run의 실행 상태·리뷰 ledger를 분석해 하네스 개선을 실측 근거와 함께 제안한다 (제안만) |
 | `pr-delivery` | 주입된 Delivery Profile에 따라 PR 제목·본문과 리뷰요청 내용을 작성한다 |
 | `confluence-doc` | 개발 문서를 Confluence 페이지로 구조화하고 Mermaid를 네이티브 렌더링해 발행한다 |
+| `design-authoring` | 루프 밖 독립 설계 요청을 정본 계약(`agents/harnie-designer.md` + `instructions/design-authoring-{arch,detail}.md`)으로 라우팅하는 얇은 래퍼 |
 
 ## 이 repo는 harnie로 개발됐다
 
