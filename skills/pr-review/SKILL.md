@@ -44,7 +44,7 @@ Priority describes **what to inspect first**—the triage order. The "Comment Cl
 ## How to Write Findings
 
 - Write review findings and the overall approval recommendation **in Korean**. Preserve code identifiers, file paths, API names, and quoted source text in their original form.
-- Explain **why each finding matters** in one sentence and state **the conditions a fix must satisfy** instead of prescribing code. The author generates the fix with full codebase context, and an explicit condition makes resolution verifiable. Include a minimal code example **only when the remediation direction is genuinely ambiguous**, and even then present it as **an example solution, not the only acceptable answer**.
+- Explain **why each finding matters** in one sentence. For `issue:` and `discuss:`, state **the conditions a fix must satisfy** instead of prescribing code — the author generates the fix with full codebase context, and an explicit condition makes resolution verifiable. Include a minimal code example **only when the remediation direction is genuinely ambiguous**, and even then present it as **an example solution, not the only acceptable answer**. `nit:` may stay a light, concrete suggestion, code included.
 - Base feedback on the actual code in this change, not speculation or generic advice.
 - Use a professional, insightful tone.
 
