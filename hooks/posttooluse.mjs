@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Observe successful tool results to bind threads and approval without trusting main narration.
 import { readStdin, resolveRoot, classifyCodex, extractThreadId, isOwnerSession, allow, allowPostTool } from "./lib.mjs"
-import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval } from "../scripts/execution.mjs"
+import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval, bindErrata } from "../scripts/execution.mjs"
 import { decideWatchdog, WATCHDOG_DEFAULTS } from "../scripts/guards.mjs"
 
 try {
@@ -20,7 +20,7 @@ try {
       if (threadId) {
         if (input.sandbox === "read-only") registerReadonlyThread(root, ctx.track, ctx.slug, threadId)
         else if (input.sandbox === "workspace-write") {
-          registerBuilderAuto(root, ctx.slug, threadId) // 모호하면 no-op
+          registerBuilderAuto(root, ctx.slug, threadId, input.cwd) // 모호하면 no-op
           const recorded = recordBuilderCall(root, ctx.slug, threadId)
           if (recorded.ok) watchdogWarning = { ...recorded, ...decideWatchdog(recorded) }
         }
@@ -30,6 +30,7 @@ try {
       if (recorded.ok) watchdogWarning = { ...recorded, ...decideWatchdog(recorded) }
     } else if (toolName === "AskUserQuestion" && ctx.track === "plan") {
       bindApproval(root, ctx.slug, p.tool_use_id, response)
+      bindErrata(root, ctx.slug, p.tool_use_id, response)
     }
     if (watchdogWarning && watchdogWarning.warn && !watchdogWarning.deny) {
       const elapsed = watchdogWarning.elapsedMs == null ? "시간 정보 없음" : `${Math.floor(watchdogWarning.elapsedMs / 60_000)}분`

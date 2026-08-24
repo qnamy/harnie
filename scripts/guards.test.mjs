@@ -1,12 +1,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isActiveTaskWorktree } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isActiveTaskWorktree, taskIdFromActiveTaskWorktree } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·route·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
     ".harnie/active.json", ".harnie/plan/x/manifest.json", ".harnie/plan/x/execution.json",
     ".harnie/plan/x/review/u/ledger.json", ".harnie/plan/x/review/u/state.json",
     ".harnie/plan/x/review/u/receipt.json", ".harnie/pending-route/s.json", ".harnie/state.lock",
+    ".harnie/plan/x/design/errata.md", ".harnie/plan/x/.arm-errata.json", ".harnie/plan/x/.pending-errata.json",
   ]) assert.equal(isControlPath(p), true, p)
   for (const p of [".harnie/plan/x/plan.md", ".harnie/plan/x/review/u/round-1.txt", ".harnie/plan/x/review/u/delta.patch", "src/x.ts"])
     assert.equal(isControlPath(p), false, p)
@@ -158,10 +159,11 @@ test("isActiveTaskWorktree: 활성 slug의 직접 task worktree만 허용", () =
   assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-other-t1"), false)
   assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-t1/nested"), false)
   assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt-evil/harnie-x-t1"), false)
+  assert.equal(taskIdFromActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-tA_2"), "A_2")
 })
 
 test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building task", () => {
-  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", hasBuildingUnbound: true }
+  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": "/repo" } }
   assert.equal(decideCodex(base).deny, false)
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, false)
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-other-t1" }).deny, true)
@@ -170,12 +172,21 @@ test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt-evil/harnie-x-t1" }).deny, true)
   assert.equal(decideCodex({ ...base, sandbox: "danger-full-access" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/other" }).deny, true)
-  assert.equal(decideCodex({ ...base, hasBuildingUnbound: false }).deny, true)
+  assert.equal(decideCodex({ ...base, buildingUnboundTasks: [] }).deny, true)
+  assert.equal(decideCodex({ ...base, pendingRunRootBootstrap: null }).deny, true)
+})
+
+test("decideCodex: 복수 building 중 cwd가 가리키는 task의 첫 호출을 허용", () => {
+  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", phase: "executing", buildingUnboundTasks: ["1", "2"] }
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, false)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t2" }).deny, false)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t3" }).deny, true)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
 })
 
 test("decideCodex: workspace run — 멤버 workroot·그 하위 task worktree cwd 허용, 미등록 deny", () => {
   const member = "/ws/repoA/.harnie-wt/harnie-x"
-  const base = { isReply: false, sandbox: "workspace-write", root: "/ws/.harnie-wt/harnie-x", slug: "x", phase: "executing", hasBuildingUnbound: true, memberRoots: [member] }
+  const base = { isReply: false, sandbox: "workspace-write", root: "/ws/.harnie-wt/harnie-x", slug: "x", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": member }, memberRoots: [member] }
   assert.equal(decideCodex({ ...base, cwd: member }).deny, false)
   assert.equal(decideCodex({ ...base, cwd: `${member}/.harnie-wt/harnie-x-t1` }).deny, false)
   assert.equal(decideCodex({ ...base, cwd: "/ws/repoB/.harnie-wt/harnie-x" }).deny, true)

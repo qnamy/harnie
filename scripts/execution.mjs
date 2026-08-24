@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Durable run state; completion is always re-derived from manifest, reviews, and receipts.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync, realpathSync } from "node:fs"
+import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync, realpathSync } from "node:fs"
 import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
@@ -415,7 +415,11 @@ export function loadContext(root) {
   // workspace run(멀티레포): 게이트가 멤버 repo workroot를 허용 집합에 넣을 수 있게 노출.
   const repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
   const memberWorkroots = Object.values(repos).map((r) => r && r.workroot).filter((w) => typeof w === "string" && w)
-  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots }
+  const buildingUnboundTaskIds = Object.entries(ex.tasks || {}).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
+  const manifest = readJSONOrNull(join(dir, "manifest.json"))
+  const taskRepoWorkroots = {}
+  for (const task of manifest?.tasks || []) taskRepoWorkroots[task.id] = s.workspaceRoot ? repos[task.repo]?.workroot : root
+  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
 }
 
 export function computeCompletion(root, track, slug) {
@@ -424,7 +428,15 @@ export function computeCompletion(root, track, slug) {
   if (!existsSync(manifestPath)) return { complete: true, blockers: [], noManifest: true }
   const manifest = readJSONStrict(manifestPath)
   const snap = buildSnapshot(root, track, slug, manifest, manifest.planHash)
-  return deriveCompletion(manifest, snap)
+  const result = deriveCompletion(manifest, snap)
+  for (const entry of listErrata(root, slug)) {
+    if ((entry.severity === "blocker" || entry.severity === "degrade") && entry.disposition === "pending")
+      result.blockers.push(`errata ${entry.id}: ${entry.severity} pending`)
+    if (entry.disposition === "approved-workaround" && !entry.correction)
+      result.blockers.push(`errata ${entry.id}: approved-workaround correction 없음`)
+  }
+  result.complete = result.blockers.length === 0
+  return result
 }
 
 function lockPath(root) { return join(root, ".harnie", "state.lock") }
@@ -567,7 +579,9 @@ function parseArgs(argv) {
     const a = argv[i]
     if (a.startsWith("--")) {
       const key = a.slice(2)
-      flags[key] = argv[++i]
+      const next = argv[i + 1]
+      if (next === undefined || next.startsWith("--")) flags[key] = true
+      else { flags[key] = next; i++ }
     } else pos.push(a)
   }
   return { flags, pos }
@@ -626,11 +640,15 @@ export function armApproval(root, slug, { approveOption = "승인" } = {}) {
   const rb = validateRepoBinding(root, d.block)
   if (rb) return { ok: false, reason: rb }
   const dir = planDir(root, "plan", slug)
-  writeJSONAtomic(join(dir, ".arm-approval.json"), { planHash: d.planHash, approveOption, at: new Date().toISOString() })
-  const execPath = join(dir, "execution.json")
-  const ex = readJSONOrNull(execPath) || { track: "plan", slug, planHash: null, phase: "planning", tasks: {} }
-  if (ex.phase === "planning") { ex.phase = "awaiting-approval"; writeJSONAtomic(execPath, ex) }
-  return { ok: true, planHash: d.planHash }
+  return withStateLock(root, () => {
+    if (existsSync(join(dir, ".arm-errata.json")) || existsSync(join(dir, ".pending-errata.json")))
+      return { ok: false, reason: "errata 승인 대기 중 — 계획 승인 arm 불가" }
+    writeJSONAtomic(join(dir, ".arm-approval.json"), { planHash: d.planHash, approveOption, at: new Date().toISOString() })
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONOrNull(execPath) || { track: "plan", slug, planHash: null, phase: "planning", tasks: {} }
+    if (ex.phase === "planning") { ex.phase = "awaiting-approval"; writeJSONAtomic(execPath, ex) }
+    return { ok: true, planHash: d.planHash }
+  })
 }
 
 export function recordPendingApproval(root, slug, toolUseId) {
@@ -663,40 +681,40 @@ export function bindApproval(root, slug, toolUseId, response) {
   if (d.planHash !== pending.planHash) return { ok: false, reason: "질문 이후 plan 변경(planHash 불일치) — awaiting-approval 유지", phase: "awaiting-approval" }
   const rb = validateRepoBinding(root, d.block)
   if (rb) return { ok: false, reason: `repo 바인딩 불일치 — ${rb}`, phase: "awaiting-approval" }
-  const manifestPath = join(dir, "manifest.json")
-  const manifest = { ...canonicalManifest(d.block), planHash: d.planHash }
-  if (existsSync(manifestPath)) {
-    const prev = readJSONStrict(manifestPath)
-    if (prev.planHash !== d.planHash) {
+  return withStateLock(root, () => {
+    const manifestPath = join(dir, "manifest.json")
+    const manifest = { ...canonicalManifest(d.block), planHash: d.planHash }
+    if (existsSync(manifestPath)) {
+      const prev = readJSONStrict(manifestPath)
+      if (prev.planHash !== d.planHash) {
       // manifest 개정 — 실제 사용자 재승인을 통과한 뒤에만 도달한다(approve 선택 + 새 planHash 일치).
       // 이전 정본은 감사용으로 manifest.v<n>.json에 아카이브하고 교체한다. 이 분기 밖에서 manifest를
       // 바꾸는 경로는 없다: 직접 쓰기는 훅이, set-phase 역전이는 CLI가 여전히 차단한다.
       // 기존 receipt는 옛 planHash로 남아 completion이 재검증을 강제한다(verify 재실행 필요, 리뷰 ledger는 유지).
-      let n = 1
-      while (existsSync(join(dir, `manifest.v${n}.json`))) n++
-      writeJSONAtomic(join(dir, `manifest.v${n}.json`), { ...prev, supersededAt: new Date().toISOString(), supersededBy: d.planHash })
+        let n = 1
+        while (existsSync(join(dir, `manifest.v${n}.json`))) n++
+        writeJSONAtomic(join(dir, `manifest.v${n}.json`), { ...prev, supersededAt: new Date().toISOString(), supersededBy: d.planHash })
+        writeJSONAtomic(manifestPath, manifest)
+      }
+    } else {
       writeJSONAtomic(manifestPath, manifest)
     }
-  } else {
-    writeJSONAtomic(manifestPath, manifest)
-  }
-  const execPath = join(dir, "execution.json")
-  const ex = readJSONOrNull(execPath) || { track: "plan", slug, tasks: {} }
-  ex.planHash = d.planHash
-  ex.phase = "executing"
-  writeJSONAtomic(execPath, ex)
-  withStateLock(root, () => { // P1-3b: active.json RMW를 lock으로 직렬화 + rollover 감지
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONOrNull(execPath) || { track: "plan", slug, tasks: {} }
+    ex.planHash = d.planHash
+    ex.phase = "executing"
+    writeJSONAtomic(execPath, ex)
     const s = readJSONStrict(sentinelPath(root))
     if (s.slug !== slug || s.track !== "plan") throw new FailClosed("승인 중 active run 변경됨(rollover) — 이 run은 더 이상 활성 아님, fail-closed")
     s.planHash = d.planHash
     writeJSONAtomic(sentinelPath(root), s)
+    rmSync(pendingPath, { force: true })
+    rmSync(join(dir, ".arm-approval.json"), { force: true })
+    return { ok: true, planHash: d.planHash, phase: "executing" }
   })
-  rmSync(pendingPath, { force: true })
-  rmSync(join(dir, ".arm-approval.json"), { force: true })
-  return { ok: true, planHash: d.planHash, phase: "executing" }
 }
 
-export function registerBuilderThread(root, slug, taskId, threadId) {
+function registerBuilderThreadLocked(root, slug, taskId, threadId, { clearBootstrap = false } = {}) {
   const execPath = join(planDir(root, "plan", slug), "execution.json")
   const ex = readJSONStrict(execPath)
   ex.tasks = ex.tasks || {}
@@ -706,24 +724,32 @@ export function registerBuilderThread(root, slug, taskId, threadId) {
   if (ex.tasks[taskId].builderThreadId && ex.tasks[taskId].builderThreadId !== threadId)
     throw new FailClosed(`task ${taskId} builderThreadId 이미 등록됨(${ex.tasks[taskId].builderThreadId})`)
   ex.tasks[taskId].builderThreadId = threadId
+  if (clearBootstrap) delete ex.pendingRunRootBootstrap
   writeJSONAtomic(execPath, ex)
   return { ok: true, taskId, threadId }
+}
+
+export function registerBuilderThread(root, slug, taskId, threadId) {
+  return withStateLock(root, () => registerBuilderThreadLocked(root, slug, taskId, threadId))
 }
 
 export function setTaskRunStatus(root, slug, taskId, runStatus) {
   const VALID = new Set(["pending", "building", "built"])
   if (!VALID.has(runStatus)) throw new FailClosed(`runStatus는 ${[...VALID].join("|")}`)
-  const execPath = join(planDir(root, "plan", slug), "execution.json")
-  const ex = readJSONStrict(execPath)
-  ex.tasks = ex.tasks || {}
-  ex.tasks[taskId] = ex.tasks[taskId] || { runStatus: "pending", builderThreadId: null }
-  ex.tasks[taskId].runStatus = runStatus
-  if (runStatus === "building") {
-    ex.tasks[taskId].startedAt = new Date().toISOString()
-    ex.tasks[taskId].codexCalls = 0
-  }
-  writeJSONAtomic(execPath, ex)
-  return { ok: true, taskId, runStatus }
+  return withStateLock(root, () => {
+    const execPath = join(planDir(root, "plan", slug), "execution.json")
+    const ex = readJSONStrict(execPath)
+    ex.tasks = ex.tasks || {}
+    ex.tasks[taskId] = ex.tasks[taskId] || { runStatus: "pending", builderThreadId: null }
+    const firstBuild = ex.tasks[taskId].runStatus === "pending" && runStatus === "building"
+    ex.tasks[taskId].runStatus = runStatus
+    if (firstBuild) {
+      ex.tasks[taskId].startedAt = new Date().toISOString()
+      ex.tasks[taskId].codexCalls = 0
+    }
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, taskId, runStatus }
+  })
 }
 
 export function buildingUnboundTasks(root, slug) {
@@ -732,23 +758,76 @@ export function buildingUnboundTasks(root, slug) {
   return Object.entries(ex.tasks).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
 }
 
-export function registerBuilderAuto(root, slug, threadId) {
-  const cands = buildingUnboundTasks(root, slug)
-  if (cands.length !== 1) return { ok: false, reason: `building-unbound task ${cands.length}개 — 자동 귀속 모호`, candidates: cands }
-  return registerBuilderThread(root, slug, cands[0], threadId)
+function taskWorkroot(root, task, sentinel) {
+  if (sentinel.workspaceRoot) return sentinel.repos?.[task.repo]?.workroot || null
+  return task.repo == null ? root : null
+}
+
+function taskIdFromWorktreeCwd(root, slug, cwd, manifest, sentinel) {
+  if (typeof cwd !== "string" || !existsSync(cwd)) return null
+  const realCwd = realpathOf(cwd)
+  for (const task of manifest.tasks || []) {
+    const workroot = taskWorkroot(root, task, sentinel)
+    if (!workroot || !existsSync(workroot)) continue
+    const expected = join(realpathOf(workroot), ".harnie-wt", `harnie-${slug}-t${task.id}`)
+    if (realCwd === realOrResolve(expected)) return task.id
+  }
+  return null
+}
+
+function gitRootOf(cwd) {
+  try { return realpathOf(execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim()) }
+  catch { return null }
+}
+
+function realOrResolve(p) { try { return realpathSync(p) } catch { return resolve(p) } }
+
+export function registerBuilderAuto(root, slug, threadId, cwd = null) {
+  return withStateLock(root, () => {
+    const dir = planDir(root, "plan", slug)
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONOrNull(execPath)
+    if (!ex || ex.track !== "plan") return { ok: false, reason: "plan 실행 상태 없음 — 자동 귀속 대상 아님" }
+    const cands = Object.entries(ex.tasks || {}).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
+    const manifest = readJSONOrNull(join(dir, "manifest.json")) || { tasks: [] }
+    const sentinel = readJSONOrNull(sentinelPath(root))
+    if (!sentinel) return { ok: false, reason: "활성 run sentinel 없음 — 자동 귀속 대상 아님" }
+    const mapped = taskIdFromWorktreeCwd(root, slug, cwd, manifest, sentinel)
+    if (mapped != null) {
+      if (!cands.includes(mapped)) return { ok: false, reason: `cwd task ${mapped}가 building-unbound 아님`, candidates: cands }
+      return registerBuilderThreadLocked(root, slug, mapped, threadId)
+    }
+    const roots = [root, ...Object.values(sentinel.repos || {}).map((r) => r && r.workroot).filter(Boolean)]
+    const directRoot = typeof cwd === "string" && existsSync(cwd) && roots.some((r) => existsSync(r) && realpathOf(r) === realpathOf(cwd))
+    if (directRoot) {
+      const taskId = ex.pendingRunRootBootstrap
+      if (!taskId) return { ok: false, reason: "run-root 부트스트랩 marker 없음 — building task 추측 금지", candidates: cands }
+      const task = manifest.tasks.find((t) => t.id === taskId)
+      const expectedRoot = task && taskWorkroot(root, task, sentinel)
+      if (!task || !expectedRoot || gitRootOf(cwd) !== realpathOf(expectedRoot))
+        return { ok: false, reason: `pendingRunRootBootstrap task ${taskId}의 repo workroot와 cwd git root 불일치` }
+      if (!cands.includes(taskId)) return { ok: false, reason: `marker task ${taskId}가 building-unbound 아님`, candidates: cands }
+      return registerBuilderThreadLocked(root, slug, taskId, threadId, { clearBootstrap: true })
+    }
+    if (cwd != null) return { ok: false, reason: `codex cwd가 활성 task worktree·run/member root 패턴과 불일치: ${cwd}`, candidates: cands }
+    if (cands.length !== 1) return { ok: false, reason: `building-unbound task ${cands.length}개 — 자동 귀속 모호`, candidates: cands }
+    return registerBuilderThreadLocked(root, slug, cands[0], threadId)
+  })
 }
 
 // 빌더 호출 수는 워치독 표시용이다. 권위 상태가 아니므로 조회 실패는 호출자에서 fail-open으로 다룬다.
 export function recordBuilderCall(root, slug, threadId) {
-  const execPath = join(planDir(root, "plan", slug), "execution.json")
-  const ex = readJSONStrict(execPath)
-  const found = Object.entries(ex.tasks || {}).find(([, task]) => task && task.builderThreadId === threadId)
-  if (!found) return { ok: false }
-  const [taskId, task] = found
-  task.codexCalls = Number.isInteger(task.codexCalls) && task.codexCalls >= 0 ? task.codexCalls + 1 : 1
-  if (!task.startedAt) task.startedAt = new Date().toISOString()
-  writeJSONAtomic(execPath, ex)
-  return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt }
+  return withStateLock(root, () => {
+    const execPath = join(planDir(root, "plan", slug), "execution.json")
+    const ex = readJSONStrict(execPath)
+    const found = Object.entries(ex.tasks || {}).find(([, task]) => task && task.builderThreadId === threadId)
+    if (!found) return { ok: false }
+    const [taskId, task] = found
+    task.codexCalls = Number.isInteger(task.codexCalls) && task.codexCalls >= 0 ? task.codexCalls + 1 : 1
+    if (!task.startedAt) task.startedAt = new Date().toISOString()
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt }
+  })
 }
 
 export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null } = {}) {
@@ -769,17 +848,177 @@ export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null }
 
 export function watchdogExtend(root, slug, taskId, reason) {
   if (typeof reason !== "string" || reason.trim() === "") throw new FailClosed("watchdog-extend: --reason 필요")
-  const execPath = join(planDir(root, "plan", slug), "execution.json")
-  const ex = readJSONStrict(execPath)
-  const task = ex.tasks && ex.tasks[taskId]
-  if (!task) throw new FailClosed(`watchdog-extend: task ${taskId} 없음`)
-  const at = new Date().toISOString()
-  task.startedAt = at
-  task.codexCalls = 0
-  task.watchdogExtensions = Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions : []
-  task.watchdogExtensions.push({ at, reason: reason.trim() })
-  writeJSONAtomic(execPath, ex)
-  return { ok: true, taskId, extensions: task.watchdogExtensions.length }
+  return withStateLock(root, () => {
+    const execPath = join(planDir(root, "plan", slug), "execution.json")
+    const ex = readJSONStrict(execPath)
+    const task = ex.tasks && ex.tasks[taskId]
+    if (!task) throw new FailClosed(`watchdog-extend: task ${taskId} 없음`)
+    const normalized = reason.trim()
+    task.watchdogExtensions = Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions : []
+    if (normalized === "auto-cap" && task.watchdogExtensions.length > 0)
+      throw new FailClosed(`watchdog-extend: task ${taskId} auto-cap은 기존 연장 전 1회만 허용(총 예산 최대 2×)`)
+    const at = new Date().toISOString()
+    task.startedAt = at
+    task.codexCalls = 0
+    task.watchdogExtensions.push({ at, reason: normalized })
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, taskId, extensions: task.watchdogExtensions.length }
+  })
+}
+
+const ERRATA_SEVERITIES = new Set(["blocker", "degrade", "note"])
+const ERRATA_DISPOSITIONS = new Set(["approved-workaround", "deferred-next-run", "superseded-by-A5.2"])
+function errataPath(root, slug) { return join(planDir(root, "plan", slug), "design", "errata.md") }
+
+function fieldText(lines, start) {
+  const values = [lines[start].replace(/^-[ \t]+[^:]+:[ \t]*/, "")]
+  for (let i = start + 1; i < lines.length && !/^-[ \t]+[^:]+:/.test(lines[i]) && !/^##[ \t]+E-\d+/.test(lines[i]); i++)
+    if (lines[i].startsWith("  ")) values.push(lines[i].slice(2))
+  return values.join("\n").trim()
+}
+
+export function listErrata(root, slug, { pending = false } = {}) {
+  const path = errataPath(root, slug)
+  if (!existsSync(path)) return []
+  const lines = readFileSync(path, "utf8").split(/\r?\n/)
+  const entries = []
+  let current = null
+  for (let i = 0; i < lines.length; i++) {
+    const heading = lines[i].match(/^##[ \t]+(E-\d{3})\b/)
+    if (heading) {
+      current = entries.find((e) => e.id === heading[1]) || { id: heading[1] }
+      if (!entries.includes(current)) entries.push(current)
+      continue
+    }
+    if (!current) continue
+    const field = lines[i].match(/^-[ \t]+(found|severity|design-ref|defect|disposition|correction):/)
+    if (!field) continue
+    const value = fieldText(lines, i)
+    if (field[1] === "disposition") current.disposition = value.split(/[ \t]+\(/, 1)[0]
+    else current[field[1] === "design-ref" ? "designRef" : field[1]] = value
+  }
+  return pending ? entries.filter((e) => e.disposition === "pending") : entries
+}
+
+function appendErrata(path, text) {
+  mkdirSync(dirname(path), { recursive: true })
+  appendFileSync(path, text)
+}
+
+function markdownField(text) { return String(text).replace(/\r?\n/g, "\n  ") }
+
+export function errataAdd(root, slug, { severity, designRef, defect }) {
+  if (!ERRATA_SEVERITIES.has(severity)) throw new FailClosed(`errata-add: --severity는 ${[...ERRATA_SEVERITIES].join("|")}`)
+  if (typeof designRef !== "string" || !designRef.trim()) throw new FailClosed("errata-add: --design-ref 필요")
+  if (typeof defect !== "string" || !defect.trim()) throw new FailClosed("errata-add: --defect 필요")
+  return withStateLock(root, () => {
+    const entries = listErrata(root, slug)
+    const n = entries.reduce((max, e) => Math.max(max, Number(e.id.slice(2))), 0) + 1
+    const id = `E-${String(n).padStart(3, "0")}`
+    const at = new Date().toISOString()
+    appendErrata(errataPath(root, slug), `${entries.length ? "\n" : ""}## ${id}\n- found: ${at}\n- severity: ${severity}\n- design-ref: ${markdownField(designRef.trim())}\n- defect: ${markdownField(defect.trim())}\n- disposition: pending\n`)
+    return { ok: true, id, severity, designRef: designRef.trim(), defect: defect.trim(), disposition: "pending" }
+  })
+}
+
+function correctionText(arg) {
+  if (typeof arg !== "string" || !arg) throw new FailClosed("--correction <text|@file> 필요")
+  const text = arg.startsWith("@") ? readFileSync(arg.slice(1), "utf8") : arg
+  if (!text.trim()) throw new FailClosed("--correction은 비어있을 수 없음")
+  return text.trim()
+}
+
+export function errataArm(root, slug, { id, disposition, correction }) {
+  if (!ERRATA_DISPOSITIONS.has(disposition)) throw new FailClosed(`errata-arm: --disposition은 ${[...ERRATA_DISPOSITIONS].join("|")}`)
+  const text = correctionText(correction)
+  return withStateLock(root, () => {
+    const dir = planDir(root, "plan", slug)
+    if (existsSync(join(dir, ".arm-approval.json")) || existsSync(join(dir, ".pending-approval.json")))
+      throw new FailClosed("errata-arm: 계획 승인 대기 중 — errata 승인 arm 불가")
+    const entry = listErrata(root, slug).find((e) => e.id === id)
+    if (!entry) throw new FailClosed(`errata-arm: ${id} 없음`)
+    if (entry.severity === "note") throw new FailClosed(`errata-arm: note는 errata-set-disposition 사용`)
+    if (entry.disposition !== "pending") throw new FailClosed(`errata-arm: ${id} disposition이 pending 아님`)
+    const path = join(dir, ".arm-errata.json")
+    if (existsSync(path)) throw new FailClosed("errata-arm: 이미 무장된 errata 승인 있음")
+    writeJSONAtomic(path, { id, disposition, correction: text, approveOption: "승인", at: new Date().toISOString() })
+    return { ok: true, id, disposition }
+  })
+}
+
+export function recordPendingErrata(root, slug, toolUseId) {
+  const dir = planDir(root, "plan", slug)
+  const armPath = join(dir, ".arm-errata.json")
+  if (!existsSync(armPath)) return { ok: false, reason: "errata 승인 미-arm" }
+  return withStateLock(root, () => {
+    const arm = readJSONStrict(armPath)
+    writeJSONAtomic(join(dir, ".pending-errata.json"), { ...arm, toolUseId })
+    rmSync(armPath, { force: true })
+    return { ok: true, id: arm.id }
+  })
+}
+
+export function bindErrata(root, slug, toolUseId, response) {
+  const dir = planDir(root, "plan", slug)
+  const pendingPath = join(dir, ".pending-errata.json")
+  if (!existsSync(pendingPath)) return { ok: false, reason: "pending-errata 없음" }
+  return withStateLock(root, () => {
+    const pending = readJSONStrict(pendingPath)
+    if (pending.toolUseId !== toolUseId) return { ok: false, reason: "tool_use_id 불일치" }
+    rmSync(pendingPath, { force: true })
+    const selected = extractSelectedAnswers(response)
+    if (!selected.length || !selected.every((v) => v === pending.approveOption)) return { ok: false, reason: "승인 옵션 정확 일치 아님" }
+    const entry = listErrata(root, slug).find((e) => e.id === pending.id)
+    if (!entry || entry.disposition !== "pending" || entry.severity === "note") throw new FailClosed(`errata ${pending.id} 승인 대상 상태 불일치`)
+    const at = new Date().toISOString()
+    appendErrata(errataPath(root, slug), `\n## ${pending.id} disposition\n- disposition: ${pending.disposition} (user approved ${at})\n- correction: ${markdownField(pending.correction)}\n`)
+    return { ok: true, id: pending.id, disposition: pending.disposition, correction: pending.correction }
+  })
+}
+
+export function errataSetDisposition(root, slug, { id, disposition, correction }) {
+  if (!ERRATA_DISPOSITIONS.has(disposition)) throw new FailClosed(`errata-set-disposition: --disposition은 ${[...ERRATA_DISPOSITIONS].join("|")}`)
+  const text = correctionText(correction)
+  return withStateLock(root, () => {
+    const entry = listErrata(root, slug).find((e) => e.id === id)
+    if (!entry) throw new FailClosed(`errata-set-disposition: ${id} 없음`)
+    if (entry.severity !== "note") throw new FailClosed("errata-set-disposition은 note 항목 전용 — blocker/degrade는 errata-arm + AskUserQuestion 필요")
+    if (entry.disposition !== "pending") throw new FailClosed(`errata-set-disposition: ${id} disposition이 pending 아님`)
+    appendErrata(errataPath(root, slug), `\n## ${id} disposition\n- disposition: ${disposition}\n- correction: ${markdownField(text)}\n`)
+    return { ok: true, id, disposition, correction: text }
+  })
+}
+
+export function rebindTask(root, slug, { taskId, reason, cancel = false }) {
+  const correction = /^correction:E-\d{3}$/.test(String(reason || ""))
+  const approvedArtifact = /^approved-artifact:[0-9a-f]{40}$/.test(String(reason || ""))
+  if ((!cancel && !correction) || (cancel && !approvedArtifact))
+    throw new FailClosed(`rebind-task: reason 형식 오류(${cancel ? "approved-artifact:<postSHA>" : "correction:<E-NNN>"})`)
+  return withStateLock(root, () => {
+    const execPath = join(planDir(root, "plan", slug), "execution.json")
+    const ex = readJSONStrict(execPath)
+    const task = ex.tasks && ex.tasks[taskId]
+    if (!task) throw new FailClosed(`rebind-task: task ${taskId} 없음`)
+    ex.threadRebindings = Array.isArray(ex.threadRebindings) ? ex.threadRebindings : []
+    const at = new Date().toISOString()
+    if (cancel) {
+      if (ex.pendingRunRootBootstrap !== taskId) throw new FailClosed(`rebind-task --cancel: task ${taskId} marker 없음`)
+      delete ex.pendingRunRootBootstrap
+      ex.threadRebindings.push({ action: "cancel", taskId, reason, at })
+    } else {
+      if (ex.pendingRunRootBootstrap) throw new FailClosed(`rebind-task: pendingRunRootBootstrap ${ex.pendingRunRootBootstrap} 이미 존재`)
+      const oldThreadId = task.builderThreadId
+      if (!oldThreadId) throw new FailClosed(`rebind-task: task ${taskId} builderThreadId 없음`)
+      task.builderThreadId = null
+      task.runStatus = "building"
+      task.startedAt = at
+      task.codexCalls = 0
+      ex.pendingRunRootBootstrap = taskId
+      ex.threadRebindings.push({ action: "rebind", taskId, oldThreadId, reason, at })
+    }
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, taskId, reason, cancel, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null }
+  })
 }
 
 // 워크스페이스 run에 멤버 repo를 등록: 검증(워크스페이스 하위 + git toplevel) → `<repo>/.harnie-wt/harnie-<slug>`
@@ -951,6 +1190,26 @@ function cmdWatchdogExtend({ flags }) {
   out(watchdogExtend(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.task || die("--task 필요"), flags.reason || die("--reason 필요")))
 }
 
+function cmdErrataAdd({ flags }) {
+  out(errataAdd(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { severity: flags.severity || die("--severity 필요"), designRef: flags["design-ref"] || die("--design-ref 필요"), defect: flags.defect || die("--defect 필요") }))
+}
+
+function cmdErrataArm({ flags }) {
+  out(errataArm(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
+}
+
+function cmdErrataSetDisposition({ flags }) {
+  out(errataSetDisposition(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
+}
+
+function cmdErrataList({ flags }) {
+  out(listErrata(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { pending: flags.pending === true }))
+}
+
+function cmdRebindTask({ flags }) {
+  out(rebindTask(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { taskId: flags.task || die("--task 필요"), reason: flags.reason || die("--reason 필요"), cancel: flags.cancel === true }))
+}
+
 function cmdSetPhase({ flags }) {
   const root = flags.root || die("--root 필요")
   const track = flags.track || "plan"
@@ -973,10 +1232,12 @@ function cmdSetPhase({ flags }) {
     const comp = computeCompletion(root, track, slug)
     if (!comp.complete) die(`phase=closed는 완료 재도출 complete일 때만 — 남은 것: ${comp.blockers.slice(0, 6).join("; ")}`)
   }
-  const execPath = join(dir, "execution.json")
-  const ex = readJSONStrict(execPath)
-  ex.phase = phase
-  writeJSONAtomic(execPath, ex)
+  withStateLock(root, () => {
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONStrict(execPath)
+    ex.phase = phase
+    writeJSONAtomic(execPath, ex)
+  })
   out({ ok: true, phase })
 }
 
@@ -994,6 +1255,11 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "repo-add": cmdRepoAdd(args); break
       case "set-task": cmdSetTask(args); break
       case "watchdog-extend": cmdWatchdogExtend(args); break
+      case "errata-add": cmdErrataAdd(args); break
+      case "errata-arm": cmdErrataArm(args); break
+      case "errata-set-disposition": cmdErrataSetDisposition(args); break
+      case "errata-list": cmdErrataList(args); break
+      case "rebind-task": cmdRebindTask(args); break
       case "set-phase": cmdSetPhase(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)
     }

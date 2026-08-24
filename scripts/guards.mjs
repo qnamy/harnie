@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 const CONTROL_BASENAMES = new Set([
   "manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json",
-  ".seal.json", ".pending-approval.json", ".arm-approval.json",
+  ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json", "errata.md",
 ])
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")
@@ -90,11 +90,17 @@ export function referencesHarnie(cmd) {
 }
 
 export function isActiveTaskWorktree(root, slug, candidate) {
-  if (root == null || slug == null || candidate == null) return false
+  return taskIdFromActiveTaskWorktree(root, slug, candidate) != null
+}
+
+export function taskIdFromActiveTaskWorktree(root, slug, candidate) {
+  if (root == null || slug == null || candidate == null) return null
   const parent = resolve(root, ".harnie-wt")
   const target = resolve(root, candidate)
   const escapedSlug = String(slug).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  return dirname(target) === parent && new RegExp(`^harnie-${escapedSlug}-t[A-Za-z0-9._-]+$`).test(basename(target))
+  if (dirname(target) !== parent) return null
+  const m = basename(target).match(new RegExp(`^harnie-${escapedSlug}-t([A-Za-z0-9._-]+)$`))
+  return m ? m[1] : null
 }
 
 function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots = [] }) {
@@ -167,7 +173,7 @@ export function decideTask({ subagentType, phase }) {
 }
 
 // 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/멤버 workroot/task worktree cwd만 허용한다.
-export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, memberRoots = [] }) {
+export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {}, memberRoots = [] }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
     if (!isReply) {
@@ -183,12 +189,22 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
     if (sandbox === "read-only") return { deny: false }
     if (sandbox !== "workspace-write")
       return { deny: true, reason: `빌더 codex sandbox는 정확히 "workspace-write"만(${JSON.stringify(sandbox)} 차단 — danger-full-access·미지정 불가)` }
-    const allowedCwd = cwd != null && root != null &&
-      (cwd === root || isActiveTaskWorktree(root, slug, cwd) ||
-        memberRoots.some((m) => cwd === m || isActiveTaskWorktree(m, slug, cwd)))
+    const roots = [root, ...memberRoots]
+    const taskId = roots.map((r) => taskIdFromActiveTaskWorktree(r, slug, cwd)).find((id) => id != null)
+    const directRoot = roots.includes(cwd)
+    const allowedCwd = cwd != null && root != null && (directRoot || taskId != null)
     if (!allowedCwd)
       return { deny: true, reason: `빌더 codex cwd는 활성 repo root·등록된 멤버 repo workroot 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)}·등록 멤버 workroot 또는 그 task worktree)` }
-    if (!hasBuildingUnbound)
+    if (Array.isArray(buildingUnboundTasks)) {
+      if (taskId != null && !buildingUnboundTasks.includes(taskId))
+        return { deny: true, reason: `task worktree cwd의 task ${taskId}가 building·미바인딩 상태 아님` }
+      if (directRoot) {
+        if (!pendingRunRootBootstrap)
+          return { deny: true, reason: "run-root 빌더 부트스트랩은 pendingRunRootBootstrap marker 필요 — building task 추측 금지" }
+        if (!buildingUnboundTasks.includes(pendingRunRootBootstrap) || taskRepoWorkroots[pendingRunRootBootstrap] !== cwd)
+          return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
+      }
+    } else if (!hasBuildingUnbound)
       return { deny: true, reason: "빌더 workspace-write 호출은 building·미바인딩 task가 있을 때만(set-task로 표시 후) — 임의 쓰기 차단" }
     return { deny: false }
   }
