@@ -42,19 +42,17 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 
 ## 위임 참조 규칙 (디스크 정본만)
 
-서브에이전트·리뷰어에게 넘기는 모든 경로는 repo 안의 **디스크 정본**이어야 한다 — `.harnie/plan/<slug>/…` 또는 소스 파일. **tool-result blob 경로**(`tool-results/*.json`, 트랜스크립트 스크래치, 임시 캡처 등)는 **절대 넘기지 않는다.** 그 파일들은 읽히도록 쓰인 게 아니라서(한 줄 55k 토큰 JSON은 조용히 로드에 실패한다), 위임받은 쪽은 자기가 기억하는 **더 오래된 리비전**으로 설계를 재구성하게 되고, 그렇게 세대가 라운드를 넘어 뒤섞이면 하류에서 탐지되지 않는다.
+서브에이전트·리뷰어에게 넘기는 모든 경로는 repo 안의 **디스크 정본**이어야 한다 — `.harnie/plan/<slug>/…` 또는 소스 파일. **tool-result blob 경로**(`tool-results/*.json`, 트랜스크립트 스크래치, 임시 캡처)는 넘기지 않는다: 과대 blob은 조용히 로드에 실패하고, 위임받은 쪽은 **오래된 리비전**으로 재구성한다 — 그 세대 뒤섞임은 하류에서 탐지되지 않는다.
 
-따라서 **설계 산출물이 존재하는 순간부터**:
+1. 현재 설계는 `.harnie/plan/<slug>/design/rev-N.md`에 산다 — **리비전마다 새 파일, 덮어쓰지 않는다.** **designer가 거기에 직접 쓴다**(위임이 정확한 목적지를 지명하고, designer는 짧은 요약만 반환하며, main은 그것을 참조하는 위임 前에 파일 존재·비어있지 않음을 확인한다). main이 에이전트 응답의 설계 텍스트를 파일로 전사하는 일은 없다. 최초 작성 위임이 작업과 그라운딩으로 `rev-1`을 쓴다.
+2. 기존 설계를 참조하는 이후 위임은 **그 정확한 경로와 리비전**을 명시하고, 어떤 리비전이 리뷰 대상인지 말한다.
+3. 설계 내용을 인라인으로 싣는 것(`review-loop-driver.md` R2가 `DR` 루프에서 요구)은 이 규칙을 대체하지 않는다: 인라인 내용과 명시한 `rev-N.md`는 **같은 리비전**이어야 한다.
+4. **빌더 예외(B2).** Codex 빌더는 `.harnie` 경로를 받지 않는다: 승인된 설계를 **인라인**으로 주고 `rev-N`을 명시한다. 경로 명시 요구는 `.harnie/`를 읽을 수 있는 위임 대상(designer·설계 리뷰어)에 적용된다.
 
-1. 현재 설계는 `.harnie/plan/<slug>/design/rev-N.md`에 산다 — **리비전마다 새 파일**, 이전 `N`을 덮어쓰지 않는다. **designer가 거기에 직접 쓴다**: 모든 작성 위임은 정확한 목적지 경로(`design/rev-<다음 N>.md`)를 지명하고, (Write 툴을 가진) designer가 그 경로에 문서를 쓰고 짧은 요약만 반환하며, main은 그것을 참조하는 위임 前에 파일 존재·비어있지 않음을 확인한다. main이 에이전트 응답의 설계 텍스트를 파일로 전사하는 일은 없다 — 그 왕복은 리비전마다 ~100KB 문서를 main 컨텍스트로 통과시키는, 정확히 이 규칙이 막으려는 낭비다. **최초 작성 위임**(A3/A4 첫 패스)에는 아직 산출물이 없다 — designer가 작업과 그라운딩으로 `rev-1`을 쓰고, 이 규칙은 **그 이후 모든 위임**에 적용된다.
-2. **기존 설계를 참조하는 이후 위임**은 **그 정확한 경로와 리비전 번호**를 명시하고, 어떤 리비전이 리뷰 대상인지 말한다(예: "`design/rev-4.md`를 리뷰하라, rev-3은 폐기됨").
-3. 설계 내용을 프롬프트에 인라인으로 싣는 것(`review-loop-driver.md` R2가 `DR` 루프에서 요구 — 설계 파일은 git delta에서 제외되므로)은 이 규칙을 **대체하지 않는다**: 인라인 내용과 명시한 `rev-N.md`는 **같은 리비전**이어야 한다.
-4. **빌더 예외(B2).** Codex 빌더는 `.harnie/`에 접근하지 않으므로 `.harnie` 경로를 받지 않는다. 승인된 설계를 프롬프트에 **인라인**으로 주고, **어느 리비전에서 온 것인지(`rev-N`)를 명시**해 산출의 귀속을 유지한다. 경로 명시 요구는 `.harnie/`를 읽을 수 있는 위임 대상(designer·설계 리뷰어)에 적용된다.
-
-위임받은 쪽이 참조 경로를 읽지 못했다고 보고하면 그 라운드의 산출은 **무효**로 보고, 참조를 고쳐 재위임한다. 기억으로 재구성한 결과는 절대 받아들이지 않는다.
+위임받은 쪽이 참조 경로를 읽지 못했다고 보고하면 그 라운드의 산출은 **무효**다 — 참조를 고쳐 재위임한다. 기억으로 재구성한 결과는 절대 받아들이지 않는다.
 
 ## 실행 상태 + 강제 훅 (plan 전용 하네스 — `scripts/execution.mjs`)
-plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 `manifest.json`(PHASE A의 A5.2 사용자 재승인 — 이전 버전을 아카이브 — 을 통해서만 개정 가능한 immutable) + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다 — 훅은 manifest+planHash로 승인을 판정하지 advisory phase를 믿지 않는다). 아래 스텝에서 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`, `<repo>` = 이 run의 절대경로 **워크루트**다. 이는 세션 시작 디렉터리가 아니라 `/harnie:dev-full` bootstrap 훅이 컨텍스트 메시지(`hookSpecificOutput.additionalContext` 또는 `permissionDecisionReason`)로 보고한 전용 git worktree 경로다. 메시지를 찾을 수 없으면 `<main repo>/.harnie/sessions/<이 세션의 id>.json`의 `workroot` 필드에서 `<repo>`를 복구한다. **모든 `execution.mjs` 서브커맨드와 `loop.mjs apply`는 `--root <repo>` 필수**(없으면 즉시 종료). (`loop.mjs capture`/`delta`는 `<repo>`를 위치 인자로 받는다.) 상태 조작은 **반드시 `execution.mjs`로만**(직접 Edit/Write/Bash-write는 훅이 차단). Bash 가드는 명령 텍스트에 `.harnie`가 등장하면 **읽기 포함** 포괄 차단한다(읽기 전용 셸 명령을 신뢰성 있게 분류할 수 없으므로). `.harnie` 산출물을 밖으로 꺼낼 때(인계용 설계 문서, 보고용 receipt)는 `cp`/`grep` 대신 sanctioned 읽기 전용 서브커맨드 `node <ROOT>/scripts/loop.mjs export <repo> <.harnie/ 기준 상대경로> [--out <.harnie 밖 목적지>]`를 쓴다; 컨텍스트 내 읽기는 늘 그렇듯 Read 툴로 하면 된다:
+plan 트랙은 durable 상태와 강제 훅으로 두 불변식 — **① 승인 前 소스 쓰기 금지, ② 미승인·미완료를 done으로 확정 금지** — 을 기계화한다. 권위 = planHash 고정 `manifest.json`(A5.2 사용자 재승인으로만 개정 가능, 이전 버전 아카이브) + 각 리뷰 유닛의 ledger·state + verification receipt; `execution.json`은 advisory 캐시일 뿐 신뢰하지 않는다. `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`; `<repo>` = 이 run의 절대경로 **워크루트**로, bootstrap 훅의 컨텍스트 메시지에서 얻는다(폴백: `<main repo>/.harnie/sessions/<이 세션의 id>.json`의 `workroot` 필드) — 세션 시작 디렉터리가 아니다. **모든 `execution.mjs` 서브커맨드와 `loop.mjs apply`는 `--root <repo>` 필수**(`loop.mjs capture`/`delta`는 `<repo>`를 위치 인자로 받는다). 상태 조작은 **반드시 `execution.mjs`로만** — 훅이 직접 쓰기를 차단하고, Bash 가드는 `.harnie`를 참조하는 명령 텍스트를 **읽기 포함** 포괄 차단한다. `.harnie` 산출물을 꺼낼 때는 `node <ROOT>/scripts/loop.mjs export <repo> <.harnie/ 기준 상대경로> [--out <.harnie 밖 목적지>]`를 쓴다; 컨텍스트 내 읽기는 늘 그렇듯 Read 툴로 하면 된다:
 - **활성 run은 bootstrap 훅이 만든다 — 스킬이 직접 만들지 않는다.** `/harnie:dev-full`(또는 라우터 `/harnie:dev` → `Skill(harnie:dev-full)`) 호출 시 bootstrap 훅이 보고한 워크루트 안에 sentinel(`<repo>/.harnie/active.json`)과 `execution.json`을 이미 만들었다. **위 bootstrap 컨텍스트 메시지나 세션 바인딩 파일에서 `<repo>`를 해석하고, `<repo>/.harnie/active.json`을 읽어 `track === "plan"`을 확인한 뒤 그 `slug`(`<slug>`)를 아래 모든 CLI에 쓴다. `execution.mjs init`을 직접 실행하지 않는다.** 그 워크루트의 active.json이 없거나 손상이면 **중단하고 bootstrap 훅 실패를 보고**한다 — 자체 init으로 복구하지 않는다(부트스트랩 갭 재발; `bootstrap-adherence.md` 참조).
 - **워크스페이스 run(멀티레포).** bootstrap 컨텍스트 메시지가 WORKSPACE run으로 플래그되면, 이 run은 여러 repo에 걸친다: `<repo>`(워크루트)는 `<workspace>/.harnie-wt/` 아래의 **plain run-state 디렉터리**이지 git worktree가 아니며, sentinel은 `workspaceRoot`와 `repos` 레지스트리를 담는다. 이 스킬의 모든 곳에서 단일-repo run과의 차이:
   - **멤버 repo 등록은 PHASE A 중 A5 gate 前에:** 계획이 수정할 워크스페이스 아래 각 repo에 대해 `node <ROOT>/scripts/execution.mjs repo-add --root <repo> --repo <절대 repo 경로 (워크스페이스 아래)>`. 이 호출이 경로를 검증(워크스페이스 안, git toplevel)하고, 그 repo의 전용 worktree(`<member repo>/.harnie-wt/harnie-<slug>`)를 만들고, run state의 registry에 `{key, workroot}`를 기록한다. manifest task 이름이 미등록 repo라면 `arm-approval`/승인이 fail-closed되므로, 먼저 등록해야 한다.
@@ -79,9 +77,9 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 
 ## 컨텍스트 예산 (run 전체) — 세션 분할·주입 절제·게이트 알림
 
-실측된 full run에서 지배적 토큰 비용은 오케스트레이터 자신의 누적 컨텍스트가 **모든** 호출마다 재독되는 것이었다: 세션 컨텍스트가 수십만 토큰에 이르면 개별 도구 스텝 하나하나가 그만큼의 입력을 다시 치른다. 상시 규칙 셋:
+실측된 run에서 지배적 토큰 비용은 오케스트레이터 자신의 누적 컨텍스트가 **모든** 호출마다 재독되는 것이다. 상시 규칙 셋:
 
-1. **유닛 경계 세션 분할.** run 권위는 전부 디스크에 durable하다(manifest·ledger·receipt·notepad) — 새 세션이 무손실로 재개하므로, 긴 run은 여러 세션에 걸치는 것이 *정상*이다. 리뷰 유닛이 완료될 때마다(태스크의 B3 확인 APPROVE, 또는 Final Wave 게이트 APPROVE) 누적 컨텍스트를 점검하고, 한 세션에서 대략 3~4개 유닛이 완료됐거나 큰 산출물이 컨텍스트를 통과했다면 `notepad.md`에 짧은 인계 항목(현재 유닛·다음 스텝·열린 blocker)을 append한 뒤 **사용자에게 세션 분할을 제안**한다 — 결정은 사용자가 한다. `loop.mjs apply`가 이를 기계적으로 백스톱한다: APPROVED 출력에 `completedUnits`가 실리고 완료 유닛 4의 배수째마다 `sessionSplitRecommended: true`가 켜진다 — 켜지면 다음 유닛 시작 전에 제안하라; 세션이 "괜찮게 느껴진다"고 무시하지 마라. 비대해진 세션에서 제안 없이 묵묵히 계속하지 마라.
+1. **유닛 경계 세션 분할.** run 권위는 전부 디스크에 durable하므로 새 세션이 무손실로 재개된다 — 긴 run은 여러 세션에 걸치는 것이 *정상*이다. 한 세션에서 리뷰 유닛이 대략 3~4개 완료됐거나(또는 그전에 큰 산출물이 컨텍스트를 통과했다면) `notepad.md`에 짧은 인계 항목(현재 유닛·다음 스텝·열린 blocker)을 append하고 **세션 분할을 제안**한다 — 결정은 사용자가 한다. `loop.mjs apply`가 이를 기계적으로 백스톱한다(완료 유닛 4의 배수째마다 `sessionSplitRecommended: true`) — 켜지면 다음 유닛 시작 전에 제안하라; 세션이 "괜찮게 느껴진다"고 무시하지 마라.
 2. **주입 절제.** 부피를 main 컨텍스트에 들이지 마라: `plan.md`/`design/rev-N.md`는 판단에 실제로 필요한 섹션만 읽고(위임 대상은 전달받은 경로에서 스스로 읽는다 — 위임 참조 규칙), 대용량 출력 명령은 소스에서 필터링해 실행하고, verdict 한 줄이면 충분한 곳에 위임자의 전체 보고를 끌고 다니지 마라. 오케스트레이터 자신의 검색은 Grep 도구가 아니라 workroot 기준 상대경로 단일 `rg` 명령으로 실행한다 — Grep 결과는 출력 줄마다 절대 worktree 경로가 붙고, 그 부피가 이후 모든 스텝에서 컨텍스트에 재유입된다(Bash 없는 서브에이전트와 `.harnie` 경로는 Grep/Read가 그대로 공인 리더다).
 3. **스텝 배치·게이트 알림.** 독립적인 도구 호출은 한 메시지에 묶는다 — 큰 컨텍스트에서는 오케스트레이터 스텝 하나가 늘 때마다 전체 컨텍스트 재독이 하나 는다. 사용자 게이트(A5 승인, errata disposition, STALLED 재진입, watchdog deny)에 블록되기 전에는, 설치본에 알림 도구(예: `PushNotification`)가 있으면 짧은 알림을 보낸다 — 실측 run에서 사용자가 보지 못한 게이트에 밤 단위 시간이 사라졌다.
 
