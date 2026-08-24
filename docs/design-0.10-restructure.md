@@ -1,6 +1,6 @@
 # 상세 설계 — dev-full 0.10.0 재편: 플랜-분배-병렬-통합 (태스크 러너 구조)
 
-> **rev-7** (라운드 6 잔여 DR-007·신규 DR-012 반영 — §9 Revision Notes 참고). 직접 작업 모드 — 경량 프로파일. 작성 근거: fcl-hmm run 실측(2026-08-19~21)과 2026-08-24 세션의 구조 분석·사용자 결정 4건. 부모 아키텍처 = `docs/architecture.md`(v0.9.x 기준) — 본 설계는 §5 PHASE B 실행 구조를 바꾸므로 아키텍처 변경 요청(ACR)을 §7에 분리했다.
+> **rev-8** (rev-7 APPROVE 후: §10 W0 검증 결과로 D2 본선 확정, D8 빌더 가용성 fail-fast 애든덤 추가 — 2026-08-24 fcl-hmm 인시던트 근거). 직접 작업 모드 — 경량 프로파일. 작성 근거: fcl-hmm run 실측(2026-08-19~21)과 2026-08-24 세션의 구조 분석·사용자 결정 4건. 부모 아키텍처 = `docs/architecture.md`(v0.9.x 기준) — 본 설계는 §5 PHASE B 실행 구조를 바꾸므로 아키텍처 변경 요청(ACR)을 §7에 분리했다.
 
 ## 0. Environment Fact Sheet (전부 레포·세션에서 검증)
 
@@ -137,7 +137,12 @@ main 자신의 재개는 기존 계약 그대로(모든 권위가 디스크): �
 
 현행 remove는 태스크 워크트리의 `.harnie`를 스태시 후 **삭제**한다 — 그러면 harness-digest(FR6)의 핵심 입력(유닛별 ledger 라운드 추이·delta 사이드카 changedCount)이 run 종료 전에 소실된다(DR-008). **변경:** `worktree.mjs remove`에 **명시적 목적지 인자 `--archive-to <run workroot>`**를 추가한다 — 워크스페이스 run에서 `--repo`는 멤버 레포 workroot라 run workroot를 명령이 스스로 알 수 없기 때문(라운드 2 지적). 엔진 검증(source–target 관계까지, 라운드 3 지적): ⓐ `--archive-to`는 활성 run workroot(센티널 대조), ⓑ `--repo`가 **그 센티널이 가리키는 run의** 단일 레포 루트이거나 `repos` 레지스트리에 등록된 멤버 workroot, ⓒ `--branch`의 slug가 그 run의 slug와 일치하고 t`<id>`가 그 run의 manifest 태스크 — 셋 중 하나라도 어긋나면 fail-closed(활성 run이 복수일 때 타 run으로 리뷰 증거가 이관된 뒤 원본이 삭제되는 사고 차단). 목적지는 `<archive-to>/.harnie/plan/<slug>/review-archive/t<id>/` 고정. W1 테스트: 활성 run 2개 오지정·워크스페이스 멤버 케이스. **멱등·크래시 복구:** 이관은 임시 디렉터리로 move 후 원자 rename; 재호출 시 목적지가 이미 있고 `<taskWt>/.harnie/review/`가 없으면 "이관 완료"로 간주하고 제거만 재시도, 둘 다 있으면(중단 잔반) 임시본을 폐기하고 원본에서 재이관. 이관 실패 시 원위치 복원 후 에러(기존 스태시-복원 안전장치와 동일 원칙). `--archive-to` 미지정 시 현행 삭제 동작 유지(직렬 경로·구버전 호환). 새 포맷 없음: 이미 존재하는 ledger/state/round/사이드카/baseline 파일을 그대로 옮긴다. 아카이브는 읽기 전용 취급(guards 보호 목록의 기존 `.harnie` 쓰기 차단이 그대로 덮는다). B3 확인 리뷰가 참조하는 "태스크 리뷰 verdict·라운드 수"도 notepad 요약 대신 아카이브를 정본으로 가리킬 수 있게 된다.
 
-## 3. harness-digest 스킬 (간결 설계)
+### D8. 빌더 가용성 fail-fast (애든덤, 2026-08-24 fcl-hmm 인시던트 근거)
+
+관측 사고: fcl-hmm run에서 Codex 빌더 호출이 **정확히 30분 idle timeout × 3회 연속** 무응답(코드 변경 0, `codexCalls` 0)으로 90분+watchdog 연장 2회가 소실됐다 — 세션에 붙은 codex MCP 서버 프로세스의 wedge로 추정(같은 시각 다른 세션의 codex 호출은 정상). 대응 두 겹, 새 메커니즘 최소:
+
+- **프로브(기존 스크립트 재사용):** 러너는 첫 codex 호출 전 `node <ROOT>/scripts/probe-codex-mcp.mjs`를 1회 실행한다(20s 캡, 모델 호출 없음) — 스폰·설정·인증 계열 실패를 30분 대신 20초에 검출. 한계 명시: 프로브는 **fresh 서버**를 띄우므로 세션 서버 wedge·백엔드 장애는 못 잡는다(tools/list는 모델을 호출하지 않음).
+- **재시도 캡 + 장애 분류:** idle timeout + 델타 0(트리 무변경)의 빌더 호출 실패는 기존 driver 계약(1회 재시도)까지만. **2연속 동일 패턴이면 인프라 장애로 분류** — 러너는 즉시 실패 보고로 종료하고, main은 남은 러너들의 신규 빌더 호출 spawn을 중단하고 사용자에게 알림(권고: 세션 재시작 — MCP 서버는 세션 프로세스에 붙어 있어 러너 재spawn으로는 회복되지 않는다). 블라인드 3회 재시도로 90분을 태우는 관측 사고의 재발 방지가 이 규칙이 막는 구체 사고다.
 
 `skills/harness-digest/SKILL.md`(+ko). quality-digest와 동일한 반자동 원칙(제안만, 자동 적용 금지, rule of three)을 하네스 자체에 적용한다.
 
@@ -236,3 +241,12 @@ Agent Teams 도입 없음(실험·재개 불가), dev-quick 변경 없음, 스�
 |---|---|---|
 | DR-007 | 수용 | 마커 종료 전이를 완결: 정상 종료 = 바인딩 시 원자 소거 또는 `rebind-task --cancel --reason approved-artifact:<postSHA>`(디스크 상태 리뷰가 새 thread 없이 APPROVE된 분기 — APPROVE artifact에 결부된 감사 기록). 사고: 마커 잔존 → 다음 run-root 호출 오귀속·후속 rebind 영구 거부. |
 | DR-012 | 수용 | `capture --record`의 컨테인먼트를 이원화: positional repo의 `.harnie` 또는 활성 run workroot(센티널 검증)의 `.harnie` — 기존 R4 apply split-containment와 동일 패턴. 사고: 워크스페이스 run에서 correction baseline 기록이 컨테인먼트 검사에 막혀 FR7 재개 기준 소실. |
+
+## 10. W0 검증 결과 (2026-08-24, PoC 완료 — D2 본선 확정)
+
+헤드리스 Claude Code 세션(훅 로거 장착, `--mcp-config`로 codex 서버 로드) + 데스크톱 세션 이중 검증:
+
+- **ⓐ 훅 발화:** 서브에이전트(general-purpose)가 실행한 `mcp__codex__codex` 호출에 **PreToolUse·PostToolUse 모두 발화**. 페이로드에 `agent_id`·`agent_type`(서브에이전트 식별)과 `tool_input.cwd`(codex 호출의 cwd 파라미터 원문), 최상위 `cwd`, `session_id`, `tool_use_id` 확인 — 훅 로그 원본은 PoC 스크래치(`w0/hook-log.jsonl`), 요지는 본 절이 정본.
+- **ⓑ 러너의 codex 호출:** 데스크톱 세션 서브에이전트에서 실호출 SUCCESS(threadId 수신, 응답 "OK"). 헤드리스에서도 서브에이전트 호출 SUCCESS — 단 MCP 도구가 deferred 상태라 **서브에이전트가 ToolSearch로 스키마를 로드한 뒤 호출**했다 → W2의 러너 에이전트 문서에 "codex 도구가 deferred면 ToolSearch로 먼저 로드"를 1줄 계약으로 반영한다.
+
+**판정: D2 본선(cwd→task 매핑) 확정.** 폴백(bind-thread·thread.json·record-builder-call, DR-011 분기 ⓘⓘ/ⓘⓘⓘ)은 구현하지 않는다 — 설계에는 W0 부정 결과였을 경우의 계약으로만 남긴다(사용 조건 미충족 명시). 잔여 확인 1건: 첫 0.10.0 실전 run의 A0에서 플러그인 네임스페이스(`mcp__plugin_harnie_codex__*`) 환경의 훅 발화를 같은 방식으로 1회 재확인(로거 없이 execution.json의 threadId 자동 바인딩 성공 여부로 판정 — 실패 시 그 run만 직렬 경로 폴백).
