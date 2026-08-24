@@ -4,7 +4,7 @@
 
 **Reviewer = the producer's opposite provider**, bound per stage (symmetric cross-model):
 - **Design loop:** producer = Claude (`harnie-designer`); reviewer = **Codex** (Codex MCP, `sandbox:"read-only"`).
-- **Code loop:** producer = **Codex** (Codex MCP, `sandbox:"workspace-write"` — the builder); reviewer = **Claude** (the read-only `harnie-reviewer` subagent — never the orchestrator inline).
+- **Code loop:** producer = **Codex** (Codex MCP, `sandbox:"workspace-write"` — the builder); reviewer = **Claude** (the read-only `harnie-reviewer` subagent — never the orchestrator inline). **One exception: dev-full's runner path (B2′)** — a task's unit review is performed inline by that task's `harnie-task-runner` (it cannot spawn subagents), which stays a legitimate Claude reviewer because it writes no source (its agent contract forbids it; the producer remains the Codex builder). The post-merge confirmation round and every other code review keep the `harnie-reviewer` contract.
 
 The loop core (`loop.mjs`) is provider-agnostic: R1 and R3–R5 are identical for both loops, and only **R2 (the reviewer call)** and the **producer's fix** differ by provider. Depending on installation mode, the Codex MCP tool is `mcp__plugin_harnie_codex__codex` for the plugin or `mcp__codex__codex` for a local `.mcp.json`; re-review or re-build uses the corresponding `*__codex-reply`. `<ROOT>` means `${CLAUDE_PLUGIN_ROOT}`. `<dir>` is the track-specific state directory, such as `.harnie/quick/<slug>/review/code/`, `.harnie/plan/<slug>/review/<unit>/`, or — for a task's pre-merge loops in dev-full's parallel PHASE B — `.harnie/review/design/` or `.harnie/review/code/` rooted in that task's own isolated worktree.
 

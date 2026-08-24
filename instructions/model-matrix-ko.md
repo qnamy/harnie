@@ -48,7 +48,8 @@ Rubric (어느 신호든 정당화하는 가장 높은 티어를 선택):
 
 | 리뷰어 역할 | easy | medium | hard |
 |---|---|---|---|
-| 코드 리뷰어 (`harnie-reviewer`) — **유닛 리뷰** (첫 리뷰 + 재리뷰 라운드: quick Step 4, full B3, 병렬 머지 前) | sonnet | opus | opus |
+| Task runner inline 리뷰 (`harnie-task-runner` 내부) | sonnet | opus | opus |
+| 코드 리뷰어 (`harnie-reviewer`) — **유닛 리뷰** (첫 리뷰 + 재리뷰 라운드: quick Step 4, full B3, runner 머지 前) | sonnet | opus | opus |
 | 코드 리뷰어 — **확인 리뷰** (이미 승인된 코드의 빈 ledger 재확인, 예: 머지 後 B3 확인) | sonnet | sonnet | opus |
 | 코드 리뷰어 — **Final Wave 게이트** (B5 `final-*`) | **opus** | **opus** | **opus** |
 | 설계 리뷰어 (Codex, `DR` 루프) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` |

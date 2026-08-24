@@ -4,7 +4,7 @@
 
 **리뷰어 = producer의 반대 프로바이더**, 단계별로 고정(대칭 크로스-모델):
 - **설계 루프:** producer = Claude(`harnie-designer`); 리뷰어 = **Codex**(codex MCP, `sandbox:"read-only"`).
-- **코드 루프:** producer = **Codex**(codex MCP, `sandbox:"workspace-write"` — 빌더); 리뷰어 = **Claude**(read-only `harnie-reviewer` 서브에이전트 — 오케스트레이터 인라인 아님).
+- **코드 루프:** producer = **Codex**(codex MCP, `sandbox:"workspace-write"` — 빌더); 리뷰어 = **Claude**(read-only `harnie-reviewer` 서브에이전트 — 오케스트레이터 인라인 아님). **예외: dev-full의 runner path(B2′)** — 태스크의 unit review는 그 태스크의 `harnie-task-runner`가 inline으로 수행한다(subagent를 spawn할 수 없음). 이것도 정당한 Claude 리뷰어인데, 소스를 쓰지 않기 때문이다(agent contract 금지; producer는 여전히 Codex). post-merge confirmation 라운드와 다른 모든 코드 리뷰는 `harnie-reviewer` 계약을 유지한다.
 
 루프 코어(`loop.mjs`)는 프로바이더 무관이다: R1·R3~R5는 두 루프에서 동일하고, **R2(리뷰어 호출)**와 **producer의 수정**만 프로바이더별로 다르다. 설치 형태에 따라 codex MCP 툴명은 플러그인이면 `mcp__plugin_harnie_codex__codex`, 로컬 `.mcp.json`이면 `mcp__codex__codex`이며 재리뷰·재빌드는 대응하는 `*__codex-reply`를 쓴다. `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = 트랙별 상태 디렉터리 — 예: `.harnie/quick/<slug>/review/code/`, `.harnie/plan/<slug>/review/<unit>/`, 또는 dev-full 병렬 PHASE B에서 태스크의 머지 前 루프라면 그 태스크 자신의 격리 worktree에 뿌리를 둔 `.harnie/review/design/`·`.harnie/review/code/`.
 

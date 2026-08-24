@@ -23,20 +23,22 @@ description: 신규 기능·모듈·구조 변경 등 큰 작업을 풀 라이�
 이 스킬의 단계는 여기 본문이 아니라 `skills/dev-full/phases/` 아래 phase별 파일에 있다(이 파일을 작게 유지하기 위함). **그 phase에 도달했을 때 해당 파일을 읽는다 — Step 0에서 전부 미리 로드하지 않는다.** 각 phase 파일은 이 파일의 상태 위치·위임 참조 규칙·실행 상태/강제 훅·Notepad 프로토콜 섹션(아래)을 이미 읽었다고 전제한다.
 
 - **PHASE A(계획):** `phases/phase-a-ko.md` — A0~A5(그라운딩, 질문, 아키/상세 설계 + 리뷰 루프, manifest 블록, 승인 게이트).
-- **PHASE B, 직렬 + 두 경로 공통:** `phases/phase-b-ko.md` — B1(경로 선택), 직렬 경로의 B2~B3, 두 경로 공통 단계 B4~B6.
-- **PHASE B, 병렬 경로만:** `phases/phase-b-parallel-ko.md` — B2′~B3′(태스크별 worktree, 빌드, 머지 前 리뷰, 순차 통합). B1이 병렬 경로를 선택했을 때만 읽는다 — 모든 태스크의 B3′ 4단계가 APPROVE되면 B4를 위해 `phase-b-ko.md`로 돌아온다.
+- **PHASE B, 직렬 + 두 경로 공통:** `phases/phase-b-ko.md` — B1(경로 선택 — runner path가 기본), 직렬 경로의 B2~B3, 두 경로 공통 단계 B4~B6.
+- **PHASE B, runner path (기본):** `phases/phase-b-parallel-ko.md` — B2′~B3′(태스크 brief → 각 태스크마다 자기 worktree의 `harnie-task-runner` 서브에이전트, 동시 진행; 순차 통합 및 리뷰 보존). B1이 runner path를 선택했을 때만 읽는다 — 모든 태스크의 B3′ 4단계가 APPROVE되면 B4를 위해 `phase-b-ko.md`로 돌아온다.
 
 ## 상태 위치 (durable, 파일 기반)
 `.harnie/plan/<slug>/`:
 - `plan.md` — 설계 + 작업 분해 + 검증 전략 + Final Wave(Coverage·Quality·Runtime·Scope). 승인 게이트의 대상.
 - `design/rev-N.md` — **버전이 붙은 설계 정본**: 리비전마다 파일 하나, N은 단조 증가, 덮어쓰기 없음. 서브에이전트·리뷰어에게 설계 내용으로 넘길 수 있는 **유일한 경로**.
 - `notepad.md` — 진행 메모(크로스-프로바이더 공유 단일 소스).
+- `tasks/t<id>-brief[.vN].md` — 태스크별 자체 완비적 brief (A6에서 작성: manifest 항목 + design section verbatim + 빌더 계약). Runner가 이것만 읽는다; 전체 설계는 다시 읽지 않는다.
 - `review/design-arch/` · `review/design-detail/` — 아키·상세 설계 리뷰 루프 상태(각 독립: `ledger.json`·`state.json`·`round-N.txt`).
 - `review/<unit>/` — 작업/웨이브별 코드 리뷰 루프 상태.
+- `review-archive/t<id>/` — 태스크 유닛 리뷰 상태(ledger, round들, sidecar, baseline들)이 통합 시 `worktree.mjs remove --archive-to`로 옮겨지는 곳. `harness-digest` input·confirmation round 뒤의 durable 기록.
 
 > 경로 단일 스킴: 모든 리뷰 루프 상태는 `.harnie/plan/<slug>/review/<name>/` 아래(quick의 `.harnie/quick/<slug>/`와 대칭). `<name>` = `design-arch` | `design-detail` | 코드 리뷰 단위.
 
-> **병렬 PHASE B 태스크 worktree.** 병렬 경로가 적용되면 태스크마다 자기만의 `.harnie/`를 가진 격리된 git worktree를 갖는다(이 상태와는 별개). 전체 레이아웃과 가드/worktree 엔진 계층에 대한 현재 알려진 의존성은 `phases/phase-b-parallel-ko.md`를 참조.
+> **Runner-path 태스크 worktree.** Runner path(기본값)에서는 태스크마다 자기만의 `.harnie/review/`를 가진 격리된 git worktree를 갖는다(이 상태와는 별개, 해당 태스크의 `harnie-task-runner` 소유). 전체 레이아웃은 `phases/phase-b-parallel-ko.md`를 참조한다.
 
 ## 위임 참조 규칙 (디스크 정본만)
 
@@ -86,7 +88,7 @@ plan 트랙은 **durable 실행 상태 + 최소 강제 훅**으로 두 불변식
 ---
 
 ## 불변
-- **모든 수정은 반드시 리뷰된다.** 아키 설계 리뷰(A3)·상세 설계 리뷰(A4)·병렬 경로의 태스크별 설계·코드 리뷰(B2′)·머지 충돌 해결 리뷰(B3′)·run 레벨 코드 리뷰(B3)·Final Wave(B5) 모두 동일한 review-loop-driver.md 루프 — producer·리뷰어 프로바이더·기준·고도 렌즈·namespace·`<dir>`만 다르다. **대칭 크로스-모델**: 설계는 Claude producer→Codex 리뷰, 개발은 Codex producer→Claude 리뷰(리뷰어=producer의 반대).
+- **모든 수정은 반드시 리뷰된다.** 아키 설계 리뷰(A3)·상세 설계 리뷰(A4)·runner path의 태스크별 유닛 리뷰(B2′ — runner가 inline 리뷰; run 레벨 A4 설계 + task brief가 태스크별 설계 루프를 대체)·머지 충돌 해결 리뷰(B3′)·run 레벨 코드 리뷰(B3)·Final Wave(B5) 모두 동일한 review-loop-driver.md 루프 — producer·리뷰어 프로바이더·기준·고도 렌즈·namespace·`<dir>`만 다르다. **대칭 크로스-모델**: 설계는 Claude producer→Codex 리뷰, 개발은 Codex producer→Claude 리뷰(리뷰어=producer의 반대) — runner path의 inline 리뷰도 이 패턴을 유지한다(producer=Codex 빌더, runner=Claude·코드 작성 안 함).
 - **비중첩 스코프는 arm-approval(A5)에서 `validateManifest`가 한 번 강제하는 전제조건이지, 리뷰의 대체물이 아니다.** 태스크 worktree의 머지 前 리뷰(B2′)는 격리된 코드에 대한 품질 게이트이고, `execution.mjs verify`/`completion`이 읽는 것은 B3에서 만든 run 레벨 리뷰 유닛뿐이다. 태스크를 merge한다고 그 B3 확인 라운드를 건너뛰지 않는다.
 - ledger·verdict 정합·상태 전이는 **손으로 판정하지 말고 loop CLI로**(false approval 방지).
 - 설계·계획은 durable 파일(`plan.md`·`design/rev-N.md`·`notepad.md`)로 — Claude와 Codex가 같은 소스를 읽는다. **위임에서 참조할 수 있는 것은 디스크 정본뿐**이며, tool-result blob 경로는 참조가 아니다.

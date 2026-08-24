@@ -110,16 +110,65 @@ export function mergeWorktree({ repo, branch, into }) {
   return { ok: false, conflicts, stderr: (r.stderr || r.stdout || "").trim() }
 }
 
+function archiveTarget({ repo, branch, archiveTo }) {
+  if (!isAbsolute(archiveTo)) throw new Error(`--archive-to는 절대경로여야 함: ${archiveTo}`)
+  const activePath = join(archiveTo, ".harnie", "active.json")
+  if (!existsSync(activePath)) throw new Error(`--archive-to에 active run sentinel 없음: ${archiveTo}`)
+  const sentinel = JSON.parse(readFileSync(activePath, "utf8"))
+  if (!sentinel || sentinel.track !== "plan" || typeof sentinel.slug !== "string") throw new Error(`--archive-to sentinel 손상/비-plan run: ${archiveTo}`)
+  const realRepo = realOrResolve(repo), realArchive = realOrResolve(archiveTo)
+  if (sentinel.workspaceRoot) {
+    const registered = Object.values(sentinel.repos || {}).some((r) => r && realOrResolve(r.workroot) === realRepo)
+    if (!registered) throw new Error(`--repo가 archive run의 등록 멤버 workroot가 아님: ${repo}`)
+  } else if (realRepo !== realArchive) throw new Error(`--repo가 archive run의 single repo workroot가 아님: ${repo}`)
+  const prefix = `harnie/${sentinel.slug}-t`
+  if (!branch.startsWith(prefix) || branch.length === prefix.length) throw new Error(`--branch가 archive run slug의 task branch가 아님: ${branch}`)
+  const taskId = branch.slice(prefix.length)
+  const manifestPath = join(archiveTo, ".harnie", "plan", sentinel.slug, "manifest.json")
+  if (!existsSync(manifestPath)) throw new Error(`archive run manifest 없음: ${manifestPath}`)
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"))
+  if (!Array.isArray(manifest.tasks) || !manifest.tasks.some((t) => t && t.id === taskId))
+    throw new Error(`branch task ${taskId}가 archive run manifest에 없음`)
+  return { slug: sentinel.slug, taskId, destination: join(archiveTo, ".harnie", "plan", sentinel.slug, "review-archive", `t${taskId}`) }
+}
+
 // remove --repo <abs> --branch <name> [--delete-branch] : worktree 제거. **기본은 브랜치 유지**(T2 스펙 §1)
 // — 브랜치까지 지우려면 --delete-branch를 명시(-d, 안전삭제 — 미병합 커밋이 있으면 git이 거부해 fail-closed).
 // 기본을 "삭제"로 두면 흔한 정리 케이스(미완료·미병합 run 정리)에서 worktree는 이미 지워졌는데 branch -d만
 // 실패해 부분 상태 + 오해하기 쉬운 에러가 남는다 — 기본 유지가 그 부분-실패 창을 없앤다.
-export function removeWorktree({ repo, branch, deleteBranch = false }) {
+export function removeWorktree({ repo, branch, deleteBranch = false, archiveTo = null }) {
   if (!repo || typeof repo !== "string") throw new Error("--repo 필요")
   if (!branch || typeof branch !== "string") throw new Error("--branch 필요")
   const dir = worktreeDirFor(repo, branch)
   assertWithinContainer(repo, dir)
   const harniePath = join(dir, ".harnie")
+  const reviewPath = join(harniePath, "review")
+  let archive = null, archivedNow = false
+  if (archiveTo) {
+    archive = archiveTarget({ repo, branch, archiveTo })
+    const temp = archive.destination + ".tmp"
+    if (existsSync(temp)) {
+      if (existsSync(archive.destination)) rmSync(temp, { recursive: true, force: true })
+      else renameSync(temp, archive.destination)
+    }
+    if (existsSync(reviewPath)) {
+      rmSync(temp, { recursive: true, force: true })
+      if (existsSync(archive.destination)) rmSync(archive.destination, { recursive: true, force: true })
+      mkdirSync(dirname(archive.destination), { recursive: true })
+      try {
+        renameSync(reviewPath, temp)
+        renameSync(temp, archive.destination)
+        archivedNow = true
+      } catch (e) {
+        if (existsSync(temp) && !existsSync(reviewPath)) {
+          mkdirSync(dirname(reviewPath), { recursive: true })
+          renameSync(temp, reviewPath)
+        }
+        throw new Error(`review archive 이관 실패: ${e.message}`)
+      }
+    }
+    if (!existsSync(dir) && existsSync(archive.destination)) return { ok: true, archive: archive.destination }
+  }
   const hasRunState = [join(harniePath, "active.json"), join(harniePath, "plan"), join(harniePath, "quick")].some(existsSync)
   const status = gitStatus(dir, ["status", "--porcelain=v1", "-z", "--untracked-files=all"])
   const changes = (status.stdout || "").split("\0").filter(Boolean)
@@ -142,6 +191,10 @@ export function removeWorktree({ repo, branch, deleteBranch = false }) {
       renameSync(stashPath, harniePath)
       rmSync(stashRoot, { recursive: true, force: true })
     }
+    if (archivedNow && archive && existsSync(archive.destination)) {
+      mkdirSync(dirname(reviewPath), { recursive: true })
+      renameSync(archive.destination, reviewPath)
+    }
     throw new Error(`git worktree remove 실패(exit ${r.status}, 미커밋 변경 등 확인): ${(r.stderr || r.stdout || "").trim()}`)
   }
   if (stashRoot) rmSync(stashRoot, { recursive: true, force: true })
@@ -149,7 +202,7 @@ export function removeWorktree({ repo, branch, deleteBranch = false }) {
     const rb = gitStatus(repo, ["branch", "-d", branch])
     if (rb.status !== 0) throw new Error(`git branch -d 실패(exit ${rb.status}, 미병합 커밋 등 확인): ${(rb.stderr || rb.stdout || "").trim()}`)
   }
-  return { ok: true }
+  return { ok: true, ...(archive ? { archive: archive.destination } : {}) }
 }
 
 // ── CLI ──────────────────────────────────────────────────────────────────
@@ -180,7 +233,7 @@ function cmdMerge({ flags }) {
   if (!r.ok) process.exit(3)
 }
 function cmdRemove({ flags }) {
-  try { out(removeWorktree({ repo: flags.repo, branch: flags.branch, deleteBranch: flags["delete-branch"] === true })) }
+  try { out(removeWorktree({ repo: flags.repo, branch: flags.branch, deleteBranch: flags["delete-branch"] === true, archiveTo: flags["archive-to"] || null })) }
   catch (e) { die(e.message) }
 }
 

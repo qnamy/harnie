@@ -24,8 +24,8 @@ When a new user message arrives, do **not** automatically carry forward the curr
 This skill's steps live in per-phase files under `skills/dev-full/phases/`, not inline here, to keep this file small. **Read the relevant file when you reach that phase; do not preload all of them at Step 0.** Each phase file assumes you have already read this file's State Location, Delegation Reference Rule, Execution State/Mandatory Hooks, and Notepad Protocol sections below.
 
 - **PHASE A (planning):** `phases/phase-a.md` — A0–A5 (grounding, questions, architecture/detailed design + review loops, the manifest block, and the approval gate).
-- **PHASE B, serial + both paths:** `phases/phase-b.md` — B1 (choose the path), the serial path's B2–B3, and the steps common to both paths, B4–B6.
-- **PHASE B, parallel path only:** `phases/phase-b-parallel.md` — B2′–B3′ (per-task worktrees, build, pre-merge review, sequential integration). Read this only when B1 selects the parallel path; return to `phase-b.md` for B4 once every task's B3′ step 4 has APPROVEd.
+- **PHASE B, serial + both paths:** `phases/phase-b.md` — B1 (choose the path — the runner path is the default), the serial path's B2–B3, and the steps common to both paths, B4–B6.
+- **PHASE B, runner path (default):** `phases/phase-b-parallel.md` — B2′–B3′ (task briefs → one `harnie-task-runner` subagent per task in its own worktree, concurrent; sequential integration with review archiving). Return to `phase-b.md` for B4 once every task's B3′ step 4 has APPROVEd.
 
 ## State Location (Durable, File-Based)
 
@@ -34,12 +34,14 @@ This skill's steps live in per-phase files under `skills/dev-full/phases/`, not 
 - `plan.md` — Design + work breakdown + verification strategy + Final Wave (Coverage, Quality, Runtime, Scope). This is the approval-gate artifact.
 - `design/rev-N.md` — The **versioned design artifact of record**: one file per revision, monotonically numbered, never overwritten. This is the only path that may be handed to a subagent or reviewer for design content.
 - `notepad.md` — Progress notes and the shared single source across providers.
+- `tasks/t<id>-brief[.vN].md` — Per-task self-contained briefs written at A6 (manifest entry + verbatim design-section excerpts + builder contract). Runners read these; the full design is never re-read per task.
 - `review/design-arch/` and `review/design-detail/` — Independent architecture and detailed-design review-loop state, each with `ledger.json`, `state.json`, and `round-N.txt`.
 - `review/<unit>/` — Code-review loop state for each task or wave.
+- `review-archive/t<id>/` — A task's unit-review state (ledger, rounds, sidecars, baselines), moved here from its worktree by `worktree.mjs remove --archive-to` at integration. Input to `harness-digest` and the durable record behind confirmation rounds.
 
 > Use one path scheme: keep every review loop under `.harnie/plan/<slug>/review/<name>/`, symmetric with quick's `.harnie/quick/<slug>/`. `<name>` is `design-arch`, `design-detail`, or a code-review unit.
 
-> **Parallel PHASE B task worktrees.** When the parallel path applies, each task gets its own isolated git worktree with its own `.harnie/`, separate from this state. See `phases/phase-b-parallel.md` for the full layout and the current known dependency on the guard/worktree engine layer.
+> **Runner-path task worktrees.** On the runner path (the default), each task gets its own isolated git worktree with its own `.harnie/review/`, separate from this state, owned by that task's `harnie-task-runner`. See `phases/phase-b-parallel.md` for the full layout.
 
 ## Delegation Reference Rule (Disk Artifacts of Record Only)
 
@@ -94,7 +96,7 @@ Measured full runs show the dominant token cost is the orchestrator's own accumu
 
 ## Invariants
 
-- **Every modification is reviewed.** Architecture design review (A3), detailed design review (A4), per-task design and code review in the parallel path (B2′), merge-conflict-resolution review (B3′), run-level code review (B3), and Final Wave (B5) all use the same `review-loop-driver.md` loop. Only the producer, reviewer provider, criteria, altitude lens, namespace, and `<dir>` differ. Preserve **symmetric cross-model review**: Claude producer → Codex review for design; Codex producer → Claude review for development, with reviewer opposite producer.
+- **Every modification is reviewed.** Architecture design review (A3), detailed design review (A4), per-task unit review on the runner path (B2′ — the runner reviews inline; the run-level A4 design plus the task brief replaces a per-task design loop), merge-conflict-resolution review (B3′), run-level code review (B3), and Final Wave (B5) all use the same `review-loop-driver.md` loop. Only the producer, reviewer provider, criteria, altitude lens, namespace, and `<dir>` differ. Preserve **symmetric cross-model review**: Claude producer → Codex review for design; Codex producer → Claude review for development, with reviewer opposite producer — a runner's inline review keeps this (producer is the Codex builder; the runner is Claude and writes no code).
 - **Non-overlapping scope is a precondition, enforced once at arm-approval (A5) by `validateManifest`, not a substitute for review.** A task worktree's pre-merge review (B2′) is a quality gate on isolated code; only the run-level review unit created at B3 is what `execution.mjs verify`/`completion` read. Merging a task never skips its B3 confirmation round.
 - Use the loop CLI, **not manual judgment**, for ledger/verdict consistency and state transitions; this prevents false approval.
 - Keep design and planning in durable files (`plan.md`, `design/rev-N.md`, and `notepad.md`) so Claude and Codex read the same source. **Only disk artifacts of record may be referenced in a delegation**; a tool-result blob path is never a reference.

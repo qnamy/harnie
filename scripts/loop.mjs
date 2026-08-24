@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Deterministic review-state transitions around the model-produced verdict.
-import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, readdirSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, readdirSync, renameSync } from "node:fs"
 import { dirname, resolve, basename, join, sep, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
 import { captureTree, captureWorkspaceTree, computeDelta } from "./delta.mjs"
@@ -60,7 +60,7 @@ function out(obj) {
 const VALID_MACHINE_STATES = new Set(["REVISING", "APPROVED", "STALLED"])
 const REENTRY_REASONS = new Set(["new-evidence", "external-state", "user-decision", "scope-change"])
 const PROGRESS_FLAGS = new Set(["auto", "yes", "no"])
-const CONTROL_BASENAMES = new Set(["manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json", ".seal.json", ".pending-approval.json", ".arm-approval.json"])
+const CONTROL_BASENAMES = new Set(["manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json", "errata.md", ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json"])
 
 function parseLimit(v) {
   if (v == null) return 3
@@ -105,9 +105,53 @@ function acceptableArtifacts(root) {
   return [ws, ...Object.values(repos).map((r) => captureTree(r.workroot))]
 }
 
-function cmdCapture({ pos }) {
+function isUnderHarnie(p, root) {
+  const real = canonicalize(p)
+  const harnieRoot = join(existsSync(root) ? realpathSync(root) : resolve(root), ".harnie")
+  const rel = relative(harnieRoot, real)
+  return rel !== "" && rel !== ".." && !rel.startsWith(".." + sep) && !isAbsolute(rel)
+}
+
+function recordRunRoot(recordDir) {
+  let dir = canonicalize(recordDir)
+  while (dirname(dir) !== dir) {
+    if (basename(dir) === ".harnie") return dirname(dir)
+    dir = dirname(dir)
+  }
+  return null
+}
+
+function assertCaptureRecord(recordDir, repo) {
+  if (isUnderHarnie(recordDir, repo)) return
+  const runRoot = recordRunRoot(recordDir)
+  if (!runRoot || !isUnderHarnie(recordDir, runRoot)) die(`--record는 positional repo 또는 활성 run workroot의 .harnie 아래여야 함: ${recordDir}`)
+  const sentinel = readJSON(join(runRoot, ".harnie", "active.json"), null)
+  if (!sentinel || !sentinel.slug || !sentinel.track) die(`--record 대상 run root sentinel 없음/손상: ${runRoot}`)
+  const realRepo = existsSync(repo) ? realpathSync(repo) : resolve(repo)
+  if (sentinel.workspaceRoot) {
+    const member = Object.values(sentinel.repos || {}).some((r) => r && typeof r.workroot === "string" && existsSync(r.workroot) && realpathSync(r.workroot) === realRepo)
+    if (!member) die(`--record positional repo가 대상 workspace run의 등록 멤버 workroot가 아님: ${repo}`)
+  } else if (realpathSync(runRoot) !== realRepo) {
+    die(`--record positional repo가 대상 single-repo run workroot와 불일치: ${repo}`)
+  }
+}
+
+function cmdCapture({ pos, flags }) {
   const repo = pos[0] || die("capture <repo> 필요")
-  out({ baselineSHA: currentArtifact(repo) })
+  const baselineSHA = currentArtifact(repo)
+  let recordFile = null
+  if (flags.record) {
+    assertCaptureRecord(flags.record, repo)
+    const dir = canonicalize(flags.record)
+    mkdirSync(dir, { recursive: true })
+    const nums = readdirSync(dir).map((name) => name.match(/^baseline-(\d+)\.json$/)).filter(Boolean).map((m) => Number(m[1]))
+    const n = (nums.length ? Math.max(...nums) : 0) + 1
+    recordFile = join(dir, `baseline-${n}.json`)
+    const tmp = recordFile + ".tmp"
+    writeFileSync(tmp, JSON.stringify({ baselineSHA, at: new Date().toISOString(), n }, null, 2) + "\n")
+    renameSync(tmp, recordFile)
+  }
+  out({ baselineSHA, ...(recordFile ? { recordFile } : {}) })
 }
 
 function cmdDelta({ pos, flags }) {

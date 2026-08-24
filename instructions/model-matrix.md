@@ -48,7 +48,8 @@ Difficulty tiers **producer models, and — conservatively — the Claude code r
 
 | Reviewer role | easy | medium | hard |
 |---|---|---|---|
-| Code reviewer (`harnie-reviewer`) — **unit reviews** (first review + re-review rounds: quick Step 4, full B3, parallel pre-merge) | sonnet | opus | opus |
+| Code reviewer (`harnie-reviewer`) — **unit reviews** (first review + re-review rounds: quick Step 4, full B3) | sonnet | opus | opus |
+| Task runner (`harnie-task-runner`) — full B2′ runner path; performs the unit review inline, so it takes the **unit-review tier** | sonnet | opus | opus |
 | Code reviewer — **confirmation reviews** (fresh empty-ledger re-check of already-approved code, e.g. post-merge B3 confirmation) | sonnet | sonnet | opus |
 | Code reviewer — **Final Wave gates** (B5 `final-*`) | **opus** | **opus** | **opus** |
 | Design reviewer (Codex, `DR` loops) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` |

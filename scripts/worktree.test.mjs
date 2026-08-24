@@ -2,7 +2,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync } from "node:fs"
+import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, renameSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -26,6 +26,12 @@ function gitRepo() {
   execFileSync("git", ["-C", root, "add", "."])
   execFileSync("git", ["-C", root, "commit", "-q", "-m", "init"])
   return root
+}
+
+function activeRun(root, slug, taskId = "1", extra = {}) {
+  mkdirSync(join(root, ".harnie", "plan", slug), { recursive: true })
+  writeFileSync(join(root, ".harnie", "active.json"), JSON.stringify({ track: "plan", slug, ...extra }))
+  writeFileSync(join(root, ".harnie", "plan", slug, "manifest.json"), JSON.stringify({ tasks: [{ id: taskId }] }))
 }
 
 test("sanitizeBranchForDir: 슬래시를 안전하게 치환", () => {
@@ -150,6 +156,64 @@ test("remove: task worktree의 untracked .harnie 잔여는 제거 전 자동 정
   writeFileSync(join(wt, ".harnie", "design", "rev-1.md"), "design\n")
   assert.doesNotThrow(() => removeWorktree({ repo, branch: "harnie/live-state" }))
   assert.equal(existsSync(wt), false)
+})
+
+test("remove --archive-to: single-repo review 이관 후 멱등 재호출", () => {
+  const repo = gitRepo()
+  activeRun(repo, "run")
+  const branch = "harnie/run-t1"
+  const wt = createWorktree({ repo, branch }).worktreePath
+  const ledger = join(wt, ".harnie", "review", "code", "ledger.json")
+  mkdirSync(dirname(ledger), { recursive: true }); writeFileSync(ledger, "evidence\n")
+  const first = removeWorktree({ repo, branch, archiveTo: repo })
+  assert.equal(readFileSync(join(first.archive, "code", "ledger.json"), "utf8"), "evidence\n")
+  const second = removeWorktree({ repo, branch, archiveTo: repo })
+  assert.equal(second.archive, first.archive)
+})
+
+test("remove --archive-to: temp-only crash 상태를 canonical archive로 복구", () => {
+  const repo = gitRepo()
+  activeRun(repo, "run")
+  const branch = "harnie/run-t1"
+  const wt = createWorktree({ repo, branch }).worktreePath
+  const review = join(wt, ".harnie", "review")
+  const ledger = join(review, "code", "ledger.json")
+  mkdirSync(dirname(ledger), { recursive: true }); writeFileSync(ledger, "evidence\n")
+  const destination = join(repo, ".harnie", "plan", "run", "review-archive", "t1")
+  const temp = destination + ".tmp"
+  mkdirSync(dirname(destination), { recursive: true })
+  renameSync(review, temp)
+  const result = removeWorktree({ repo, branch, archiveTo: repo })
+  assert.equal(result.archive, destination)
+  assert.equal(readFileSync(join(destination, "code", "ledger.json"), "utf8"), "evidence\n")
+  assert.equal(existsSync(temp), false)
+})
+
+test("remove CLI: --archive-to 배선", () => {
+  const repo = gitRepo()
+  activeRun(repo, "cli")
+  const branch = "harnie/cli-t1"
+  const wt = createWorktree({ repo, branch }).worktreePath
+  const round = join(wt, ".harnie", "review", "code", "round-1.txt")
+  mkdirSync(dirname(round), { recursive: true }); writeFileSync(round, "APPROVE\n")
+  const result = run(["remove", "--repo", repo, "--branch", branch, "--archive-to", repo])
+  assert.equal(readFileSync(join(result.archive, "code", "round-1.txt"), "utf8"), "APPROVE\n")
+})
+
+test("remove --archive-to: wrong run 거부·workspace 등록 member workroot 허용", () => {
+  const member = gitRepo()
+  const workspace = mkdtempSync(join(tmpdir(), "harnie-wt-ws-"))
+  const runRoot = join(workspace, ".harnie-wt", "harnie-ws")
+  activeRun(runRoot, "ws", "2", { workspaceRoot: workspace, repos: { member: { repo: member, workroot: member } } })
+  const branch = "harnie/ws-t2"
+  const wt = createWorktree({ repo: member, branch }).worktreePath
+  const state = join(wt, ".harnie", "review", "code", "state.json")
+  mkdirSync(dirname(state), { recursive: true }); writeFileSync(state, "{}\n")
+  const wrong = mkdtempSync(join(tmpdir(), "harnie-wt-wrong-"))
+  activeRun(wrong, "ws", "2")
+  assert.throws(() => removeWorktree({ repo: member, branch, archiveTo: wrong }), /single repo workroot/)
+  const result = removeWorktree({ repo: member, branch, archiveTo: runRoot })
+  assert.equal(readFileSync(join(result.archive, "code", "state.json"), "utf8"), "{}\n")
 })
 
 test("remove: active.json이 있는 run worktree의 권위 상태는 자동 정리하지 않음", () => {

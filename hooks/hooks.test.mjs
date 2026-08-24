@@ -117,6 +117,7 @@ test("control·review-state 직접 Write는 phase 무관 deny", () => {
   toExecuting(root)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(dir, "manifest.json") }, cwd: root })))
   assert.ok(deny(hook(PRE, { tool_name: "Edit", tool_input: { file_path: join(dir, "review", "task-a", "ledger.json") }, cwd: root })))
+  assert.ok(deny(hook(PRE, { tool_name: "Edit", tool_input: { file_path: join(dir, "design", "errata.md") }, cwd: root })))
 })
 
 test("executing: 소스 Write allow", () => {
@@ -177,16 +178,29 @@ test("codex: planning workspace-write deny, read-only allow", () => {
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "read-only" }, cwd: root }), null)
 })
 
-test("codex: executing 빌더 부트스트랩은 building-unbound task가 있어야 allow(cwd=root 필수)", () => {
+test("codex: executing 첫 빌더 호출은 building task 자신의 worktree cwd만 allow", () => {
   const { root } = setupRepo()
   toExecuting(root)
-  const ti = { sandbox: "workspace-write", cwd: root }
+  const taskWt = join(root, ".harnie-wt", "harnie-feat-x-tT1")
+  mkdirSync(taskWt, { recursive: true })
+  const ti = { sandbox: "workspace-write", cwd: taskWt }
   // 아직 building 표시 없음 → deny
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root })))
   exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root }), null)
+  assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, cwd: root })))
   // cwd 누락이면 building-unbound라도 deny
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, cwd: root })))
+})
+
+test("codex: serial single-task run-root bootstrap을 허용하고 귀속", () => {
+  const { root, dir } = setupRepo()
+  toExecuting(root)
+  exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  const input = { sandbox: "workspace-write", cwd: root }
+  assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: input, cwd: root }), null)
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: input, tool_response: '{"threadId":"serial-thread"}', cwd: root })
+  assert.equal(JSON.parse(readFileSync(join(dir, "execution.json"), "utf8")).tasks.T1.builderThreadId, "serial-thread")
 })
 
 test("codex-reply: executing 미등록 스레드 deny", () => {
@@ -245,6 +259,50 @@ test("PostToolUse: workspace-write codex 성공 → 유일 building-unbound task
   hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, tool_response: `{"threadId":"${tid}"}`, cwd: root })
   const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
   assert.equal(ex.tasks.T1.builderThreadId, tid)
+})
+
+test("PostToolUse: 복수 building을 tool_input.cwd의 task worktree로 각각 귀속하고 lookalike는 거부", () => {
+  const { root, dir } = setupRepo()
+  const manifest = { ...MANIFEST, tasks: [...MANIFEST.tasks, { id: "T2", deps: [], reviewUnit: "task-b", scope: ["src/b/"], verification: MANIFEST.tasks[0].verification }] }
+  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(manifest, null, 2) + "\n```\n")
+  toExecuting(root)
+  for (const id of ["T1", "T2"]) exec(["set-task", "--root", root, "--slug", "feat-x", "--task", id, "--run-status", "building"])
+  const wt1 = join(root, ".harnie-wt", "harnie-feat-x-tT1")
+  const wt2 = join(root, ".harnie-wt", "harnie-feat-x-tT2")
+  const lookalike = join(root, ".harnie-wt", "harnie-feat-x-tT1-copy")
+  for (const p of [wt1, wt2, lookalike]) mkdirSync(p, { recursive: true })
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: lookalike }, tool_response: '{"threadId":"lookalike"}', cwd: root })
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: wt2 }, tool_response: '{"threadId":"thread-2"}', cwd: root })
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: wt1 }, tool_response: '{"threadId":"thread-1"}', cwd: root })
+  const ex = JSON.parse(readFileSync(join(dir, "execution.json"), "utf8"))
+  assert.equal(ex.tasks.T1.builderThreadId, "thread-1")
+  assert.equal(ex.tasks.T2.builderThreadId, "thread-2")
+  assert.ok(!Object.values(ex.tasks).some((t) => t.builderThreadId === "lookalike"))
+})
+
+test("rebind marker: run-root 호출만 지정 task에 원자 재바인딩하고 marker를 소거", () => {
+  const { root, dir } = setupRepo()
+  toExecuting(root)
+  exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  const firstWt = join(root, ".harnie-wt", "harnie-feat-x-tT1"); mkdirSync(firstWt, { recursive: true })
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: firstWt }, tool_response: '{"threadId":"old-thread"}', cwd: root })
+  exec(["rebind-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--reason", "correction:E-001"])
+  assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, cwd: root }), null)
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, tool_response: '{"threadId":"new-thread"}', cwd: root })
+  const ex = JSON.parse(readFileSync(join(dir, "execution.json"), "utf8"))
+  assert.equal(ex.tasks.T1.builderThreadId, "new-thread")
+  assert.equal(ex.pendingRunRootBootstrap, undefined)
+})
+
+test("errata-arm: 다음 AskUserQuestion 승인만 disposition+correction을 기록", () => {
+  const { root, dir } = setupRepo()
+  exec(["errata-add", "--root", root, "--slug", "feat-x", "--severity", "blocker", "--design-ref", "rev-1.md §D3", "--defect", "설계 오류"])
+  exec(["errata-arm", "--root", root, "--slug", "feat-x", "--id", "E-001", "--disposition", "approved-workaround", "--correction", "정정 기준"])
+  hook(PRE, { ...askPayload("errata-q"), cwd: root })
+  hook(POST, { tool_name: "AskUserQuestion", tool_use_id: "errata-q", tool_response: JSON.stringify({ answers: { [AQ]: "승인" } }), cwd: root })
+  const text = readFileSync(join(dir, "design", "errata.md"), "utf8")
+  assert.match(text, /disposition: approved-workaround \(user approved/)
+  assert.match(text, /correction: 정정 기준/)
 })
 
 test("승인 바인딩 e2e: arm(A5) → Pre(pending) → Post(승인 답) → executing", () => {

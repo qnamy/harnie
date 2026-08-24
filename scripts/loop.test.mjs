@@ -449,6 +449,27 @@ test("capture: workspace run root → ws:<sha256> 합성 아티팩트, 멤버 �
   assert.notEqual(r2.baselineSHA, r1.baselineSHA)
 })
 
+test("capture --record: positional repo .harnie에 monotonic baseline-N.json 기록", () => {
+  const repo = tmpBase()
+  const dir = join(repo, ".harnie", "review", "code")
+  const one = runRaw(["capture", repo, "--record", dir])
+  const two = runRaw(["capture", repo, "--record", dir])
+  assert.match(one.recordFile, /\/baseline-1\.json$/)
+  assert.match(two.recordFile, /\/baseline-2\.json$/)
+  assert.deepEqual(JSON.parse(readFileSync(two.recordFile, "utf8")), { baselineSHA: two.baselineSHA, at: JSON.parse(readFileSync(two.recordFile, "utf8")).at, n: 2 })
+  assert.equal(runFailRaw(["capture", repo, "--record", join(dirname(repo), "outside")]), 2)
+})
+
+test("capture --record: workspace member baseline을 sentinel-verified run root .harnie에 기록", () => {
+  const { repo, runRoot } = workspaceRunRoot()
+  const dir = join(runRoot, ".harnie", "plan", "ws", "review", "task-a")
+  const result = runRaw(["capture", repo, "--record", dir])
+  assert.match(result.recordFile, /\/baseline-1\.json$/)
+  assert.equal(JSON.parse(readFileSync(result.recordFile, "utf8")).baselineSHA, result.baselineSHA)
+  const other = tmpBase()
+  assert.equal(runFailRaw(["capture", other, "--record", dir]), 2)
+})
+
 test("capture: 비-git·비-workspace 디렉터리 → die / delta: workspace run root → die", () => {
   const plain = mkdtempSync(join(tmpdir(), "harnie-loop-plain-"))
   assert.equal(runFailRaw(["capture", plain]), 2)

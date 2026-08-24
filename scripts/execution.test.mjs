@@ -11,9 +11,11 @@ import {
   extractManifestBlock, validateManifest, canonicalManifest,
   deriveCompletion, sealHashOf, parseStatusFooter, FailClosed, authorityApproved,
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
+  registerBuilderAuto,
   setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
   detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
+  errataAdd, errataArm, errataSetDisposition, listErrata, recordPendingErrata, bindErrata, rebindTask,
 } from "./execution.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -518,6 +520,48 @@ test("register(함수): threadId 등록·재등록 금지(훅 전용, CLI 아님
   assert.ok(registerReadonlyThread(root, "plan", "feat-x", "th-r").readOnlyThreads.includes("th-r"))
 })
 
+test("registerBuilderAuto: workspace member task cwd 매핑·run-root repo 정합 검증", () => {
+  const runRoot = mkdtempSync(join(tmpdir(), "harnie-register-ws-"))
+  const memberA = gitRepo(), memberB = gitRepo(), slug = "ws"
+  const dir = join(runRoot, ".harnie", "plan", slug)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(runRoot, ".harnie", "active.json"), JSON.stringify({ track: "plan", slug, workspaceRoot: dirname(runRoot), repos: { a: { workroot: memberA }, b: { workroot: memberB } } }))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ tasks: [{ id: "1", repo: "a" }, { id: "2", repo: "b" }] }))
+  writeFileSync(join(dir, "execution.json"), JSON.stringify({ track: "plan", slug, tasks: { "1": { runStatus: "building", builderThreadId: null }, "2": { runStatus: "building", builderThreadId: null } } }))
+  const wt2 = join(memberB, ".harnie-wt", "harnie-ws-t2"); mkdirSync(wt2, { recursive: true })
+  assert.equal(registerBuilderAuto(runRoot, slug, "thread-2", wt2).taskId, "2")
+  const exPath = join(dir, "execution.json")
+  const ex = JSON.parse(readFileSync(exPath, "utf8")); ex.pendingRunRootBootstrap = "1"; writeFileSync(exPath, JSON.stringify(ex))
+  assert.equal(registerBuilderAuto(runRoot, slug, "wrong-root", memberB).ok, false)
+  assert.equal(JSON.parse(readFileSync(exPath, "utf8")).tasks["1"].builderThreadId, null)
+})
+
+test("registerBuilderAuto: plan execution 상태가 없으면 quick-track 호출을 no-op", () => {
+  const root = gitRepo()
+  assert.deepEqual(registerBuilderAuto(root, "quick-fix", "thread-1", root), {
+    ok: false,
+    reason: "plan 실행 상태 없음 — 자동 귀속 대상 아님",
+  })
+})
+
+test("registerBuilderAuto: marker 없는 root cwd는 단일 serial·task worktree 부재일 때만 귀속", () => {
+  const serial = gitRepo()
+  writePlan(serial, "feat-x"); run(["init", "--root", serial, "--slug", "feat-x"]); approveFlow(serial)
+  setTaskRunStatus(serial, "feat-x", "T1", "building")
+  assert.equal(registerBuilderAuto(serial, "feat-x", "serial-thread", serial).taskId, "T1")
+
+  const runner = gitRepo()
+  writePlan(runner, "feat-x"); run(["init", "--root", runner, "--slug", "feat-x"]); approveFlow(runner)
+  setTaskRunStatus(runner, "feat-x", "T1", "building")
+  mkdirSync(join(runner, ".harnie-wt", "harnie-feat-x-tT1"), { recursive: true })
+  assert.equal(registerBuilderAuto(runner, "feat-x", "root-thread", runner).ok, false)
+
+  const parallel = gitRepo()
+  writePlan(parallel, "feat-x"); run(["init", "--root", parallel, "--slug", "feat-x"]); approveFlow(parallel)
+  setTaskRunStatus(parallel, "feat-x", "T1", "building"); setTaskRunStatus(parallel, "feat-x", "T2", "building")
+  assert.equal(registerBuilderAuto(parallel, "feat-x", "ambiguous-thread", parallel).ok, false)
+})
+
 test("워치독 상태: building 진입은 예산을 재시작하고 built 전이는 유지", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
@@ -529,7 +573,13 @@ test("워치독 상태: building 진입은 예산을 재시작하고 built 전�
   assert.ok(startedAt)
   assert.equal(ex.tasks.T1.codexCalls, 0)
   ex.tasks.T1.codexCalls = 7
+  ex.tasks.T1.watchdogExtensions = [{ at: "earlier", reason: "auto-cap" }]
   writeFileSync(execPath, JSON.stringify(ex))
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  ex = JSON.parse(readFileSync(execPath, "utf8"))
+  assert.equal(ex.tasks.T1.startedAt, startedAt)
+  assert.equal(ex.tasks.T1.codexCalls, 7)
+  assert.deepEqual(ex.tasks.T1.watchdogExtensions, [{ at: "earlier", reason: "auto-cap" }])
   setTaskRunStatus(root, "feat-x", "T1", "built")
   ex = JSON.parse(readFileSync(execPath, "utf8"))
   assert.equal(ex.tasks.T1.startedAt, startedAt)
@@ -563,6 +613,130 @@ test("watchdog-extend: 예산 리셋·연장 이력, 사유 없으면 fail-close
   assert.throws(() => watchdogExtend(root, "feat-x", "T1", ""), FailClosed)
 })
 
+test("watchdog-extend: auto-cap은 task당 1회만 허용", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  assert.equal(watchdogExtend(root, "feat-x", "T1", "auto-cap").extensions, 1)
+  assert.throws(() => watchdogExtend(root, "feat-x", "T1", "auto-cap"), /1회만/)
+  assert.equal(watchdogExtend(root, "feat-x", "T1", "사용자 승인").extensions, 2)
+  setTaskRunStatus(root, "feat-x", "T2", "building")
+  watchdogExtend(root, "feat-x", "T2", "사용자 승인")
+  assert.throws(() => watchdogExtend(root, "feat-x", "T2", "auto-cap"), /총 예산 최대 2×/)
+})
+
+test("execution.json 경합: 동시 set-task가 두 task 상태를 모두 보존", async () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const child = (task) => new Promise((resolve) => execFile("node", [CLI, "set-task", "--root", root, "--slug", "feat-x", "--task", task, "--run-status", "building"], (err) => resolve(err)))
+  const errors = await Promise.all([child("T1"), child("T2")])
+  assert.deepEqual(errors, [null, null])
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.equal(ex.tasks.T1.runStatus, "building")
+  assert.equal(ex.tasks.T2.runStatus, "building")
+  assert.ok(ex.tasks.T1.startedAt && ex.tasks.T2.startedAt)
+})
+
+test("errata v2: blocker CLI 전이는 차단하고 note만 직접 disposition 가능", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const blocker = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D2", defect: "cwd 귀속 오류" })
+  assert.equal(blocker.id, "E-001")
+  assert.throws(() => errataSetDisposition(root, "feat-x", { id: blocker.id, disposition: "deferred-next-run", correction: "다음 run" }), /note 항목 전용/)
+  const note = errataAdd(root, "feat-x", { severity: "note", designRef: "rev-1.md §D7", defect: "문구 보완" })
+  assert.equal(errataSetDisposition(root, "feat-x", { id: note.id, disposition: "deferred-next-run", correction: "문서만 보완" }).ok, true)
+  assert.deepEqual(listErrata(root, "feat-x", { pending: true }).map((e) => e.id), ["E-001"])
+  assert.deepEqual(run(["errata-list", "--root", root, "--slug", "feat-x", "--pending"]).map((e) => e.id), ["E-001"])
+  assert.ok(runFail(["errata-set-disposition", "--root", root, "--slug", "feat-x", "--id", "E-001", "--disposition", "deferred-next-run", "--correction", "우회"]))
+})
+
+test("errata v2: one-shot 승인 훅 경로가 disposition+correction을 함께 append", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const { id } = errataAdd(root, "feat-x", { severity: "degrade", designRef: "rev-1.md §D3", defect: "정정 필요" })
+  const correction = join(mkdtempSync(join(tmpdir(), "harnie-correction-")), "correction.txt")
+  writeFileSync(correction, "새 기준\n")
+  errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: `@${correction}` })
+  recordPendingErrata(root, "feat-x", "ask-1")
+  assert.equal(bindErrata(root, "feat-x", "ask-1", { answers: { q: "승인" } }).ok, true)
+  const entry = listErrata(root, "feat-x").find((e) => e.id === id)
+  assert.equal(entry.disposition, "approved-workaround")
+  assert.equal(entry.correction, "새 기준")
+})
+
+test("errata-arm: custom approve option은 exact match로만 바인딩", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const { id } = errataAdd(root, "feat-x", { severity: "degrade", designRef: "rev-1.md §D3", defect: "정정 필요" })
+  const arm = () => run(["errata-arm", "--root", root, "--slug", "feat-x", "--id", id, "--disposition", "approved-workaround", "--correction", "새 기준", "--approve-option", "확인"])
+  arm(); recordPendingErrata(root, "feat-x", "ask-1")
+  assert.equal(bindErrata(root, "feat-x", "ask-1", { answers: { q: "승인" } }).ok, false)
+  arm(); recordPendingErrata(root, "feat-x", "ask-2")
+  assert.equal(bindErrata(root, "feat-x", "ask-2", { answers: { q: "확인" } }).ok, true)
+})
+
+test("계획 승인 arm은 arm·pending errata 승인과 상호 배타", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const { id } = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D3", defect: "정정 필요" })
+  errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" })
+  assert.equal(armApproval(root, "feat-x").ok, false)
+  recordPendingErrata(root, "feat-x", "ask-1")
+  assert.equal(armApproval(root, "feat-x").ok, false)
+  assert.equal(existsSync(join(dir, ".arm-approval.json")), false)
+})
+
+test("errata 승인 arm은 arm·pending 계획 승인과 상호 배타", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const { id } = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D3", defect: "정정 필요" })
+  armApproval(root, "feat-x")
+  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /계획 승인/)
+  recordPendingApproval(root, "feat-x", "ask-1")
+  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /계획 승인/)
+})
+
+test("rebind-task: correction producer 라운드는 watchdog 사용량만 초기화", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "old-thread")
+  const execPath = join(root, ".harnie", "plan", "feat-x", "execution.json")
+  const ex = JSON.parse(readFileSync(execPath, "utf8"))
+  ex.tasks.T1.runStatus = "built"
+  ex.tasks.T1.startedAt = "2000-01-01T00:00:00.000Z"
+  ex.tasks.T1.codexCalls = 7
+  ex.tasks.T1.watchdogExtensions = [{ at: "earlier", reason: "auto-cap" }]
+  writeFileSync(execPath, JSON.stringify(ex))
+  rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" })
+  const rebound = JSON.parse(readFileSync(execPath, "utf8")).tasks.T1
+  assert.notEqual(rebound.startedAt, "2000-01-01T00:00:00.000Z")
+  assert.equal(rebound.codexCalls, 0)
+  assert.deepEqual(rebound.watchdogExtensions, [{ at: "earlier", reason: "auto-cap" }])
+})
+
+test("rebind-task: 중복 marker 거부·cancel 감사 기록", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "old-thread")
+  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" }).pendingRunRootBootstrap, "T1")
+  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-002" }), /이미 존재/)
+  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: `approved-artifact:${"a".repeat(40)}`, cancel: true }).pendingRunRootBootstrap, null)
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.deepEqual(ex.threadRebindings.map((e) => e.action), ["rebind", "cancel"])
+  assert.equal(ex.threadRebindings[0].oldThreadId, "old-thread")
+})
+
 // ── bootstrap (진입점 훅 소유, docs/bootstrap-adherence.md) ─────────────────
 function readSentinel(root) { return JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")) }
 // genuinelyComplete run 구성: init→approve→모든 task/gate ledger·state·receipt 채움(completion=true).
@@ -584,6 +758,18 @@ function makeCompleteRun(root, slug) {
   }
   return dir
 }
+
+test("completion: pending blocker/degrade와 correction 없는 approved-workaround를 blocker로 산입", () => {
+  const root = gitRepo()
+  const dir = makeCompleteRun(root, "errata-complete")
+  assert.equal(run(["completion", "--root", root, "--slug", "errata-complete"]).complete, true)
+  errataAdd(root, "errata-complete", { severity: "blocker", designRef: "rev-1.md §D2", defect: "미해결" })
+  let result = run(["completion", "--root", root, "--slug", "errata-complete"])
+  assert.ok(result.blockers.some((b) => /E-001.*pending/.test(b)))
+  writeFileSync(join(dir, "design", "errata.md"), "## E-001\n- severity: blocker\n- disposition: approved-workaround\n")
+  result = run(["completion", "--root", root, "--slug", "errata-complete"])
+  assert.ok(result.blockers.some((b) => /correction 없음/.test(b)))
+})
 
 test("slugify: prefix-hash·결정적·한국어 지원·동일prefix 구분(P1-1)", () => {
   const s1 = slugify("Add a Subtract Function")

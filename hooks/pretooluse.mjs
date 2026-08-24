@@ -3,8 +3,8 @@
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
-import { loadContext, buildingUnboundTasks, recordPendingApproval, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
-import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath } from "../scripts/guards.mjs"
+import { loadContext, recordPendingApproval, recordPendingErrata, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
+import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, taskIdFromActiveTaskWorktree } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
 const TRUSTED_CLIS = new Set([join(SCRIPTS, "loop.mjs"), join(SCRIPTS, "execution.mjs"), join(SCRIPTS, "worktree.mjs")])
@@ -74,7 +74,10 @@ try {
         const d = decideCodex({
           isReply, sandbox: input.sandbox, cwd: input.cwd, root, slug, threadId: input.threadId, phase,
           readOnlyThreads: ctx.readOnlyThreads || [], builderThreads: ctx.builderThreads || [],
-          hasBuildingUnbound: ctx.failClosed ? false : buildingUnboundTasks(root, slug).length > 0,
+          buildingUnboundTasks: ctx.failClosed ? [] : ctx.buildingUnboundTaskIds || [],
+          pendingRunRootBootstrap: ctx.pendingRunRootBootstrap || null,
+          taskRepoWorkroots: ctx.taskRepoWorkroots || {},
+          taskWorktreeExists: ctx.taskWorktreeExists || {},
           memberRoots: ctx.memberWorkroots || [],
         })
         if (d.deny) denyPreTool(d.reason)
@@ -82,8 +85,10 @@ try {
         try {
           let usage = null
           if (!isReply && input.sandbox === "workspace-write") {
-            const candidates = buildingUnboundTasks(root, slug)
-            if (candidates.length === 1) usage = taskWatchdogUsage(root, slug, { taskId: candidates[0] })
+            const roots = [root, ...(ctx.memberWorkroots || [])]
+            const mapped = roots.map((r) => taskIdFromActiveTaskWorktree(r, slug, input.cwd)).find((id) => id != null)
+            const taskId = mapped || ctx.pendingRunRootBootstrap || (input.cwd == null && ctx.buildingUnboundTaskIds?.length === 1 ? ctx.buildingUnboundTaskIds[0] : null)
+            if (taskId) usage = taskWatchdogUsage(root, slug, { taskId })
           } else if (isReply && (ctx.builderThreads || []).includes(input.threadId)) {
             usage = taskWatchdogUsage(root, slug, { threadId: input.threadId })
           }
@@ -98,6 +103,7 @@ try {
         allow()
       } else if (toolName === "AskUserQuestion" && !ctx.failClosed && track === "plan") {
         try { recordPendingApproval(root, slug, p.tool_use_id) } catch { /* best-effort */ }
+        try { recordPendingErrata(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         allow()
       } else allow()
     }
