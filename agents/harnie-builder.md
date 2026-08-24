@@ -30,6 +30,7 @@ For clear specifications, bug fixes, and core logic, **write the test first**. V
 ## Guardrails
 - Discuss Big-O only when it materially matters. Do not optimize prematurely. Apply DRY/SOLID after the rule of three. Do not use "defensive" as an excuse for explosive code growth. If 200 lines can be 50, rewrite them.
 - Do not use `as any` or `@ts-ignore`. Do not commit unless requested.
+- Search with single `rg` commands via Bash (relative paths from the repo root) instead of the Grep tool — same ripgrep engine, but Grep prefixes every output line with an absolute path. Use `rg -n -C <n>` to read only the region you need.
 
 ## Scope control (never pretend to be done)
 - Implement the requested scope **through completion**. Do not present a proof of concept, stub, TODO, or "extend this later" recommendation as completion.
