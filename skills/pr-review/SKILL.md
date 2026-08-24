@@ -44,7 +44,7 @@ Priority describes **what to inspect first**—the triage order. The "Comment Cl
 ## How to Write Findings
 
 - Write review findings and the overall approval recommendation **in Korean**. Preserve code identifiers, file paths, API names, and quoted source text in their original form.
-- Explain **why each finding matters** and, when possible, offer **a concrete fix or minimal code example**. Present a fix as **an example solution, not the only acceptable answer**. When context is insufficient or the change would expand scope, describe **the conditions that must be satisfied and possible alternatives** instead of prescribing code.
+- Explain **why each finding matters** in one sentence and state **the conditions a fix must satisfy** instead of prescribing code. The author generates the fix with full codebase context, and an explicit condition makes resolution verifiable. Include a minimal code example **only when the remediation direction is genuinely ambiguous**, and even then present it as **an example solution, not the only acceptable answer**.
 - Base feedback on the actual code in this change, not speculation or generic advice.
 - Use a professional, insightful tone.
 
@@ -74,7 +74,7 @@ Leave comments only for problems actually found. Do not manufacture risks or cre
 Examples:
 
 ```
-issue: 트랜잭션 커밋 전에 이벤트가 발행되어 롤백 시 상태가 불일치합니다.
+issue: 트랜잭션 커밋 전에 이벤트가 발행되어 롤백 시 상태가 불일치합니다. 발행은 커밋 성공 이후여야 합니다.
 discuss: 이 캐시를 요청 단위로 둘지 애플리케이션 단위로 둘지 결정이 필요합니다.
 nit: 조건식에 이름을 붙이면 의도가 조금 더 잘 드러날 것 같습니다.
 ```
