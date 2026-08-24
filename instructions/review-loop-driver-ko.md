@@ -17,7 +17,7 @@
 - **신규 테스트의 fail-capability 증명**: 같은 규칙에 따라, 신규 테스트(또는 실질적으로 강화된 assertion)마다 깨뜨림→실패→복원→통과 증거를 포함한다.
 - **빌드 도구 캐시는 repo 밖으로**: 빌드 도구가 홈 디렉터리 아래에 캐시·락 파일을 쓰는 경우(샌드박스가 거부), **오케스트레이터가 프롬프트에서 시스템 temp 경로를 미리 지정한다**(예: temp 디렉터리 아래 `GRADLE_USER_HOME`) — 도구별 구체 매핑은 대상 레포의 지침(`AGENTS.md`/`CLAUDE.md`, 또는 개인용 미추적 `CLAUDE.local.md`)을 확인한다. 빌더는 repo 내부에 캐시 디렉터리를 임의로 만들면 안 되고(R1 delta를 오염시킴) `.harnie/` 아래도 안 된다.
 
-모든 codex/codex-reply MCP 호출은 `approval-policy:"never"`를 전제로 한다(서버 기동 오버라이드로 고정됨). 호출이 MCP idle timeout이나 `AbortError: remote-cancel`로 실패하면, 등록된 threadId로 `codex-reply`를 1회 재시도한다.
+모든 codex/codex-reply MCP 호출은 `approval-policy:"never"`를 전제로 한다(서버 기동 오버라이드로 고정됨). 호출이 MCP idle timeout이나 `AbortError: remote-cancel`로 실패하면, 재시도 전에 호출 전 baseline 대비 트리 변경을 먼저 확인한다: **무변경** → 세션이 행동 전에 스톨한 것(그리고 abort된 첫 호출은 스레드 자체가 등록되지 않음) — 전체 프롬프트를 다시 인라인하고 "이전 디스패치가 무변경 스톨했다"는 노트를 붙여 **새 `codex` 호출**로 1회 재시도; **변경 있음** → 등록된 threadId로 `codex-reply` 1회 재시도. 어느 쪽이든 재시도는 1회뿐: 두 번째 동일 스톨은 태스크가 아니라 infrastructure — 멈추고 표면화한다.
 
 ## R1. fix-delta 캡처 (오케스트레이터가 독립적으로 생성 — producer 자기보고 아님)
 **R1은 코드 루프에만 적용된다.** **설계 루프**의 리뷰 대상은 `.harnie/` 아래 문서(`design.md`/`plan.md`)이고, `delta.mjs`는 이를 의도적으로 제외하므로 거기서의 git delta는 항상 비어 있다. 그래서 설계 루프는 R1의 git delta를 쓰지 **않는다**: 대신 **설계 파일의 절대경로를 리뷰어에게 명시적 읽기 지시와 함께 전달**한다(첫 리뷰는 `design.md`/`rev-N.md` 경로, 재리뷰는 같은 경로와 바뀐 섹션 이름 목록 — stateful 리뷰어가 이미 이전 리뷰를 갖고 있으므로). 나머지(R2~R5, ledger, state)는 동일하다.
