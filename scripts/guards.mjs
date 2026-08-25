@@ -3,7 +3,8 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 const CONTROL_BASENAMES = new Set([
   "manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json",
-  ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json", "errata.md",
+  ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json",
+  ".arm-rebind.json", ".pending-rebind.json", "errata.md",
 ])
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")
@@ -30,23 +31,31 @@ export function watchdogBudget(difficulty) {
   return WATCHDOG_TIERS[difficulty] || WATCHDOG_DEFAULTS
 }
 
+// 예산 산식(0.11): effective = base × (1 + extensions). 카운터는 누적(리셋 없음) — watchdog-extend가 유일한
+// 확대 경로다(리셋 방식은 재스폰·rebind로 상한을 우회할 수 있어 폐기, DR-107). 시간 기산점은 첫 빌더 바인딩
+// 시각(builderBoundAt) — 러너의 그라운딩·상세설계 단계는 예산 밖이다. 구 상태(builderBoundAt 부재)는 startedAt 폴백.
 export function decideWatchdog({
   startedAt,
+  builderBoundAt,
   codexCalls,
+  extensions,
   now = Date.now(),
   difficulty,
   wallClockBudgetMs,
   maxCodexCalls,
 } = {}) {
   const tier = watchdogBudget(difficulty)
-  const budgetMs = wallClockBudgetMs == null ? tier.wallClockBudgetMs : wallClockBudgetMs
-  const maxCalls = maxCodexCalls == null ? tier.maxCodexCalls : maxCodexCalls
+  const ext = Number.isInteger(extensions) && extensions >= 0 ? extensions : 0
+  const budgetMs = (wallClockBudgetMs == null ? tier.wallClockBudgetMs : wallClockBudgetMs) * (1 + ext)
+  const maxCalls = (maxCodexCalls == null ? tier.maxCodexCalls : maxCodexCalls) * (1 + ext)
   const calls = Number.isInteger(codexCalls) && codexCalls >= 0 ? codexCalls : 0
-  const parsed = typeof startedAt === "string" ? Date.parse(startedAt) : NaN
+  const anchor = typeof builderBoundAt === "string" ? builderBoundAt : startedAt
+  const parsed = typeof anchor === "string" ? Date.parse(anchor) : NaN
   const elapsedMs = Number.isFinite(parsed) ? now - parsed : null
   const elapsedMinutes = elapsedMs == null ? "시간 정보 없음" : `${Math.floor(elapsedMs / 60_000)}분/${budgetMs / 60_000}분`
   const reason = `경과 ${elapsedMinutes}, 빌더 codex 호출 ${calls}/${maxCalls}`
-  const deny = calls >= maxCalls || (elapsedMs != null && elapsedMs >= budgetMs)
+  // 경계 계약: call은 pre-call `>=`(base 15면 15회 사용 후 16번째 거부), wall은 `>`(정확한 경계 시각은 허용).
+  const deny = calls >= maxCalls || (elapsedMs != null && elapsedMs > budgetMs)
   const warn = !deny && (calls >= Math.ceil(maxCalls * 0.8) || (elapsedMs != null && elapsedMs >= budgetMs * 0.8))
   return { deny, warn, elapsedMs, calls, reason, wallClockBudgetMs: budgetMs, maxCodexCalls: maxCalls }
 }

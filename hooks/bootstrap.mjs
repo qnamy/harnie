@@ -20,7 +20,7 @@ import { existsSync, mkdirSync, readdirSync } from "node:fs"
 import { join, resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { findRoot, readSessionBinding, writeSessionBinding } from "./lib.mjs"
-import { bootstrapRun, slugify, writePendingRoute, clearPendingRoute } from "../scripts/execution.mjs"
+import { bootstrapRun, slugify, clearPendingRoute } from "../scripts/execution.mjs"
 import { createWorktree, worktreeDirFor } from "../scripts/worktree.mjs"
 
 const SCRIPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
@@ -143,25 +143,24 @@ try {
       if (!base) fail("작업 인자가 비어 있음 — `/harnie:dev-full <작업 설명>` 형태로 실행하세요")
       doBootstrap(base, (wt, wsMode) => okContext(runMessage(wt, wsMode)))
     }
-    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 직접 quick 진입 = 이 세션 라우팅 해소(deferred)
-    const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 라우터(정확 prefix; dev-full/dev-quick은 위에서 처리)
+    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 0.11: alias — 본문이 harnie:dev 스킬로 체이닝하면 Skill 훅이 부트스트랩
+    const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 0.11 단일 파이프라인 진입(정확 prefix; dev-full/dev-quick은 위에서 처리)
     if (mDev) {
-      if (!(mDev[1] || "").trim()) fail("`/harnie:dev`에 작업 설명이 필요합니다 — `/harnie:dev <작업>`") // 빈 인자 → exit 2(P1-1)
-      // 라우터 단계에서 먼저 거른다: repo도 워크스페이스도 아닌 곳에선 어차피 bootstrap이 실패하므로,
-      // pending-route(=`.harnie/` 상태)를 만들지 않고 즉시 실패. 게이트가 걸리기 前이라 latch도 남지 않는다.
-      // (비-git이라도 하위에 repo가 있는 워크스페이스면 통과 — dev-full이 workspace run으로 이어진다.)
-      if (!isGitRoot(root) && !isWorkspaceRoot(root)) fail(NOT_RUNNABLE(root))
-      writePendingRoute(root, sessionId); ok()                                                        // 라우터: track 미정 → pending-route 게이트
+      const base = slugify((mDev[1] || "").trim())
+      if (!base) fail("`/harnie:dev`에 작업 설명이 필요합니다 — `/harnie:dev <작업>`") // 빈 인자 → exit 2(P1-1)
+      // 0.11: 라우터 폐지 — /harnie:dev가 곧 파이프라인 진입이므로 pending-route 없이 즉시 부트스트랩한다
+      // (mode는 sizing으로 시작하고 오케스트레이터가 set-mode로 확정한다).
+      doBootstrap(base, (wt, wsMode) => okContext(runMessage(wt, wsMode)))
     }
     ok() // 비-harnie·미스매치
   } else if (event === "PreToolUse" && p.tool_name === "Skill") {
     const skill = p.tool_input && p.tool_input.skill
-    if (skill === "harnie:dev-full") {
+    if (skill === "harnie:dev-full" || skill === "harnie:dev") {
       const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim())
-      if (!base) fail("작업 인자가 비어 있음 — dev-full skill args 필요")
+      if (!base) fail(`작업 인자가 비어 있음 — ${skill} skill args 필요`)
       doBootstrap(base, (wt, wsMode) => okAllow(runMessage(wt, wsMode)))
     }
-    if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // quick으로 이 세션 라우팅 해소(deferred machine)
+    if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // 0.11 alias: 본문이 harnie:dev로 체이닝
     ok() // 기타 skill
   } else {
     ok() // 미지원 이벤트

@@ -1,0 +1,26 @@
+---
+name: dev-solo
+description: Codex-standalone development pipeline — use for ANY code-change request in Codex (new features, bug fixes, refactors, migrations). Same harnie pipeline and hard rules as harnie:dev, run without Claude subagents: Codex produces, Claude reviews via the claude CLI (self-review fallback), authority via the harnie CLIs only.
+---
+
+# dev-solo — the harnie Pipeline, Codex-Standalone
+
+You are Codex running harnie's single pipeline **without Claude subagents or hooks**. Same stages, same hard rules as `harnie:dev`; only the wiring differs. `<SNAP>` = this plugin's install root (the marketplace snapshot — resolve it once from this file's own location). All state CLIs are `node <SNAP>/scripts/execution.mjs|loop.mjs …`.
+
+## Wiring differences (everything else follows the harnie:dev contract — Read `<SNAP>/skills/dev/SKILL.md` now, and `<SNAP>/skills/dev/stages/large.md` when L)
+
+- **Init (no bootstrap hook)**: `execution.mjs init --root <repo> --slug <slug> --authority cli` — creates the run worktree/branch (or the workspace run-state dir) and prints the **workroot**; use it everywhere. Then judge provisional size/difficulty and confirm with `set-mode`.
+- **Approval (M/L)**: present `plan.md` to the user in conversation; after their explicit approval run `execution.mjs approve --root <workroot> --slug <slug> --plan-hash <hash>` (valid only for cli-authority runs; hash mismatch fails). The approve call, hash, and time are the audit record.
+- **Producer = you.** Write designs and code yourself (no builder delegation). Everything the builder contract forbids still binds you: scope tests only, no unrequested work, evidence-backed completion (`<SNAP>/instructions/builder-contract.md`).
+- **Reviewer = a fresh subprocess, cross-model first**:
+  - If `command -v claude` succeeds: `node <SNAP>/scripts/run-capped.mjs <timeout-ms> claude -p "<review prompt>" --model <tier> --allowedTools Read Grep Glob` — tier per `model-matrix.md`'s **dev-solo inversion**: design reviews (any altitude) = opus, code reviews = the code-reviewer rows. The prompt names the criteria file paths (`<SNAP>/instructions/code-review.md` or `design-review.md` with the altitude, `verification-tiers.md`, `review-schema.md`), the delta.patch/design path, and the prior-ledger path, and demands the exact review-schema output.
+  - Fallback (claude absent, or the call fails/times out): `node <SNAP>/scripts/run-capped.mjs <timeout-ms> codex exec --sandbox read-only -m gpt-5.6-sol "<same review prompt>"` — a fresh process shares none of your context. There is no other fallback; if this also fails, stop and report.
+  - Either way: save stdout as `<dir>/round-N.txt`, then `loop.mjs apply …` exactly per `review-loop-driver.md` R4 (CR artifacts from `loop.mjs capture/delta`; DR artifacts as `dr:` hashes). A schema-invalid response (`needsReRequest`) gets one re-request; if it is still invalid, **stop and report the protocol failure to the user** — `apply` records no state on invalid rounds, so this is not a STALLED latch and `--reentry` does not apply.
+- **Verification/completion**: `verify --task`, `verify --integration`, and `completion` as in harnie:dev; `completion` is the only source of the `HARNIE_STATUS` footer. Run `seal`/`seal-verify` around each producer window even though you are the producer — it catches accidental authority-file edits.
+- **L runs**: no runner subagents — a **design-decided solo deviation** (design-0.11-detail.md §9, rev-6): execute tasks yourself **sequentially**, each in its own worktree (create it per task like the runner's step 1), following the runner protocol's per-task sequence and gates — incremental grounding → TASK-DETAIL design + design review → scoped build → code review → scoped commit — **with solo wiring substituted**: you build directly instead of a Codex MCP delegation, reviews go through the fresh-subprocess routes above, and you read the CONTRACT sections directly instead of briefs (no context isolation to protect) — accordingly your TASK-DETAIL `dr:` edition token is `solo:contract-rev-N` (driver R4), so a contract revision or approved errata still invalidates a stale design approval on resume. The runner's resume table and `contract-conflict` stop rule apply; since you are also main, you handle the conflict yourself via the errata path. Record in the plan that parallel isolation is unavailable in solo mode.
+
+## NEVER (beyond harnie:dev's list)
+
+- Approve, close review IDs, or emit HARNIE_STATUS from your own judgment — only the CLIs.
+- Review your own work in this conversation's context — the reviewer is always a fresh subprocess.
+- Register or rely on MCP servers for the review path; the two subprocess routes above are the whole contract.

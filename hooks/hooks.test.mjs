@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url"
 import { findRoot, canonicalRelPath, resolveRoot, readSessionBinding, writeSessionBinding, clearSessionBinding } from "./lib.mjs"
 import { slugify } from "../scripts/execution.mjs"
 import { worktreeDirFor, createWorktree } from "../scripts/worktree.mjs"
+import { captureTree } from "../scripts/delta.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const REAL_LOOP = resolve(HERE, "..", "scripts", "loop.mjs") // 훅이 신뢰하는 실제 CLI 경로
@@ -740,16 +741,21 @@ test("bootstrap 라우터: 비-git에서 /harnie:dev는 exit 2 + pending-route �
   assert.equal(existsSync(join(root, ".harnie")), false) // 비-git 워크스페이스에 상태 안 남김
 })
 
-test("bootstrap 라우터 전체 흐름: dev(pending) → dev-full 실패 시 route 삭제", () => {
+test("bootstrap 0.11: /harnie:dev는 즉시 부트스트랩(pending-route 없음), 실패 시 잔존 route 삭제", () => {
   const root = gitRepo("harnie-latch-")
   const SID = "s-latch"
   assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev 합계 함수 추가", cwd: root, session_id: SID }).status, 0)
-  assert.equal(JSON.parse(readFileSync(routeFilePath(root, SID), "utf8")).state, "pending")
-  renameSync(join(root, ".git"), join(root, ".git-off")) // dev-full 시점엔 root가 비-git(비-git 워크스페이스 진입 시뮬)
-  const r = bootstrap({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "harnie:dev-full", args: "합계 함수 추가" }, cwd: root, session_id: SID })
+  assert.equal(existsSync(routeFilePath(root, SID)), false) // 라우터 폐지 — route를 만들지 않는다
+  assert.ok(existsSync(join(root, ".harnie", "sessions", `${SID}.json`))) // 세션→run 바인딩은 기록됨
+  // 잔존 route(0.10 세션)의 실패-시-정리 경로는 유지된다
+  const root2 = gitRepo("harnie-latch2-")
+  mkdirSync(join(root2, ".harnie", "pending-route"), { recursive: true })
+  writeFileSync(routeFilePath(root2, SID), JSON.stringify({ state: "pending", at: "t" }))
+  renameSync(join(root2, ".git"), join(root2, ".git-off")) // 비-git·비-워크스페이스 → bootstrap 실패
+  const r = bootstrap({ hook_event_name: "PreToolUse", tool_name: "Skill", tool_input: { skill: "harnie:dev", args: "합계 함수 추가" }, cwd: root2, session_id: SID })
   assert.equal(r.status, 2)
   assert.match(r.stderr, /git repo/)
-  assert.equal(existsSync(routeFilePath(root, SID)), false)
+  assert.equal(existsSync(routeFilePath(root2, SID)), false)
 })
 
 test("canonicalRelPath: outside(밖 절대경로) vs escapes(symlink·상대 traversal) 구분", () => {
@@ -983,4 +989,38 @@ test("owner 미기록 sentinel(구버전·stale): 식별된 세션은 잠그지 
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })))
   setOwner(root, "owner-sid") // owner 기록됐지만 payload에 session_id 없음 → 동일하게 보수적 적용
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })))
+})
+
+// ── 0.11 S mode: 훅 면제(유효 phase=executing)와 Stop 완료 푸터 ─────────────
+test("S mode: 승인 전 소스 쓰기 차단 면제 — sizing은 차단 유지, control 보호는 S에서도 불변", () => {
+  const { root } = setupRepo() // mode=sizing
+  const write = () => hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, "src", "a", "x.js") }, cwd: root })
+  const d1 = write()
+  assert.equal(d1.hookSpecificOutput.permissionDecision, "deny") // sizing = 승인 전 차단(보수 기본값)
+  exec(["set-mode", "--root", root, "--slug", "feat-x", "--mode", "S"])
+  assert.equal(write(), null) // S = 면제(allow)
+  const ctrl = hook(PRE, { tool_name: "Write", tool_input: { file_path: join(root, ".harnie", "plan", "feat-x", ".arm-rebind.json") }, cwd: root })
+  assert.equal(ctrl.hookSpecificOutput.permissionDecision, "deny") // 신규 rebind arm 파일도 control 보호(CR-003)
+  // S에서 write 서브에이전트·workspace-write codex(단일 building-unbound t1) 게이트도 열림
+  assert.equal(hook(PRE, { tool_name: "Task", tool_input: { subagent_type: "harnie-builder" }, cwd: root }), null)
+})
+
+test("S mode Stop: APPROVED+트리 일치여도 COMPLETE 푸터 없으면 차단(CR-002), 푸터 갖추면 통과", () => {
+  const { root } = setupRepo()
+  exec(["set-mode", "--root", root, "--slug", "feat-x", "--mode", "S"])
+  // 미완료(리뷰 유닛 없음): footer 없이 완료 주장 → 차단
+  const blocked = hook(STOP, { cwd: root, last_assistant_message: "다 했습니다" })
+  assert.equal(blocked.decision, "block")
+  // canonical 유닛 APPROVED + 현재 트리 바인딩
+  const unitDir = join(root, ".harnie", "plan", "feat-x", "review", "code")
+  mkdirSync(unitDir, { recursive: true })
+  writeFileSync(join(unitDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  const noFooter = hook(STOP, { cwd: root, last_assistant_message: "다 했습니다" })
+  assert.equal(noFooter.decision, "block") // 완료 판정이어도 푸터 없으면 false-completion 차단
+  assert.match(noFooter.reason, /HARNIE_STATUS/)
+  assert.equal(hook(STOP, { cwd: root, last_assistant_message: "완료.\nHARNIE_STATUS: COMPLETE" }), null)
+  // 리뷰 후 트리 변경 → 다시 미완료
+  writeFileSync(join(root, "src", "a", "x.js"), "changed")
+  const drifted = hook(STOP, { cwd: root, last_assistant_message: "완료.\nHARNIE_STATUS: COMPLETE" })
+  assert.equal(drifted.decision, "block")
 })

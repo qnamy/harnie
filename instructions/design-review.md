@@ -1,33 +1,34 @@
 # Design Review Criteria (In-Loop, Before Coding, Injected into the Design Reviewer)
 
-Review the design or direction **before implementation begins**. Design mistakes are cheap to fix now and expensive after code exists. As with code review, the objective is to **drive the work toward correctness**.
+Review the design **before implementation** — design mistakes are cheap now, expensive after code. Drive the work toward correctness.
 
-**Unified blocking threshold:** A **specific defect or unresolved decision** that prevents a sound design—where you can identify what is blocked and why—is **blocking (REJECT)**. A concern based on weak evidence or speculation is **non-blocking**. Judge soundness, not style.
+**Blocking threshold:** a specific defect or unresolved decision that prevents a sound design — you can name what is blocked and why — is blocking (REJECT). Weak evidence or speculation is non-blocking. Judge soundness, not style.
 
-**Design altitude:** The caller (skill) states whether this is an **architecture** or **detailed-design** review. Use the same lenses with different emphasis: architecture emphasizes boundaries, data ownership, technology choices, and single points of failure; detailed design emphasizes decision completeness, requirement coverage, and failure modes. Do not reopen an approved higher-level architecture decision during detailed-design review; request an architecture change through a separate path.
+## Altitude — stated by the caller; judge ONLY at that altitude
 
-## Lenses
+- **ARCH**: boundaries, components, data ownership, technology choices, SPOFs. Findings about classes, SQL, task-internal logic, or per-task detail are out of altitude.
+- **CONTRACT**: task decomposition (each task's independent-review-value rationale), inter-task interface/data/event contracts, per-task Env Fact Sheets, verification strategy (automated/human split). Task-internal implementation findings are out of altitude.
+- **TASK-DETAIL**: decision completeness inside one task's settled contract — an implementer can start without further core decisions; failure modes (errors, duplicates, timeouts, retries, partial success, concurrency); requirement coverage. Demands to change the CONTRACT itself are out of altitude (that goes through the central errata/A5.2 path).
 
-### Required: Potential Blockers
-- **Implementability (decision-complete gate):** Can a competent developer begin implementation from this design or plan **without making additional core decisions**? If not, identify the remaining `[UNRESOLVED]` decision and REJECT.
-- **Environment-fact grounding:** Verify the design's environment premises against the actual repo — the Environment Fact Sheet's claims (schema-migration head, test infrastructure, runtime configuration constraints, framework/build-tool behavior; see `design-authoring-detail.md`) and any decision that rests on them. A decision built on a false or missing environment fact is blocking. Report **every** fact error you find in the same round; do not mete them out one per round.
-- **Requirement coverage:** Does the design actually satisfy the stated FRs and NFRs? Identify any **uncovered requirement ID**.
-- **Data ownership and boundaries:** Which component owns which data? Look for duplicate ownership or boundary violations.
-- **Missing failure modes:** Does the design cover errors, duplicates, delays, timeouts, retries, partial success, and concurrent execution? Check transaction boundaries and idempotency.
-- **Operability, scalability, and cost:** Does it cover scheduling, reprocessing, monitoring, and disaster recovery? Can it handle data growth? Identify single points of failure.
-- **Soundness of key decisions:** Are tradeoffs understood? Were alternatives compared without signaling the conclusion in advance? Is this the **simplest design for the current requirements**?
+Do not reopen an approved higher-altitude decision at a lower altitude. An out-of-altitude demand raised as blocking will be **contested** (`CONTEST … reason=altitude`, `loop.md`); on a contest, concede (`resolved`, optionally a new non-blocking ID) unless you can show the finding truly belongs to this altitude.
 
-### Overengineering Fence: Also Grounds for REJECT
-- Unsupported abstractions, patterns, indexes, caches, or flexibility; complexity for hypothetical future needs; premature generalization of a single use case; or technology choices justified by fashion or vague scalability claims.
-- **Burden of proof for a mechanism-adding finding — applies to your own issues.** Before raising anything that can only be satisfied by **adding a mechanism** (a new claim, lease, receipt, identifier, hash, table, state file, or extra round trip), answer two questions in order: ① Is the threat or failure you assume **inside the stated threat model** for this design? ② **Must this mechanism exist** — is it not already covered by something the design has? Raise it as **blocking only if you can name at least one concrete mistake scenario** it prevents. Otherwise mark it **non-blocking**. Rounds that each ask only "how will you satisfy this?" without asking "must this exist?" accumulate machinery that the next revision has to unwind.
-- **Do not stack across rounds.** A finding is not blocking merely because it recurs. Before demanding a mechanism on top of one you required in an earlier round, recheck that the earlier one is still needed; if it is not, say so and withdraw it.
-- **When the producer answers with those two questions and asks you to drop the blocking demand**, respond on the merits: name the concrete scenario if you have one. If you cannot, **do not re-label the same ID** — the ledger rejects a blocking/non-blocking change on an existing ID and fails the whole round closed. Instead, in your next response report that ID as **`resolved`** (the risk no longer applies under the current scope and decisions) and, if the concern is still worth recording, raise it under a **new ID marked `non-blocking`**.
+## MUST find (blocking when violated)
 
-### Do Not Raise
-- Document format, wording, section order, or other stylistic aspects of the design artifact.
+- **Implementability**: a competent developer can begin without additional core decisions — name any remaining `[UNRESOLVED]`.
+- **Fact grounding**: claims about the environment (schema head, test infra, runtime/driver semantics, build behavior) verified against the actual repo. A decision on a false or missing fact is blocking — report every fact error in the same round.
+- **Requirement coverage**: an uncovered stated requirement is blocking (one-line lens — no traceability-matrix artifact is required of the design).
+- **Boundaries and ownership**: duplicate data ownership, boundary violations, missing failure modes, transaction/idempotency gaps.
+- **Soundness**: alternatives compared without pre-signaling; the simplest design that meets current requirements.
+
+## Overengineering fence — also grounds for REJECT, and your own burden of proof
+
+Unsupported abstractions/patterns/caches/flexibility, hypothetical-future complexity, premature generalization, fashion-driven technology. Before you raise anything satisfiable only by **adding a mechanism** (claim, lease, receipt, hash, table, state file, extra round trip): ① is the assumed failure inside the stated threat model? ② is it not already covered? Raise as blocking **only with a concrete mistake scenario**; otherwise non-blocking. Do not stack mechanisms across rounds — withdraw an earlier demand that is no longer needed. On a `CONTEST … reason=overengineering`, either name the concrete scenario or report the ID `resolved` (a still-worthwhile concern becomes a **new non-blocking ID** — the same ID never changes class; the ledger rejects it).
+
+## NEVER raise
+
+- Document format, wording, section order, or style.
+- Correctness/safety findings are never contestable — if you hold one and receive a CONTEST, insist with the scenario.
 
 ## Output
-Follow the canonical **loop contract** in `loop.md` for the ledger, gate, and re-review scope, and `review-schema.md` for the output schema. The design-loop reviewer is Codex, so this file and `review-schema.md` are provided once per thread via `developer-instructions` (see `review-loop-driver.md` R2) — not re-injected on every re-review. Review-specific settings:
-- **ID namespace:** `DR-NNN`
-- **Location:** a section, FR/NFR ID, decision ID, or short quotation when the design is not file-based
-- Ground every issue in the design's actual content. Do not impose heavyweight advice on a small design.
+
+Follow `loop.md` (ledger/contest) and `review-schema.md` (schema — injected once per thread via developer-instructions). Namespace `DR`; location = a section, decision, or short quotation. Ground every issue in the design's actual content; no heavyweight advice on a small design.

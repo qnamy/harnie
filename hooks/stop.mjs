@@ -23,6 +23,15 @@ try {
   if (!ctx.active) allow()
   else if (!isOwnerSession(root, ctx, p.session_id)) allow()
   else if (ctx.failClosed) failClosed([`상태 손상: ${ctx.reason}`])
+  // S mode(0.11): 승인 권위 없음 — canonical 리뷰 유닛 APPROVED + 현재 트리 바인딩 + 정직 footer가 완료 판정.
+  // decideStop은 complete를 단락 평가하므로, S의 3항 중 footer는 여기서 별도 강제한다(CR-002 — footer 없는 false-completion 차단).
+  else if (ctx.mode === "S") {
+    const comp = computeCompletion(root, ctx.track, ctx.slug)
+    if (comp.complete && !(footer.present && footer.status === "COMPLETE"))
+      blockStop("S run 완료 판정인데 HARNIE_STATUS 푸터 부재/불일치 — 최종 응답을 `HARNIE_STATUS: COMPLETE`로 끝내라(미완료면 INCOMPLETE — <blocker>)")
+    const d = decideStop({ complete: comp.complete, blockers: comp.blockers, footer, stopHookActive })
+    d.block ? blockStop(d.reason) : allow()
+  }
   // Approved runs are checked regardless of their advisory phase.
   else if (ctx.approved) {
     const comp = computeCompletion(root, ctx.track, ctx.slug)

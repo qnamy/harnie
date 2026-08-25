@@ -1,8 +1,8 @@
 # harnie
 
-> 플러그인/repo 이름 = **harnie**(AI 서브에이전트 개발 하네스 + 스킬 허브). 크로스-모델 빌드/리뷰 루프 = 커맨드 `/harnie:dev`(라우터), 트랙 스킬 `dev-full`·`dev-quick`(직접 진입 `/harnie:dev-full`·`/harnie:dev-quick`), 에이전트 `harnie-scout`·`harnie-designer`·`harnie-builder`·`harnie-reviewer`. 상태 디렉터리 = `.harnie/`, 툴 네임스페이스 = `mcp__plugin_harnie_codex__*`.
+> 플러그인/repo 이름 = **harnie**(AI 서브에이전트 개발 하네스 + 스킬 허브). 크로스-모델 빌드/리뷰 루프(0.11) = **단일 파이프라인** 커맨드 `/harnie:dev` + 스킬 `dev`(크기 S/M/L로 스테이지 스킵; `dev-full`·`dev-quick`은 0.12 제거 예정 alias), Codex 단독 스킬 `dev-solo`, 에이전트 `harnie-scout`·`harnie-designer`·`harnie-builder`·`harnie-reviewer`·`harnie-task-runner`. 상태 디렉터리 = `.harnie/`, 툴 네임스페이스 = `mcp__plugin_harnie_codex__*`.
 
-런타임 계약의 정본은 `instructions/`, 설계 근거·이력은 `docs/`(architecture · execution-state · bootstrap-adherence · codex-mechanisms · permission-prompt-reduction)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다).
+런타임 계약의 정본은 `instructions/`, 설계 근거·이력은 `docs/`(architecture · execution-state · enforcement-map · design-0.11-process/-detail · design-0.10-restructure · bootstrap-adherence · codex-mechanisms · permission-prompt-reduction)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다).
 
 ## 언어 정책 — 영문 정본 + 한국어 미러 (필수)
 

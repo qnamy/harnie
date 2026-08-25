@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { captureTree, captureWorkspaceTree } from "./delta.mjs"
-import { createWorktree } from "./worktree.mjs"
+import { createWorktree, worktreeDirFor } from "./worktree.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers } from "../hooks/lib.mjs"
 
@@ -70,7 +70,26 @@ export function extractManifestBlock(planMd) {
   return obj
 }
 
-export function validateManifest(obj) {
+// argv 엔트리(verification·setup·integrationVerification) 공통 검증. kind에 따라 evidencePolicy 허용이 갈린다.
+function validateArgvEntry(v, where, errors, { allowEvidencePolicy = true, allowRepo = false } = {}) {
+  if (!v || typeof v !== "object") { errors.push(`${where} 객체 아님`); return }
+  if (typeof v.executable !== "string" || !v.executable) errors.push(`${where}.executable 필요`)
+  if (!Array.isArray(v.args) || !v.args.every((a) => typeof a === "string")) errors.push(`${where}.args 문자열 배열`)
+  const cwd = v.cwd == null ? "." : v.cwd
+  try { if (cwd !== ".") assertContainedRel(cwd, `${where}.cwd`) } catch (e) { errors.push(e.message) }
+  if (!Number.isInteger(v.timeout) || v.timeout <= 0) errors.push(`${where}.timeout 양의 정수(ms) 필요`)
+  // 단위 착오 가드: 초 단위로 적으면(예: 60) spawnSync에 60ms로 전달돼 전 항목 영구 실패한다. 1초 미만에 유의미한 검증은 없다.
+  else if (v.timeout < 1000) errors.push(`${where}.timeout ${v.timeout}ms — 1000ms 미만 거부(밀리초 단위; 초로 적은 단위 착오 의심)`)
+  if (allowEvidencePolicy) {
+    if (v.evidencePolicy != null && v.evidencePolicy !== "output-required" && v.evidencePolicy !== "exit-code-only")
+      errors.push(`${where}.evidencePolicy는 "output-required"|"exit-code-only" (기본 output-required)`)
+  } else if (v.evidencePolicy != null) errors.push(`${where}: evidencePolicy 불가(웜업은 검증 증거가 아님)`)
+  if (v.repo != null && !allowRepo) errors.push(`${where}.repo 불가(integrationVerification 전용)`)
+  if (v.repo != null && (typeof v.repo !== "string" || !REPO_KEY_RE.test(v.repo))) errors.push(`${where}.repo 형식 오류(${JSON.stringify(v.repo)})`)
+}
+
+// mode(0.11 S/M/L): 미지정 = 레거시(0.10) 규칙(4게이트). "M"/"L"은 게이트 티어링·integrationVerification 필수를 적용한다.
+export function validateManifest(obj, { mode = null } = {}) {
   const errors = []
   if (!obj || typeof obj !== "object" || Array.isArray(obj)) return ["manifest 최상위가 plain object 아님"]
   if (!Array.isArray(obj.tasks) || obj.tasks.length === 0) errors.push("tasks는 비어있지 않은 배열")
@@ -97,33 +116,22 @@ export function validateManifest(obj) {
     if (!Array.isArray(t.scope) || t.scope.length === 0) errors.push(`tasks[${i}].scope 비어있지 않은 배열 필요`)
     else for (const s of t.scope) { try { assertContainedRel(s, `tasks[${i}].scope`) } catch (e) { errors.push(e.message) } }
     if (!Array.isArray(t.verification) || t.verification.length === 0) errors.push(`tasks[${i}].verification 비어있지 않은 배열 필요(런타임 증거 강제)`)
-    else for (const [j, v] of t.verification.entries()) {
-      if (!v || typeof v !== "object") { errors.push(`tasks[${i}].verification[${j}] 객체 아님`); continue }
-      if (typeof v.executable !== "string" || !v.executable) errors.push(`tasks[${i}].verification[${j}].executable 필요`)
-      if (!Array.isArray(v.args) || !v.args.every((a) => typeof a === "string")) errors.push(`tasks[${i}].verification[${j}].args 문자열 배열`)
-      const cwd = v.cwd == null ? "." : v.cwd
-      try { if (cwd !== ".") assertContainedRel(cwd, `tasks[${i}].verification[${j}].cwd`) } catch (e) { errors.push(e.message) }
-      if (!Number.isInteger(v.timeout) || v.timeout <= 0) errors.push(`tasks[${i}].verification[${j}].timeout 양의 정수(ms) 필요`)
-      // 단위 착오 가드: 초 단위로 적으면(예: 60) spawnSync에 60ms로 전달돼 전 항목 영구 실패한다. 1초 미만에 유의미한 검증은 없다.
-      else if (v.timeout < 1000) errors.push(`tasks[${i}].verification[${j}].timeout ${v.timeout}ms — 1000ms 미만 거부(밀리초 단위; 초로 적은 단위 착오 의심)`)
-      if (v.evidencePolicy != null && v.evidencePolicy !== "output-required" && v.evidencePolicy !== "exit-code-only")
-        errors.push(`tasks[${i}].verification[${j}].evidencePolicy는 "output-required"|"exit-code-only" (기본 output-required)`)
-    }
+    else for (const [j, v] of t.verification.entries()) validateArgvEntry(v, `tasks[${i}].verification[${j}]`, errors)
     // setup(선택): verification 前 1회 실행하는 웜업 argv(의존성 설치·콜드-스타트 컴파일). 증거가 아니므로 evidencePolicy 불가.
     if (t.setup != null) {
       if (!Array.isArray(t.setup) || t.setup.length === 0) errors.push(`tasks[${i}].setup은 생략 또는 비어있지 않은 배열(웜업 argv)`)
-      else for (const [j, s] of t.setup.entries()) {
-        if (!s || typeof s !== "object") { errors.push(`tasks[${i}].setup[${j}] 객체 아님`); continue }
-        if (typeof s.executable !== "string" || !s.executable) errors.push(`tasks[${i}].setup[${j}].executable 필요`)
-        if (!Array.isArray(s.args) || !s.args.every((a) => typeof a === "string")) errors.push(`tasks[${i}].setup[${j}].args 문자열 배열`)
-        const scwd = s.cwd == null ? "." : s.cwd
-        try { if (scwd !== ".") assertContainedRel(scwd, `tasks[${i}].setup[${j}].cwd`) } catch (e) { errors.push(e.message) }
-        if (!Number.isInteger(s.timeout) || s.timeout <= 0) errors.push(`tasks[${i}].setup[${j}].timeout 양의 정수(ms) 필요`)
-        else if (s.timeout < 1000) errors.push(`tasks[${i}].setup[${j}].timeout ${s.timeout}ms — 1000ms 미만 거부(밀리초 단위; 초로 적은 단위 착오 의심)`)
-        if (s.evidencePolicy != null) errors.push(`tasks[${i}].setup[${j}]: evidencePolicy 불가(웜업은 검증 증거가 아님)`)
-      }
+      else for (const [j, s] of t.setup.entries()) validateArgvEntry(s, `tasks[${i}].setup[${j}]`, errors, { allowEvidencePolicy: false })
     }
   }
+  // integrationVerification(0.11): 통합 후 전체 스위트 — run-level receipt의 원천. M·L 필수(mode 지정 시).
+  if (obj.integrationVerification != null) {
+    if (!Array.isArray(obj.integrationVerification) || obj.integrationVerification.length === 0)
+      errors.push("integrationVerification은 생략 또는 비어있지 않은 배열")
+    else for (const [j, v] of obj.integrationVerification.entries())
+      validateArgvEntry(v, `integrationVerification[${j}]`, errors, { allowRepo: true })
+  }
+  if ((mode === "M" || mode === "L") && !(Array.isArray(obj.integrationVerification) && obj.integrationVerification.length > 0))
+    errors.push(`mode ${mode}: integrationVerification 필수(통합 후 전체 스위트 — 최종 트리 성공 receipt의 원천)`)
   for (const [i, t] of (Array.isArray(obj.tasks) ? obj.tasks : []).entries())
     if (Array.isArray(t?.deps)) for (const d of t.deps) if (!taskIds.has(d)) errors.push(`tasks[${i}].deps: 미지 task ${JSON.stringify(d)}`)
   // repo 키는 all-or-none: 워크스페이스 run은 모든 task가 repo 바인딩 필수, 단일-repo run은 repo 키 금지.
@@ -154,19 +162,74 @@ export function validateManifest(obj) {
     else gateNames.push(g.name)
     claimUnit(g.reviewUnit, `gates[${i}]`)
   }
-  const REQUIRED_GATES = ["coverage", "quality", "runtime", "scope"]
-  const gs = new Set(gateNames)
-  const missing = REQUIRED_GATES.filter((n) => !gs.has(n))
-  const extra = gateNames.filter((n) => !REQUIRED_GATES.includes(n))
-  if (missing.length) errors.push(`Final Wave 게이트 누락: ${missing.join(", ")}(정확히 coverage·quality·runtime·scope 필요)`)
-  if (extra.length) errors.push(`Final Wave에 규약 외 게이트: ${extra.join(", ")}`)
-  if (gateNames.length !== new Set(gateNames).size) errors.push(`Final Wave 게이트 이름 중복`)
+  if (gateNames.length !== new Set(gateNames).size) errors.push(`게이트 이름 중복`)
+  // 게이트 티어링(0.11): L = final-review 1개, M = 없음. mode 미지정 = 레거시(0.10) 4게이트 규칙 유지.
+  if (mode === "L") {
+    if (!(gateNames.length === 1 && gateNames[0] === "final-review"))
+      errors.push(`mode L: gates는 정확히 [{name:"final-review"}] 1개(got ${JSON.stringify(gateNames)})`)
+  } else if (mode === "M") {
+    if (gateNames.length !== 0) errors.push(`mode M: gates는 빈 배열(단일 태스크 — 게이트 없음, got ${JSON.stringify(gateNames)})`)
+  } else {
+    const REQUIRED_GATES = ["coverage", "quality", "runtime", "scope"]
+    const gs = new Set(gateNames)
+    const missing = REQUIRED_GATES.filter((n) => !gs.has(n))
+    const extra = gateNames.filter((n) => !REQUIRED_GATES.includes(n))
+    if (missing.length) errors.push(`Final Wave 게이트 누락: ${missing.join(", ")}(정확히 coverage·quality·runtime·scope 필요)`)
+    if (extra.length) errors.push(`Final Wave에 규약 외 게이트: ${extra.join(", ")}`)
+  }
+  // "integration" reviewUnit은 통합 검증 receipt 디렉터리(review/integration/)로 예약(0.11) — 충돌 금지.
+  if (mode != null && reviewUnits.has("integration")) errors.push(`reviewUnit "integration"은 예약어(통합 검증 receipt) — 다른 이름 사용`)
   return errors
 }
 
 export function canonicalManifest(obj) {
-  // difficulty는 있을 때만 포함 — 기존(필드 없는) manifest의 planHash를 바꾸지 않는다.
-  return { tasks: obj.tasks, gates: obj.gates, ...(obj.difficulty != null ? { difficulty: obj.difficulty } : {}) }
+  // difficulty·integrationVerification은 있을 때만 포함 — 기존(필드 없는) manifest의 planHash를 바꾸지 않는다.
+  return {
+    tasks: obj.tasks, gates: obj.gates,
+    ...(obj.difficulty != null ? { difficulty: obj.difficulty } : {}),
+    ...(obj.integrationVerification != null ? { integrationVerification: obj.integrationVerification } : {}),
+  }
+}
+
+// ── 0.11 mode(S/M/L) — 크기 판정의 권위 기록. 상향 전이만 허용된다. ─────────
+const MODE_ORDER = { sizing: 0, S: 1, M: 2, L: 3 }
+// sentinel·execution 양쪽 mode를 검증해 읽는다(권위 소비자용 — CR-001). 레거시(0.10)는 양쪽 모두 부재일 때만
+// null; 한쪽만 있으면 손상으로 fail-closed. 이 run이 활성 run인지(slug·track 일치)도 함께 검증한다.
+export function readMode(root, track, slug) {
+  const s = readJSONOrNull(sentinelPath(root))
+  const ex = readJSONOrNull(join(planDir(root, track, slug), "execution.json"))
+  const sMode = s && typeof s.mode === "string" ? s.mode : null
+  const exMode = ex && typeof ex.mode === "string" ? ex.mode : null
+  // 활성 run이 아닌 과거 run(sentinel이 다른 run을 가리킴)의 판독은 execution.json 기준(sentinel mode는 무관).
+  const isActiveRun = s && s.track === track && s.slug === slug
+  if (isActiveRun && sMode !== exMode)
+    throw new FailClosed(`mode 불일치(sentinel=${sMode}, execution=${exMode}) — 상태 손상, fail-closed`)
+  return exMode
+}
+export function setMode(root, slug, mode) {
+  if (!["S", "M", "L"].includes(mode)) throw new FailClosed(`set-mode: --mode는 S|M|L (${mode})`)
+  return withStateLock(root, () => {
+    const s = readJSONStrict(sentinelPath(root))
+    if (s.track !== "plan") throw new FailClosed("set-mode: plan track 전용")
+    if (s.slug !== slug) throw new FailClosed(`set-mode: --slug(${slug})가 활성 run(${s.slug})과 불일치 — fail-closed`)
+    const execPath = join(planDir(root, "plan", s.slug), "execution.json")
+    const ex = readJSONStrict(execPath)
+    const sMode = typeof s.mode === "string" ? s.mode : "sizing"
+    const exMode = typeof ex.mode === "string" ? ex.mode : "sizing"
+    if (sMode !== exMode) throw new FailClosed(`mode 불일치(sentinel=${sMode}, execution=${exMode}) — 상태 손상, fail-closed`)
+    if (!(MODE_ORDER[mode] > MODE_ORDER[sMode]))
+      throw new FailClosed(`set-mode: 상향 전이만 허용(${sMode} → ${mode} 불가; 하향·동급 재설정 금지)`)
+    ex.mode = mode
+    s.mode = mode
+    if (mode === "S") {
+      // S: manifest 없음 — 단일 암묵 태스크 t1이 빌더 threadId 귀속·워치독·seal의 태스크 매핑을 제공한다(DR-114).
+      ex.tasks = ex.tasks || {}
+      ex.tasks.t1 = ex.tasks.t1 || { runStatus: "building", builderThreadId: null, startedAt: new Date().toISOString(), codexCalls: 0 }
+    }
+    writeJSONAtomic(execPath, ex)
+    writeJSONAtomic(sentinelPath(root), s)
+    return { ok: true, mode, slug: s.slug }
+  })
 }
 
 const SEARCH_BASENAMES = new Set(["grep", "egrep", "fgrep", "rg", "ag", "ack"])
@@ -389,7 +452,9 @@ export function authorityApproved(dir, sentinelPlanHash) {
   const planMd = readFileSync(planPath, "utf8")
   let block
   try { block = extractManifestBlock(planMd) } catch { return false }
-  if (validateManifest(block).length) return false
+  let mode = null
+  try { const ex = readJSONOrNull(join(dir, "execution.json")); mode = ex && typeof ex.mode === "string" && ex.mode !== "sizing" ? ex.mode : null } catch { mode = null }
+  if (validateManifest(block, { mode }).length) return false
   if (computePlanHash(planMd, canonicalManifest(block)) !== m.planHash) return false // plan.md 수정 탐지
   if (stableStringify(canonicalManifest(m)) !== stableStringify(canonicalManifest(block))) return false // manifest 변조 탐지
   return true
@@ -407,6 +472,12 @@ export function loadContext(root) {
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
   if (ex.slug !== s.slug || ex.track !== s.track) return fc("execution.json이 sentinel과 불일치")
+  // mode(0.11): sentinel과 execution 양쪽에 기록되며 불일치는 손상이다. 레거시 run(양쪽 모두 부재)은 mode=null.
+  const sMode = typeof s.mode === "string" ? s.mode : null
+  const exMode = typeof ex.mode === "string" ? ex.mode : null
+  if (sMode !== exMode) return fc(`mode 불일치(sentinel=${sMode}, execution=${exMode})`)
+  const mode = sMode
+  const authority = typeof s.authority === "string" ? s.authority : "hook"
   const builderThreads = Object.values(ex.tasks || {}).map((t) => t && t.builderThreadId).filter(Boolean)
   const approved = authorityApproved(dir, s.planHash)
   const approvalEvidence = existsSync(join(dir, "manifest.json")) || !!s.planHash
@@ -424,16 +495,48 @@ export function loadContext(root) {
     taskRepoWorkroots[task.id] = workroot
     taskWorktreeExists[task.id] = typeof workroot === "string" && existsSync(join(workroot, ".harnie-wt", `harnie-${s.slug}-t${task.id}`))
   }
-  return { active: true, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots, taskWorktreeExists }
+  // S mode: manifest 없이 암묵 t1이 유일 태스크 — 빌더 cwd·워치독 매핑을 run root로 합성한다(DR-114).
+  if (mode === "S" && ex.tasks && ex.tasks.t1) { taskRepoWorkroots.t1 = root; taskWorktreeExists.t1 = false }
+  return { active: true, root, track: s.track, slug: s.slug, mode, authority, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots, taskWorktreeExists }
 }
 
 export function computeCompletion(root, track, slug) {
   const dir = planDir(root, track, slug)
+  const mode = readMode(root, track, slug)
+  if (mode === "S") {
+    // S(0.11): 승인 게이트·manifest 없음 — canonical 단일 리뷰 유닛(review/code/)의 APPROVED와
+    // reviewedPostSHA=현재 tree 바인딩이 완료 권위다(검증 증거는 리뷰 前 수행되어 리뷰 APPROVE가 보증).
+    const blockers = []
+    if (workspaceInfo(root)) blockers.push("S mode는 단일 repo 전용 — workspace run은 승격(M/L) 필요")
+    const state = readJSONOrNull(join(dir, "review", "code", "state.json"))
+    if (!state || state.machineState !== "APPROVED") blockers.push(`S: review/code 미승인(machineState=${state ? state.machineState : "없음"})`)
+    else if (!state.reviewedPostSHA) blockers.push("S: reviewedPostSHA 없음 — 리뷰 tree 바인딩 불가")
+    else {
+      let current = null
+      try { current = captureTree(root) } catch { current = null }
+      if (current == null) blockers.push("S: 현재 tree 캡처 실패")
+      else if (current !== state.reviewedPostSHA) blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
+    }
+    return { complete: blockers.length === 0, blockers, mode: "S" }
+  }
   const manifestPath = join(dir, "manifest.json")
   if (!existsSync(manifestPath)) return { complete: true, blockers: [], noManifest: true }
   const manifest = readJSONStrict(manifestPath)
   const snap = buildSnapshot(root, track, slug, manifest, manifest.planHash)
   const result = deriveCompletion(manifest, snap)
+  // 통합 검증(0.11): 선언된 run은 최종 트리에 바인딩된 성공 receipt 정확히 1개가 완료 조건이다(NFR-2).
+  if (Array.isArray(manifest.integrationVerification) && manifest.integrationVerification.length) {
+    const r = readJSONOrNull(join(dir, "review", "integration", "receipt.json"))
+    const expectedHash = sha256(stableStringify(manifest.integrationVerification))
+    if (!r) result.blockers.push("통합 검증 receipt 없음 — verify --integration 실행 필요")
+    else {
+      if (r.exitCode !== 0) result.blockers.push(`통합 검증 실패(exitCode=${r.exitCode})`)
+      if (r.vacuous) result.blockers.push(`통합 검증이 공허함(${(r.vacuousReasons || []).join("; ") || "실행 증거 없음"})`)
+      if (r.planHash !== manifest.planHash) result.blockers.push("통합 receipt planHash 불일치(승인 개정 후 재실행 필요)")
+      if (r.verificationHash !== expectedHash) result.blockers.push("통합 receipt가 승인된 integrationVerification 계약과 불일치")
+      if (r.artifact !== snap.currentWholeTree) result.blockers.push("코드가 통합 검증 후 변경됨(현재 tree ≠ receipt tree) — verify --integration 재실행 필요")
+    }
+  }
   for (const entry of listErrata(root, slug)) {
     if ((entry.severity === "blocker" || entry.severity === "degrade") && entry.disposition === "pending")
       result.blockers.push(`errata ${entry.id}: ${entry.severity} pending`)
@@ -514,10 +617,11 @@ function collisionFreeSlug(root, track, base) {
 }
 
 function genuinelyComplete(root, track, slug) {
+  const comp = computeCompletion(root, track, slug)
+  if (comp.mode === "S") return comp.complete === true // S: 승인 권위 없음 — 리뷰 바인딩 완주가 완료
   const dir = planDir(root, track, slug)
   const sentinelPlanHash = (readJSONOrNull(sentinelPath(root)) || {}).planHash
   if (!authorityApproved(dir, sentinelPlanHash)) return false
-  const comp = computeCompletion(root, track, slug)
   return comp.complete === true && comp.noManifest !== true
 }
 
@@ -531,12 +635,13 @@ export function normalizeOwnerSessions(s) {
   return one ? [one] : []
 }
 
-function createRun(root, track, base, sessionId, workspaceRoot = null) {
+function createRun(root, track, base, sessionId, workspaceRoot = null, { authority = null } = {}) {
   const slug = collisionFreeSlug(root, track, base)
   const owner = ownerSessionId(sessionId)
-  writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", tasks: {} })
-  const sentinel = { track, slug, base, planHash: null, readOnlyThreads: [], sessionIds: owner ? [owner] : [] }
+  writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} })
+  const sentinel = { track, slug, base, planHash: null, mode: "sizing", readOnlyThreads: [], sessionIds: owner ? [owner] : [] }
   if (workspaceRoot) { sentinel.workspaceRoot = workspaceRoot; sentinel.repos = {} } // 워크스페이스 run(멀티레포)
+  if (authority) sentinel.authority = authority // "cli" = dev-solo(훅 부재) — approve CLI는 이 run에서만 유효
   writeJSONAtomic(sentinelPath(root), sentinel)
   return { slug, reused: false }
 }
@@ -558,7 +663,7 @@ function resumeRun(root, s, sessionId) {
   return { slug: s.slug, reused: true, resumed: true }
 }
 
-export function bootstrapRun(root, { base, track = "plan", sessionId = null, workspaceRoot = null } = {}) {
+export function bootstrapRun(root, { base, track = "plan", sessionId = null, workspaceRoot = null, authority = null } = {}) {
   if (track !== "plan") throw new FailClosed(`bootstrapRun: 현재 track=plan만 (${track})`) // quick 이연(§3.8)
   if (typeof base !== "string" || base === "") throw new FailClosed("bootstrap: 빈 작업 인자 — 진행 불가")
   validateSlug(base)
@@ -567,9 +672,9 @@ export function bootstrapRun(root, { base, track = "plan", sessionId = null, wor
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base, sessionId, workspaceRoot)
+    if (!s) result = createRun(root, track, base, sessionId, workspaceRoot, { authority })
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, workspaceRoot) // 완료 → 새 run(포인터 전환·old 보존)
+    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, workspaceRoot, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
     else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 완료하거나, 별도 worktree checkout에서 이 스킬을 다시 실행해 새 run을 시작하세요.`)
     clearPendingRoute(root, sessionId) // 부트스트랩 성공 = 이 세션 라우팅 해소(§3.9, per-session 파일이라 lock-free)
@@ -594,8 +699,10 @@ function parseArgs(argv) {
 
 function cmdInit({ flags }) {
   const root = flags.root || die("--root 필요")
-  const track = flags.track || "plan"
   const slug = flags.slug || die("--slug 필요")
+  if (flags.authority === "cli") { out(initCliAuthority(root, slug)); return } // dev-solo(훅 부재) — run worktree 생성 포함
+  if (flags.authority != null) die(`--authority는 cli만(훅 run은 bootstrap 훅이 생성 — init 직접 호출 금지)`)
+  const track = flags.track || "plan"
   const dir = planDir(root, track, slug)
   const sentinel = sentinelPath(root)
   const execPath = join(dir, "execution.json")
@@ -610,8 +717,8 @@ function cmdInit({ flags }) {
       }
       throw new FailClosed(`다른 활성 단위 존재(active=${s.track}/${s.slug}) — 동시 활성 금지, fail-closed`)
     }
-    writeJSONAtomic(execPath, { track, slug, planHash: null, phase: "planning", tasks: {} }) // execution 먼저
-    writeJSONAtomic(sentinel, { track, slug, planHash: null, readOnlyThreads: [] })          // active 포인터 마지막(§3.5 정렬, P2-4)
+    writeJSONAtomic(execPath, { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} }) // execution 먼저
+    writeJSONAtomic(sentinel, { track, slug, planHash: null, mode: "sizing", readOnlyThreads: [] })          // active 포인터 마지막(§3.5 정렬, P2-4)
     return { ok: true, reused: false, phase: "planning" }
   }))
 }
@@ -623,19 +730,44 @@ export function derivePlanHash(root, slug) {
   const planMd = readFileSync(planPath, "utf8")
   let block
   try { block = extractManifestBlock(planMd) } catch (e) { return { ok: false, reason: e.message } }
-  const errs = validateManifest(block)
+  const exMode = readMode(root, "plan", slug)
+  const mode = exMode && exMode !== "sizing" ? exMode : null
+  if (mode === "S") return { ok: false, reason: "S mode는 manifest·승인 게이트가 없음 — 승인이 필요하면 set-mode로 M/L 승격" }
+  const errs = validateManifest(block, { mode })
   if (errs.length) return { ok: false, reason: `manifest 검증 실패: ${errs.join("; ")}` }
   return { ok: true, planHash: computePlanHash(planMd, canonicalManifest(block)), block }
 }
 
-// manifest의 task.repo 바인딩이 이 run의 등록 repo와 정합한지 — 승인 시점에 fail-closed로 확인한다.
+// manifest의 task.repo·integrationVerification[].repo 바인딩이 이 run의 등록 repo와 정합한지 —
+// 승인 시점에 fail-closed로 확인한다(verify 시점 지연 실패 방지, CR-005).
 export function validateRepoBinding(root, block) {
   const ws = workspaceInfo(root)
   const withRepo = block.tasks.filter((t) => t.repo != null)
-  if (!ws) return withRepo.length ? `task.repo는 workspace run에서만 유효(비-workspace run에 ${withRepo.length}개 지정)` : null
+  const iv = Array.isArray(block.integrationVerification) ? block.integrationVerification : []
+  if (!ws) {
+    if (withRepo.length) return `task.repo는 workspace run에서만 유효(비-workspace run에 ${withRepo.length}개 지정)`
+    const ivRepo = iv.filter((v) => v.repo != null).length
+    return ivRepo ? `integrationVerification[].repo는 workspace run에서만 유효(${ivRepo}개 지정)` : null
+  }
   if (withRepo.length !== block.tasks.length) return "workspace run은 모든 task에 repo 키 필수"
   for (const t of block.tasks) if (!ws.repos[t.repo]) return `task ${t.id}: repo '${t.repo}' 미등록 — 먼저 execution.mjs repo-add로 등록`
+  for (const [j, v] of iv.entries()) {
+    if (v.repo == null) return `integrationVerification[${j}]: workspace run은 repo 키 필수`
+    if (!ws.repos[v.repo]) return `integrationVerification[${j}]: repo '${v.repo}' 미등록`
+  }
   return null
+}
+
+// 원샷 arm 상호배제(0.11 DR-108·CR-004): A5 승인·errata·rebind의 arm/pending은 run 전체에서 **타입 무관하게
+// 동시에 하나만** 존재한다 — 하나의 AskUserQuestion 응답이 복수 권위 전이를 소비하거나 payload가 덮이는 것을
+// 막는다. 재-arm이 필요하면 먼저 기존 arm을 소비시켜라(다음 질문이 stale arm을 소비·정리한다).
+const ONE_SHOT_ARM_FILES = [
+  ".arm-approval.json", ".pending-approval.json",
+  ".arm-errata.json", ".pending-errata.json",
+  ".arm-rebind.json", ".pending-rebind.json",
+]
+function otherArmPending(dir) {
+  return ONE_SHOT_ARM_FILES.find((f) => existsSync(join(dir, f))) || null
 }
 
 // The first observed AskUserQuestion after arming is the one-shot approval candidate.
@@ -646,8 +778,8 @@ export function armApproval(root, slug, { approveOption = "승인" } = {}) {
   if (rb) return { ok: false, reason: rb }
   const dir = planDir(root, "plan", slug)
   return withStateLock(root, () => {
-    if (existsSync(join(dir, ".arm-errata.json")) || existsSync(join(dir, ".pending-errata.json")))
-      return { ok: false, reason: "errata 승인 대기 중 — 계획 승인 arm 불가" }
+    const other = otherArmPending(dir)
+    if (other) return { ok: false, reason: `원샷 승인 대기 중(${other}) — run 전체 단일 arm/pending(타입 무관 상호배제). 기존 것을 먼저 소비(질문)하거나 정리 후 재-arm` }
     writeJSONAtomic(join(dir, ".arm-approval.json"), { planHash: d.planHash, approveOption, at: new Date().toISOString() })
     const execPath = join(dir, "execution.json")
     const ex = readJSONOrNull(execPath) || { track: "plan", slug, planHash: null, phase: "planning", tasks: {} }
@@ -729,6 +861,13 @@ function registerBuilderThreadLocked(root, slug, taskId, threadId, { clearBootst
   if (ex.tasks[taskId].builderThreadId && ex.tasks[taskId].builderThreadId !== threadId)
     throw new FailClosed(`task ${taskId} builderThreadId 이미 등록됨(${ex.tasks[taskId].builderThreadId})`)
   ex.tasks[taskId].builderThreadId = threadId
+  // 워치독 시간 기산점(0.11): 태스크의 **첫** 바인딩 성공 시각. 이후 재스폰·rebind에도 불변 — 리셋은 예산 우회 경로(DR-107).
+  // 레거시(builderBoundAt 없이 이미 rebind 이력이 있는 0.10 task)는 startedAt을 anchor로 보존한다 —
+  // rebind로 지금 시각을 새 anchor로 삼으면 no-reset 계약이 우회된다(CR-006).
+  if (!ex.tasks[taskId].builderBoundAt) {
+    const priorRebind = Array.isArray(ex.threadRebindings) && ex.threadRebindings.some((r) => r && r.taskId === taskId && r.action === "rebind")
+    ex.tasks[taskId].builderBoundAt = priorRebind && ex.tasks[taskId].startedAt ? ex.tasks[taskId].startedAt : new Date().toISOString()
+  }
   if (clearBootstrap) delete ex.pendingRunRootBootstrap
   writeJSONAtomic(execPath, ex)
   return { ok: true, taskId, threadId }
@@ -797,6 +936,13 @@ export function registerBuilderAuto(root, slug, threadId, cwd = null) {
     const manifest = readJSONOrNull(join(dir, "manifest.json")) || { tasks: [] }
     const sentinel = readJSONOrNull(sentinelPath(root))
     if (!sentinel) return { ok: false, reason: "활성 run sentinel 없음 — 자동 귀속 대상 아님" }
+    // S mode(0.11, DR-114): manifest 없음 — run root cwd의 workspace-write 호출만 암묵 t1에 귀속(fail-closed cwd 검증).
+    if (ex.mode === "S") {
+      if (!cands.includes("t1")) return { ok: false, reason: "S mode: t1이 building-unbound 아님", candidates: cands }
+      if (typeof cwd !== "string" || !existsSync(cwd) || gitRootOf(cwd) !== realpathOf(root))
+        return { ok: false, reason: `S mode: 빌더 cwd의 git root가 run root와 불일치(got ${JSON.stringify(cwd)}, expect ${root})` }
+      return registerBuilderThreadLocked(root, slug, "t1", threadId)
+    }
     const mapped = taskIdFromWorktreeCwd(root, slug, cwd, manifest, sentinel)
     if (mapped != null) {
       if (!cands.includes(mapped)) return { ok: false, reason: `cwd task ${mapped}가 building-unbound 아님`, candidates: cands }
@@ -839,7 +985,7 @@ export function recordBuilderCall(root, slug, threadId) {
     task.codexCalls = Number.isInteger(task.codexCalls) && task.codexCalls >= 0 ? task.codexCalls + 1 : 1
     if (!task.startedAt) task.startedAt = new Date().toISOString()
     writeJSONAtomic(execPath, ex)
-    return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt }
+    return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt, builderBoundAt: task.builderBoundAt || null, extensions: Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions.length : 0 }
   })
 }
 
@@ -855,7 +1001,7 @@ export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null }
     // manifest의 difficulty(A5에서 함께 승인)로 워치독 예산 티어를 결정한다 — 없으면 기본 티어.
     const manifest = readJSONOrNull(join(planDir(root, "plan", slug), "manifest.json"))
     const difficulty = manifest && typeof manifest.difficulty === "string" ? manifest.difficulty : undefined
-    return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt, ...(difficulty ? { difficulty } : {}) }
+    return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt, builderBoundAt: task.builderBoundAt || null, extensions: Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions.length : 0, ...(difficulty ? { difficulty } : {}) }
   } catch { return null } // advisory 읽기 실패는 훅 차단 근거가 아니다.
 }
 
@@ -871,8 +1017,7 @@ export function watchdogExtend(root, slug, taskId, reason) {
     if (normalized === "auto-cap" && task.watchdogExtensions.length > 0)
       throw new FailClosed(`watchdog-extend: task ${taskId} auto-cap은 기존 연장 전 1회만 허용(총 예산 최대 2×)`)
     const at = new Date().toISOString()
-    task.startedAt = at
-    task.codexCalls = 0
+    // 0.11: 카운터·기산점 리셋 없음 — 연장은 effective 예산 확대(base×(1+extensions))로만 반영된다(DR-107).
     task.watchdogExtensions.push({ at, reason: normalized })
     writeJSONAtomic(execPath, ex)
     return { ok: true, taskId, extensions: task.watchdogExtensions.length }
@@ -946,14 +1091,13 @@ export function errataArm(root, slug, { id, disposition, correction, approveOpti
   const text = correctionText(correction)
   return withStateLock(root, () => {
     const dir = planDir(root, "plan", slug)
-    if (existsSync(join(dir, ".arm-approval.json")) || existsSync(join(dir, ".pending-approval.json")))
-      throw new FailClosed("errata-arm: 계획 승인 대기 중 — errata 승인 arm 불가")
+    const other = otherArmPending(dir)
+    if (other) throw new FailClosed(`errata-arm: 원샷 승인 대기 중(${other}) — run 전체 단일 arm/pending(타입 무관 상호배제)`)
     const entry = listErrata(root, slug).find((e) => e.id === id)
     if (!entry) throw new FailClosed(`errata-arm: ${id} 없음`)
     if (entry.severity === "note") throw new FailClosed(`errata-arm: note는 errata-set-disposition 사용`)
     if (entry.disposition !== "pending") throw new FailClosed(`errata-arm: ${id} disposition이 pending 아님`)
     const path = join(dir, ".arm-errata.json")
-    if (existsSync(path)) throw new FailClosed("errata-arm: 이미 무장된 errata 승인 있음")
     writeJSONAtomic(path, { id, disposition, correction: text, approveOption, at: new Date().toISOString() })
     return { ok: true, id, disposition }
   })
@@ -1003,10 +1147,13 @@ export function errataSetDisposition(root, slug, { id, disposition, correction }
 }
 
 export function rebindTask(root, slug, { taskId, reason, cancel = false }) {
-  const correction = /^correction:E-\d{3}$/.test(String(reason || ""))
+  // correction:E-NNN = 승인된 errata 정정 / finding:<reviewUnit>:CR-NNN = 통합 후 순수 코드 결함(그 finding을 낸
+  // 유닛 ledger에 귀속 — 유닛 식별자가 있어야 CR ID 중복이 모호하지 않다) / verification:integration = ledger 없는
+  // 통합 검증 실패(0.11 CR-209·219). 모두 run-root 부트스트랩 마커 경로는 동일하다.
+  const correction = /^(correction:E-\d{3}|finding:[A-Za-z0-9._-]+:CR-\d{3}|verification:integration)$/.test(String(reason || ""))
   const approvedArtifact = /^approved-artifact:[0-9a-f]{40}$/.test(String(reason || ""))
   if ((!cancel && !correction) || (cancel && !approvedArtifact))
-    throw new FailClosed(`rebind-task: reason 형식 오류(${cancel ? "approved-artifact:<postSHA>" : "correction:<E-NNN>"})`)
+    throw new FailClosed(`rebind-task: reason 형식 오류(${cancel ? "approved-artifact:<postSHA>" : "correction:<E-NNN> | finding:<reviewUnit>:<CR-NNN> | verification:integration"})`)
   return withStateLock(root, () => {
     const execPath = join(planDir(root, "plan", slug), "execution.json")
     const ex = readJSONStrict(execPath)
@@ -1024,13 +1171,142 @@ export function rebindTask(root, slug, { taskId, reason, cancel = false }) {
       if (!oldThreadId) throw new FailClosed(`rebind-task: task ${taskId} builderThreadId 없음`)
       task.builderThreadId = null
       task.runStatus = "building"
-      task.startedAt = at
-      task.codexCalls = 0
+      // 0.11: startedAt·codexCalls·builderBoundAt 리셋 없음 — 예산 우회 방지(DR-107); 확대는 watchdog-extend만.
       ex.pendingRunRootBootstrap = taskId
       ex.threadRebindings.push({ action: "rebind", taskId, oldThreadId, reason, at })
     }
     writeJSONAtomic(execPath, ex)
     return { ok: true, taskId, reason, cancel, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null }
+  })
+}
+
+// ── dead-session rebind(0.11 §6-d) — 사용자 승인 원샷 바인딩 + provider terminal 원문 봉인 ─────────
+// Codex MCP 세션 유실(hmm 런 6회+ 수기 복구)의 sanctioned 복구 경로. CLI 단독으로는 전이 불가:
+// arm(원문 검증·봉인) → 다음 AskUserQuestion(질문 본문에 원문 그대로 제시) → 정확한 승인 선택에만 원자 전이.
+const TERMINAL_MARKERS = [/session not found/i, /no such session/i, /thread not found/i, /unknown thread/i, /session .{0,20}expired/i]
+
+export function rebindArm(root, slug, { taskId, oldThread, evidence, approveOption = "승인" }) {
+  if (typeof evidence !== "string" || !evidence.trim()) throw new FailClosed("rebind-arm: --evidence <provider terminal 응답 원문> 필요")
+  if (!TERMINAL_MARKERS.some((re) => re.test(evidence)))
+    throw new FailClosed("rebind-arm: --evidence에 provider terminal 마커(Session not found류)가 없음 — idle timeout은 terminal 증거가 아니다(기존 fail-fast·세션 재시작 경로 사용)")
+  return withStateLock(root, () => {
+    const dir = planDir(root, "plan", slug)
+    const other = otherArmPending(dir)
+    if (other) throw new FailClosed(`rebind-arm: 원샷 승인 대기 중(${other}) — run 전체 단일 arm/pending(타입 무관 상호배제)`)
+    const ex = readJSONStrict(join(dir, "execution.json"))
+    const task = ex.tasks && ex.tasks[taskId]
+    if (!task) throw new FailClosed(`rebind-arm: task ${taskId} 없음`)
+    if (ex.pendingRunRootBootstrap) throw new FailClosed(`rebind-arm: pendingRunRootBootstrap ${ex.pendingRunRootBootstrap} 이미 존재`)
+    if (!task.builderThreadId) throw new FailClosed(`rebind-arm: task ${taskId} builderThreadId 없음(해제할 스레드 없음)`)
+    if (task.builderThreadId !== oldThread)
+      throw new FailClosed(`rebind-arm: --old-thread 불일치(현재 바인딩 ${task.builderThreadId}) — 다른 태스크·낡은 스레드의 증거 재사용 방지`)
+    writeJSONAtomic(join(dir, ".arm-rebind.json"), { taskId, oldThreadId: oldThread, evidence: evidence.trim(), approveOption, at: new Date().toISOString() })
+    return { ok: true, taskId, oldThreadId: oldThread }
+  })
+}
+
+export function recordPendingRebind(root, slug, toolUseId) {
+  const dir = planDir(root, "plan", slug)
+  const armPath = join(dir, ".arm-rebind.json")
+  if (!existsSync(armPath)) return { ok: false, reason: "rebind 승인 미-arm" }
+  return withStateLock(root, () => {
+    const arm = readJSONStrict(armPath)
+    writeJSONAtomic(join(dir, ".pending-rebind.json"), { ...arm, toolUseId })
+    rmSync(armPath, { force: true })
+    return { ok: true, taskId: arm.taskId }
+  })
+}
+
+export function bindRebind(root, slug, toolUseId, toolInput, response) {
+  const dir = planDir(root, "plan", slug)
+  const pendingPath = join(dir, ".pending-rebind.json")
+  if (!existsSync(pendingPath)) return { ok: false, reason: "pending-rebind 없음" }
+  return withStateLock(root, () => {
+    const pending = readJSONStrict(pendingPath)
+    if (pending.toolUseId !== toolUseId) return { ok: false, reason: "tool_use_id 불일치" }
+    rmSync(pendingPath, { force: true })
+    // 질문 본문 대조: 봉인된 원문·태스크·구 threadId가 질문에 그대로 제시됐는가(요약·전언 금지 — 사용자 눈앞 검증).
+    const haystack = JSON.stringify(toolInput || {})
+    const needle = JSON.stringify(String(pending.evidence)).slice(1, -1)
+    if (!haystack.includes(needle) || !haystack.includes(pending.taskId) || !haystack.includes(pending.oldThreadId))
+      return { ok: false, reason: "승인 질문 본문에 봉인된 증거 원문·task·old threadId가 그대로 제시되지 않음 — 비바인딩" }
+    const selected = extractSelectedAnswers(response)
+    if (!selected.length || !selected.every((v) => v === pending.approveOption)) return { ok: false, reason: "승인 옵션 정확 일치 아님" }
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONStrict(execPath)
+    const task = ex.tasks && ex.tasks[pending.taskId]
+    if (!task || task.builderThreadId !== pending.oldThreadId)
+      return { ok: false, reason: `rebind 대상 상태 변화(현재 바인딩 ${task ? task.builderThreadId : "task 없음"}) — 비바인딩` }
+    if (ex.pendingRunRootBootstrap) return { ok: false, reason: `pendingRunRootBootstrap ${ex.pendingRunRootBootstrap} 이미 존재` }
+    task.builderThreadId = null
+    task.runStatus = "building"
+    // 카운터·기산점 리셋 없음(DR-107) — 예산 확대는 watchdog-extend만.
+    ex.pendingRunRootBootstrap = pending.taskId
+    ex.threadRebindings = Array.isArray(ex.threadRebindings) ? ex.threadRebindings : []
+    ex.threadRebindings.push({ action: "rebind", taskId: pending.taskId, oldThreadId: pending.oldThreadId, reason: "dead-session", evidence: pending.evidence, at: new Date().toISOString() })
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, taskId: pending.taskId, oldThreadId: pending.oldThreadId }
+  })
+}
+
+// ── dev-solo(훅 부재 환경) CLI 권위 경로(0.11 §9) ─────────────────────────────
+// init --authority cli: 훅 부트스트랩이 하던 실행 환경 준비(run worktree/branch 또는 workspace run-state 디렉터리)
+// 를 CLI로 수행한다. authority:"cli" run에서만 approve 서브커맨드가 유효하다(훅 run의 자가승인 차단 불변).
+export function initCliAuthority(root, slug) {
+  validateSlug(slug)
+  const branch = `harnie/${slug}`
+  const gitMode = existsSync(join(root, ".git"))
+  let workroot, workspaceRoot = null
+  if (gitMode) {
+    workroot = createWorktree({ repo: root, branch }).worktreePath
+  } else {
+    const isWorkspace = readdirSync(root, { withFileTypes: true })
+      .some((e) => e.isDirectory() && !e.name.startsWith(".") && existsSync(join(root, e.name, ".git")))
+    if (!isWorkspace) throw new FailClosed(`init --authority cli: root가 git repo도 워크스페이스도 아님(${root})`)
+    workroot = worktreeDirFor(root, branch)
+    mkdirSync(workroot, { recursive: true })
+    workspaceRoot = root
+  }
+  const result = bootstrapRun(workroot, { base: slug, track: "plan", sessionId: null, workspaceRoot, authority: "cli" })
+  return { ok: true, workroot, slug: result.slug, reused: result.reused === true, authority: "cli" }
+}
+
+export function approveCli(root, slug, planHashArg) {
+  if (typeof planHashArg !== "string" || !planHashArg) throw new FailClosed("approve: --plan-hash 필요(사용자에게 제시·확인한 plan의 해시)")
+  const s = readJSONStrict(sentinelPath(root))
+  if (s.authority !== "cli")
+    throw new FailClosed("approve: authority=cli run 전용 — 훅 부트스트랩 run의 승인은 AskUserQuestion 원샷 바인딩만 유효(자가승인 차단)")
+  if (s.slug !== slug || s.track !== "plan") throw new FailClosed("approve: 활성 run과 slug 불일치")
+  const d = derivePlanHash(root, slug)
+  if (!d.ok) throw new FailClosed(d.reason)
+  if (d.planHash !== planHashArg) throw new FailClosed("approve: --plan-hash가 현재 plan.md와 불일치 — 사용자에게 제시한 판과 다름")
+  const rb = validateRepoBinding(root, d.block)
+  if (rb) throw new FailClosed(`approve: repo 바인딩 불일치 — ${rb}`)
+  return withStateLock(root, () => {
+    const dir = planDir(root, "plan", slug)
+    const manifestPath = join(dir, "manifest.json")
+    const manifest = { ...canonicalManifest(d.block), planHash: d.planHash }
+    if (existsSync(manifestPath)) {
+      const prev = readJSONStrict(manifestPath)
+      if (prev.planHash !== d.planHash) {
+        let n = 1
+        while (existsSync(join(dir, `manifest.v${n}.json`))) n++
+        writeJSONAtomic(join(dir, `manifest.v${n}.json`), { ...prev, supersededAt: new Date().toISOString(), supersededBy: d.planHash })
+        writeJSONAtomic(manifestPath, manifest)
+      }
+    } else writeJSONAtomic(manifestPath, manifest)
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONStrict(execPath)
+    ex.planHash = d.planHash
+    ex.phase = "executing"
+    ex.cliApprovals = Array.isArray(ex.cliApprovals) ? ex.cliApprovals : []
+    ex.cliApprovals.push({ planHash: d.planHash, at: new Date().toISOString() }) // 감사 기록(대화 승인의 기계 바인딩 부재는 문서화된 한계)
+    writeJSONAtomic(execPath, ex)
+    const s2 = readJSONStrict(sentinelPath(root))
+    if (s2.slug !== slug || s2.track !== "plan") throw new FailClosed("approve 중 active run 변경됨 — fail-closed")
+    s2.planHash = d.planHash
+    writeJSONAtomic(sentinelPath(root), s2)
+    return { ok: true, planHash: d.planHash, phase: "executing" }
   })
 }
 
@@ -1053,6 +1329,7 @@ export function repoAdd(root, repoPathArg) {
   if (!toplevel || realpathOf(toplevel) !== realRepo)
     throw new FailClosed(`repo-add: git repo toplevel이 아님(${repoPathArg}) — repo 루트 디렉터리를 지정하세요`)
   const s0 = readJSONStrict(sentinelPath(root))
+  readMode(root, s0.track, s0.slug) // mode mirror 손상 시 fail-closed(CR-001 — repo-add도 권위 변이 명령)
   const branch = `harnie/${s0.slug}`
   const { worktreePath, created } = createWorktree({ repo: realRepo, branch })
   return withStateLock(root, () => {
@@ -1081,8 +1358,22 @@ export function registerReadonlyThread(root, track, slug, threadId) {
   })
 }
 
+// CLI 진입 공통 가드(CR-001): 권위 상태를 변경하는 서브커맨드는 실행 전에 ① 인자(track/slug)가 활성 run과
+// 일치하고 ② sentinel/execution의 mode mirror가 정합함을 검증한다(불일치 = 손상, fail-closed). init 제외.
+export function assertActiveRun(root, slug, track = "plan") {
+  const s = readJSONOrNull(sentinelPath(root))
+  if (!s) throw new FailClosed("활성 run 없음(active.json 부재) — fail-closed")
+  if (s.track !== track || s.slug !== slug)
+    throw new FailClosed(`활성 run(${s.track}/${s.slug})과 인자(${track}/${slug}) 불일치 — fail-closed`)
+  readMode(root, track, slug) // mode mirror 불일치 시 throw
+}
+function guardActive(flags, track = flags.track || "plan") {
+  assertActiveRun(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), track)
+}
+
 function cmdArmApproval({ flags }) {
-  const r = armApproval(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { approveOption: flags["approve-option"] || "승인" })
+  guardActive(flags)
+  const r = armApproval(flags.root, flags.slug, { approveOption: flags["approve-option"] || "승인" })
   if (!r.ok) die(r.reason)
   out(r)
 }
@@ -1091,6 +1382,7 @@ function cmdSeal({ flags }) {
   const root = flags.root || die("--root 필요")
   const track = flags.track || "plan"
   const slug = flags.slug || die("--slug 필요")
+  guardActive(flags, track)
   const dir = planDir(root, track, slug)
   const files = collectAuthorityFiles(root, track, slug)
   const hash = sealHashOf(files)
@@ -1151,9 +1443,50 @@ function runSetup(execRoot, s) {
   }
 }
 
-function cmdVerify({ flags }) {
+// 통합 검증(0.11 §6-b): 전체 스위트 1회 — run-level receipt(review/integration/receipt.json).
+// 유효 키 = whole-tree 아티팩트 + planHash + 승인된 integrationVerification 계약 해시. 동일 키 pass receipt 존재 시
+// 재실행하지 않는다(무변화 중복 실행 금지의 기계화). 아티팩트는 실행 **후** 트리(검증이 캐시 등을 만들 수 있음).
+function cmdVerifyIntegration({ flags }) {
   const root = flags.root || die("--root 필요")
   const slug = flags.slug || die("--slug 필요")
+  const dir = planDir(root, "plan", slug)
+  const manifest = readJSONStrict(join(dir, "manifest.json"))
+  const iv = manifest.integrationVerification
+  if (!Array.isArray(iv) || iv.length === 0) die("manifest에 integrationVerification 없음 — M/L 승인 계약에 포함돼야 함")
+  const ws = workspaceInfo(root)
+  const expectedHash = sha256(stableStringify(iv))
+  const currentTree = ws ? captureWorkspaceTree(ws.repos) : captureTree(root)
+  const receiptPath = join(dir, "review", "integration", "receipt.json")
+  const prev = readJSONOrNull(receiptPath)
+  if (prev && prev.exitCode === 0 && !prev.vacuous && prev.planHash === manifest.planHash && prev.verificationHash === expectedHash && prev.artifact === currentTree) {
+    out({ ok: true, skipped: "existing-receipt", receipt: prev })
+    return
+  }
+  const execRootOf = (v) => {
+    if (ws) {
+      if (v.repo == null) die("workspace run의 integrationVerification entry는 repo 키 필수")
+      const entry = ws.repos[v.repo]
+      if (!entry || !existsSync(entry.workroot)) die(`integrationVerification repo '${v.repo}' 미등록/소실`)
+      return entry.workroot
+    }
+    if (v.repo != null) die("단일-repo run의 integrationVerification entry에 repo 키 불가")
+    return root
+  }
+  const results = iv.map((v) => runVerification(execRootOf(v), v))
+  const allPass = results.every((r) => r.exitCode === 0)
+  const vacuousReasons = results.flatMap((r, i) => r.vacuousReasons.map((x) => `integrationVerification[${i}] ${r.executable} ${r.args.join(" ")}: ${x}`))
+  const artifact = ws ? captureWorkspaceTree(ws.repos) : captureTree(root) // 실행 후 트리에 바인딩
+  const receipt = { integration: true, results, exitCode: allPass ? 0 : (results.find((r) => r.exitCode !== 0)?.exitCode ?? 1), vacuous: vacuousReasons.length > 0, vacuousReasons, planHash: manifest.planHash, verificationHash: expectedHash, artifact, at: new Date().toISOString() }
+  writeJSONAtomic(receiptPath, receipt)
+  if (receipt.vacuous) process.stderr.write(`harnie-exec: VACUOUS VERIFICATION — ${vacuousReasons.join(" | ")}\n`)
+  out({ ok: allPass && !receipt.vacuous, receipt })
+}
+
+function cmdVerify({ flags }) {
+  guardActive(flags, "plan")
+  if (flags.integration === true) { cmdVerifyIntegration({ flags }); return }
+  const root = flags.root
+  const slug = flags.slug
   const taskId = flags.task || die("--task 필요")
   const dir = planDir(root, "plan", slug)
   const manifest = readJSONStrict(join(dir, "manifest.json"))
@@ -1196,23 +1529,28 @@ function cmdRepoAdd({ flags }) {
 }
 
 function cmdSetTask({ flags }) {
-  out(setTaskRunStatus(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.task || die("--task 필요"), flags["run-status"] || die("--run-status 필요")))
+  guardActive(flags, "plan")
+  out(setTaskRunStatus(flags.root, flags.slug, flags.task || die("--task 필요"), flags["run-status"] || die("--run-status 필요")))
 }
 
 function cmdWatchdogExtend({ flags }) {
-  out(watchdogExtend(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.task || die("--task 필요"), flags.reason || die("--reason 필요")))
+  guardActive(flags, "plan")
+  out(watchdogExtend(flags.root, flags.slug, flags.task || die("--task 필요"), flags.reason || die("--reason 필요")))
 }
 
 function cmdErrataAdd({ flags }) {
-  out(errataAdd(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { severity: flags.severity || die("--severity 필요"), designRef: flags["design-ref"] || die("--design-ref 필요"), defect: flags.defect || die("--defect 필요") }))
+  guardActive(flags, "plan")
+  out(errataAdd(flags.root, flags.slug, { severity: flags.severity || die("--severity 필요"), designRef: flags["design-ref"] || die("--design-ref 필요"), defect: flags.defect || die("--defect 필요") }))
 }
 
 function cmdErrataArm({ flags }) {
-  out(errataArm(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요"), approveOption: flags["approve-option"] || "승인" }))
+  guardActive(flags, "plan")
+  out(errataArm(flags.root, flags.slug, { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요"), approveOption: flags["approve-option"] || "승인" }))
 }
 
 function cmdErrataSetDisposition({ flags }) {
-  out(errataSetDisposition(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
+  guardActive(flags, "plan")
+  out(errataSetDisposition(flags.root, flags.slug, { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
 }
 
 function cmdErrataList({ flags }) {
@@ -1220,13 +1558,31 @@ function cmdErrataList({ flags }) {
 }
 
 function cmdRebindTask({ flags }) {
-  out(rebindTask(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { taskId: flags.task || die("--task 필요"), reason: flags.reason || die("--reason 필요"), cancel: flags.cancel === true }))
+  guardActive(flags, "plan")
+  out(rebindTask(flags.root, flags.slug, { taskId: flags.task || die("--task 필요"), reason: flags.reason || die("--reason 필요"), cancel: flags.cancel === true }))
+}
+
+function cmdRebindArm({ flags }) {
+  guardActive(flags, "plan")
+  const evidence = flags.evidence || die("--evidence <provider terminal 응답 원문|@file> 필요")
+  const text = String(evidence).startsWith("@") ? readFileSync(String(evidence).slice(1), "utf8") : String(evidence)
+  out(rebindArm(flags.root, flags.slug, { taskId: flags.task || die("--task 필요"), oldThread: flags["old-thread"] || die("--old-thread 필요"), evidence: text, approveOption: flags["approve-option"] || "승인" }))
+}
+
+function cmdSetMode({ flags }) {
+  out(setMode(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.mode || die("--mode S|M|L 필요"))) // slug·mirror 검증은 setMode 내부
+}
+
+function cmdApprove({ flags }) {
+  guardActive(flags, "plan")
+  out(approveCli(flags.root, flags.slug, flags["plan-hash"] || die("--plan-hash 필요")))
 }
 
 function cmdSetPhase({ flags }) {
   const root = flags.root || die("--root 필요")
   const track = flags.track || "plan"
   const slug = flags.slug || die("--slug 필요")
+  guardActive(flags, track)
   const phase = flags.phase || die("--phase 필요")
   const VALID = new Set(["planning", "awaiting-approval", "final-wave", "closed"])
   if (phase === "executing") die("phase=executing는 set-phase로 불가 — 실제 사용자 승인(AskUserQuestion)만 실행을 연다")
@@ -1273,6 +1629,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "errata-set-disposition": cmdErrataSetDisposition(args); break
       case "errata-list": cmdErrataList(args); break
       case "rebind-task": cmdRebindTask(args); break
+      case "rebind-arm": cmdRebindArm(args); break
+      case "set-mode": cmdSetMode(args); break
+      case "approve": cmdApprove(args); break
       case "set-phase": cmdSetPhase(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)
     }

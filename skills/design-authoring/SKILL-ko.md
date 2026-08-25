@@ -14,11 +14,11 @@ description: 독립 요청(/harnie:dev 루프 밖)으로 아키텍처 설계 또
 
 ## 절차
 
-1. **고도 결정.** ARCH/DETAIL 고도 정의는 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1을 따른다. 요청이 모호하면 요청자에게 고도를 한 번 확인한다.
+1. **고도 결정.** 고도 정의는 `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1을 따른다. 독립 요청은 ARCH 또는 TASK-DETAIL(상세설계 프로필)이며, CONTRACT 고도는 L 파이프라인 내부 전용으로 독립 요청 대상이 아니다. 요청이 모호하면 요청자에게 고도를 한 번 확인한다.
 2. **정본 로드.** 디자이너 에이전트 본문과 해당 고도 프로필을 Read한다. 직접(인라인) 작성할 때는 에이전트 본문의 진입 게이트와 작업 원칙을 스스로 적용한다. `harnie-designer` 서브에이전트에 위임할 때는 위임 프롬프트에 프로필의 **절대경로**, 고도·모드 신호, 출력 경로를 전달한다 — 에이전트 본문이 프로필을 직접 Read하도록 요구하므로 내용을 붙여넣지 않는다.
 3. **작성.** 프로필의 섹션 계약을 따른다. 기본은 경량(lightweight)이며, 요청자가 명시적으로 "formal"을 신호할 때만 정식(Formal) 섹션 세트를 쓴다. 문서는 요청자가 사용하는 언어로 작성한다.
 
 ## 범위 주석
 
-- `/harnie:dev-full`·`/harnie:dev-quick` 루프는 같은 계약을 직접 로드한다(phase A / Step 3). 루프 내부에서 이 스킬을 호출하지 않는다.
+- `/harnie:dev` 파이프라인은 설계 스테이지에서 같은 계약을 직접 로드한다. 파이프라인 내부에서 이 스킬을 호출하지 않는다.
 - 기존 설계의 리뷰는 이 스킬이 아니다: 대상에 맞는 고도 렌즈로 `${CLAUDE_PLUGIN_ROOT}/instructions/design-review.md`를 적용한다.

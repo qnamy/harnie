@@ -1,70 +1,45 @@
-# 모델 매트릭스 (canonical) — 설계 altitude · run 난이도 · 모델 배정
+# 모델 매트릭스 (canonical) — 설계 고도, run 난이도, 모델 배정
 
-이 파일은 `/harnie:dev`·`dev-quick`·`dev-full`이 공유하는 세 가지 결정을 소유한다: ① **설계 altitude** 경계(아키텍처 vs 상세), ② **run 난이도** rubric(run당 1회 판정), ③ 각 단계가 거기서 도출하는 **모델 배정**. 호출 지점들은 편의상 구체 모델명을 재기술한다; 충돌 시 이 파일이 우선한다.
+`harnie:dev` 파이프라인의 세 가지 결정을 소유한다: ① 설계 고도 경계, ② run 난이도 루브릭(run당 1회 판정), ③ 이들로부터 각 스테이지가 도출하는 모델. 호출 지점은 편의상 구체 이름을 재서술한다; 충돌 시 이 파일이 이긴다.
 
-## 1. 설계 altitude — 아키텍처 vs 상세 (고정 경계)
+## 1. 설계 고도 (3개 레이어, 한 문서·한 루프에서 절대 섞지 않는다)
 
-두 altitude는 한 문서·한 리뷰 루프에서 절대 섞지 않는다:
+- **ARCH** — 경계, 신규 컴포넌트, 데이터 소유권, 기술 선정, 크로스 모듈/레포 계약, SPOF/스케일링 결정. L 스테이지의 아키텍처 단계에서만 생산된다(정식 프로필 `design-authoring-arch.md`, formal); 그 트리거 체크리스트가 S/M/L의 L 승격도 구동한다.
+- **CONTRACT** — 태스크 분해 + 태스크 간 계약(`design-authoring-contract.md`), L 전용; 승인 게이트 산출물.
+- **TASK-DETAIL** — 확정된 경계 안의 구현 설계(`design-authoring-detail.md`): L 각 태스크의 설계(그 러너가 작성)와 M의 단일 설계.
 
-- **ARCH (아키텍처 설계):** 시스템 경계, 신규 컴포넌트/모듈/서비스, 데이터 소유권·저장소 선택, 기술 선택, 모듈 간·레포 간 계약, SPOF/확장성/가용성 결정. **dev-full A3**에서만 생산(정식 프로필, `design-authoring-arch.md`)하고 `design-review.md`의 아키텍처-altitude 렌즈로 `review/design-arch/`에서 리뷰한다.
-- **DETAIL (상세 설계):** 확정된 경계 안의 구현 설계 — 특정 모듈·API·DB 스키마·처리 로직, 요구사항 추적, 작업 분해. **dev-full A4**(정식 프로필) 또는 **dev-quick Step 3**(경량 프로필, 둘 다 `design-authoring-detail.md`)에서 생산하고 상세-altitude 렌즈로 `review/design-detail/`(full) 또는 `review/design/`(quick)에서 리뷰한다.
+## 2. Run 난이도 — 1회 판정, run 전체 적용
 
-라우팅 귀결:
+**easy / medium / hard**를 (진입 시, 잠정 크기와 함께) 한 번 판정하고 고정한다; 재판정은 사용자 범위 변경 시에만. 크기(S/M/L)와 난이도는 독립 축이다.
 
-- ARCH-altitude 트리거(`phases/phase-a.md`의 A3 트리거 체크리스트)가 하나라도 있으면 그 작업은 **plan 트랙**으로 간다. `dev-quick`은 구조상 DETAIL altitude만 지원한다.
-- dev-full 안에서도 A3는 ARCH 트리거가 실제로 존재할 때**만** 실행한다; 아니면 곧장 A4로 간다. 근거 없는 정식 아키텍처 단계는 스코프 인플레이션이다.
+- **easy** — 국소 변경, 알려진 패턴, 새 로직 설계 없음. *기계적(mechanical) 하위 유형:* 판단이 필요 없는 rename/미러/반복 편집.
+- **medium** — 다중 파일, 기존 패턴 안의 새 로직, 중간 폭발 반경.
+- **hard** — 새 모듈 또는 복잡한 로직; 동시성/보안/데이터 정합성 우려; 높은 폭발 반경 또는 비싼 롤백.
 
-## 2. run 난이도 — 1회 판정, run 전체 적용
-
-**easy / medium / hard**를 run당 정확히 1회 판정하고 이후 고정한다:
-
-- `/harnie:dev` 라우터 경유: 라우터가 분류 단계에서 난이도를 판정하고 트랙과 함께 announce한다.
-- 직접 진입(`/harnie:dev-quick`, `/harnie:dev-full`): 트랙 스킬이 첫 단계(quick Step 1 / full A0)에서 판정하고 announce한다. dev-full은 `plan.md`에도 기록한다.
-- 트랙 스킬은 라우터의 판정을 계승하고 재판정하지 않는다. 사용자가 스코프·목표를 바꿀 때(`replace` 또는 스코프를 바꾸는 `add`)만, 그 경우 이미 요구되는 스코프 재계산과 함께 재판정한다.
-
-트랙과 난이도는 **독립 축**이다: quick 트랙 버그픽스가 medium일 수 있고, full 트랙 run이 hard가 아니라 medium일 수 있다.
-
-Rubric (어느 신호든 정당화하는 가장 높은 티어를 선택):
-
-- **easy** — 한 모듈·소수 파일의 국소 변경; 알려진 패턴 적용; 신규 로직 설계 없음. *기계적 하위유형:* 리네임, 미러 번역, 판단이 필요 없는 반복 편집.
-- **medium** — 다파일 변경; 기존 패턴 안의 신규 로직; 일부 판단 필요; 중간 blast radius.
-- **hard** — 신규 모듈 또는 복잡한 로직; 동시성·보안·데이터 정합성 우려; 열린 설계 결정 다수; 높은 blast radius 또는 비싼 롤백.
-
-난이도는 **생산자 모델과 — 보수적으로 — Claude 코드 리뷰어**를 티어링한다(§3). 리뷰 게이트는 절대 sonnet 아래로 내리지 않으며, 놓침이 가장 비싼 곳 — hard run, Final Wave 게이트, 설계 리뷰 — 에는 최상위 티어를 그대로 유지한다. (실측 run에서 opus 리뷰어 기동 22회+가 최대 비용 축의 하나였다; 게이트는 지키는 대상에 비례해야지 일률적으로 최대일 필요는 없다.)
+난이도는 생산자 모델을, 그리고 보수적으로 Claude 코드 리뷰어를 티어링한다. 리뷰 게이트는 절대 sonnet 아래로 내려가지 않고, 최상위 티어는 miss가 가장 비싼 곳에 둔다.
 
 ## 3. 모델 배정
 
-**생산자 (run 난이도로 티어링):**
+**생산자 (난이도별):**
 
 | 생산자 역할 | easy | medium | hard |
 |---|---|---|---|
-| Codex 빌더 (quick Step 4; full B2/B2′) | `gpt-5.6-luna` — 작업이 순수 기계적이면 `gpt-5.3-codex-spark` | `gpt-5.6-terra` | `gpt-5.6-sol` |
-| Claude 설계자, DETAIL altitude (`harnie-designer`: quick Step 3; full A4) | sonnet | sonnet | opus |
-| Claude 설계자, ARCH altitude (full A3 전용) | **fable** | **fable** | **fable** |
+| Codex builder (모든 크기) | `gpt-5.6-luna` — 순수 기계적이면 `gpt-5.3-codex-spark` | `gpt-5.6-terra` | `gpt-5.6-sol` |
+| Claude designer, TASK-DETAIL (M 인라인/designer; L 러너 작성) | sonnet | sonnet | opus |
+| Claude designer, CONTRACT (L) | sonnet | sonnet | opus |
+| Claude designer, ARCH (L, 트리거 시) | **fable** | **fable** | **fable** (폴백 opus, 플랜에 기록) |
 
-> ARCH-altitude 설계는 run 난이도와 무관하게 항상 최상위 티어(fable)를 쓴다: A3는 정확히 시스템에서 가장 비싼 결정을 위해 존재하고, A3가 트리거된 run은 이미 그 비용선을 넘었다.
-
-**리뷰어 (품질 게이트 — 보수적 티어링, sonnet 아래 금지):**
+**리뷰어 (절대 sonnet 미만 금지):**
 
 | 리뷰어 역할 | easy | medium | hard |
 |---|---|---|---|
-| Task runner inline 리뷰 (`harnie-task-runner` 내부) | sonnet | opus | opus |
-| 코드 리뷰어 (`harnie-reviewer`) — **유닛 리뷰** (첫 리뷰 + 재리뷰 라운드: quick Step 4, full B3, runner 머지 前) | sonnet | opus | opus |
-| 코드 리뷰어 — **확인 리뷰** (이미 승인된 코드의 빈 ledger 재확인, 예: 머지 後 B3 확인) | sonnet | sonnet | opus |
-| 코드 리뷰어 — **Final Wave 게이트** (B5 `final-*`) | **opus** | **opus** | **opus** |
-| 설계 리뷰어 (Codex, `DR` 루프) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` |
+| 코드 유닛 리뷰 (S/M 인라인 루프; L 러너 인라인) | sonnet | opus | opus |
+| 확인 리뷰 (이미 게이트를 통과한 코드의 머지 후 재확인) | sonnet | sonnet | opus |
+| Final Review (L, 단일 유닛 — 최후 방어선) | **opus** | **opus** | **opus** |
+| 설계 리뷰어 (Codex, 모든 `DR` 루프) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` |
 
-> 각 줄의 근거: **확인 리뷰**는 티어 모델 리뷰가 이미 승인한 코드를 재확인한다 — 로직이 아니라 머지를 검증하므로 원 게이트보다 덜 필요하다. **Final Wave**는 전체 tree에 대한 마지막 방어선이고 4유닛으로 한정되므로 난이도와 무관하게 항상 최상위 티어를 받는다. **설계 리뷰**는 횟수가 적고 설계 결함이 가장 비싼 부류라 최상위 Codex 티어 고정을 유지한다.
+**고정:** `harnie-scout` = haiku (frontmatter 고정).
 
-**고정 역할 (티어링 없음):**
+**dev-solo(Codex 단독) 역전:** 모든 스테이지에서 생산자가 Codex이므로 리뷰어는 `claude -p --model <tier>`를 통한 Claude다 — **설계 리뷰(모든 고도) = opus, 잠정**(고정 Codex 설계 리뷰어와 같은 근거: 적은 볼륨, 가장 비싼 결함 클래스; 첫 solo run의 비용 실측으로 확정 또는 재티어링 예정 — design-0.11-detail.md의 open item U-3); **코드 리뷰 = 위 코드-리뷰어 행**. 자기 리뷰 폴백은 `codex exec -m gpt-5.6-sol`을 실행한다.
 
-| 역할 | 모델 |
-|---|---|
-| 스카우트 (`harnie-scout`) | haiku (에이전트 frontmatter에 고정) |
-
-**선택 메커니즘과 폴백:**
-
-- **Codex 모델:** Codex MCP `codex` 호출의 `model` 파라미터로 지정한다(`codex-reply`는 스레드의 모델을 이어간다). 설치본이 모델 선택을 노출하지 않으면 설치 기본값을 쓴다 — 그것 때문에 단계를 실패시키지 않는다.
-- **Claude 서브에이전트 모델:** `harnie-scout`는 에이전트 frontmatter로 고정된다. `harnie-designer`·`harnie-reviewer`(frontmatter 기본 `opus` — 안전한 폴백)는 설치본이 지원하면 Task 호출의 모델 오버라이드로 티어 모델을 전달하고, 지원하지 않으면 frontmatter 기본값이 적용된다. 리뷰어의 행(유닛/확인/Final Wave)은 오케스트레이터가 위임마다 선택한다.
-- **fable 폴백:** 이 설치본에서 서브에이전트에 fable을 선택할 수 없으면 A3에 `opus`를 쓰고 그 대체 사실을 `plan.md`에 기록한다.
-- **오케스트레이터(메인 루프) — 여기서 배정하지 않음:** 세션 모델이 그대로 적용되며 harnie가 제어하지 않는다. 오케스트레이션 자체(라우팅, CLI 배선, ledger 관리, 위임)는 최상위 티어가 필요 없다 — **실행 단계의 세션 모델로는 sonnet이면 충분하고 권장**된다. 품질을 짊어지는 역할(디자이너, 양쪽 리뷰어, 빌더)은 모두 세션 모델과 무관하게 고정·티어링되기 때문이다. 실측 run에서 오케스트레이터 자체 호출이 전체 run 토큰의 절반을 크게 넘었으므로, 세션 모델 선택이 단일 최대 비용 레버다.
+**메커니즘:** Codex 모델은 `codex` 호출의 `model` 파라미터(`codex-reply`는 스레드의 것을 유지); Claude 서브에이전트 티어는 지원되는 곳에서 Task 모델 오버라이드(frontmatter `opus`가 폴백). 오케스트레이터/세션 모델은 여기서 배정하지 않는다 — 품질을 짊어지는 모든 역할이 독립적으로 고정되므로, **세션 모델은 sonnet으로 충분하며 권장된다**(실측 run에서 오케스트레이터 자신의 호출이 총 토큰의 절반을 훨씬 넘었다 — 단일 최대 비용 레버).

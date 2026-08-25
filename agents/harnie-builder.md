@@ -37,7 +37,7 @@ For clear specifications, bug fixes, and core logic, **write the test first**. V
 - At the same time, do not build anything that was **not** requested. The boundary is: fully finish what was requested and leave everything else untouched.
 
 ## Verification (definition of done)
-- **Choose the required verification set by change risk, not file count.** **Read** `${CLAUDE_PLUGIN_ROOT}/instructions/verification-tiers.md` for tier definitions, required sets, Manual QA, and unverifiable cases — the skill does not paste it into your prompt. **Stop when the complete required set for that tier passes for the first time.** ("It compiles" is not verification.)
+- **Choose the required verification set by change risk, not file count.** **Read** `${CLAUDE_PLUGIN_ROOT}/instructions/verification-tiers.md` for tier definitions, required sets, Manual QA, and unverifiable cases — the skill does not paste it into your prompt. **Run only the scope-test set named in your prompt** — full suites belong to integration verification, not the unit stage. **Stop when the complete required set for that tier passes for the first time.** ("It compiles" is not verification.)
 - **Do not repeat verification without evidence:** Reverify only after changing code. Do not check the same state again without a reason.
 - **One-line completion report:** State the selected tier, the passed verification set with observable evidence, what changed, and any remaining issue. Never claim completion without evidence.
 
