@@ -219,7 +219,7 @@ test("decideWatchdog: 예산 내·80% 경고·100% 차단", () => {
 test("decideWatchdog: 시간 예산·누락 시간·비정수 호출은 advisory로 판정", () => {
   const startedAt = "2026-08-18T00:00:00.000Z"
   const base = Date.parse(startedAt)
-  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 30 * 60_000 }).deny, true)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 30 * 60_000 + 1 }).deny, true) // wall은 `>` 경계(0.11)
   assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 25 * 60_000 }).warn, true)
   const missing = decideWatchdog({ codexCalls: 12, now: base })
   assert.equal(missing.elapsedMs, null)
@@ -244,6 +244,26 @@ test("decideWatchdog: difficulty 티어 — hard는 60분/25콜, 미지·미지�
   const r = decideWatchdog({ startedAt, codexCalls: 0, now: base, difficulty: "hard" })
   assert.equal(r.wallClockBudgetMs, 60 * 60_000)
   assert.equal(r.maxCodexCalls, 25)
+})
+
+test("decideWatchdog(0.11): 연장 산식 effective=base×(1+ext), pre-call >= 경계, builderBoundAt 기산·startedAt 폴백", () => {
+  const base = Date.parse("2026-01-01T00:00:00.000Z")
+  const startedAt = new Date(base).toISOString()
+  // 연장 1회 = 호출 상한 30: 29는 통과, 30은 deny(>= 경계 — base 15의 15번째 사용 후 16번째 호출 거부와 동일 계약)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 15, now: base }).deny, true)                     // ext 0: 15 >= 15
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 15, now: base, extensions: 1 }).deny, false)     // ext 1: 15 < 30
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 29, now: base, extensions: 1 }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 30, now: base, extensions: 1 }).deny, true)
+  // wall도 확대: ext 1 = 60분 — 경계 계약은 wall `>`(정확한 경계 시각 허용, +1ms부터 deny) / call `>=`
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 45 * 60_000, extensions: 1 }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 60 * 60_000, extensions: 1 }).deny, false)      // 정확 경계 = 허용
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 60 * 60_000 + 1, extensions: 1 }).deny, true)   // 경계 +1ms = deny
+  // 기산점 = builderBoundAt(설계·그라운딩 단계는 예산 밖): startedAt이 오래돼도 boundAt 기준으로 판정
+  const boundAt = new Date(base + 40 * 60_000).toISOString()
+  assert.equal(decideWatchdog({ startedAt, builderBoundAt: boundAt, codexCalls: 0, now: base + 50 * 60_000 }).deny, false)     // bound 후 10분
+  assert.equal(decideWatchdog({ startedAt, builderBoundAt: boundAt, codexCalls: 0, now: base + 70 * 60_000 + 1 }).deny, true)  // bound 후 30분+1ms
+  // 구 상태(builderBoundAt 부재)는 startedAt 폴백 — 하위 호환
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 30 * 60_000 + 1 }).deny, true)
 })
 
 // 실측 회귀(관측 ④): 신뢰 CLI를 쓰고 있는데 deny 이유가 "loop.mjs로만 하라"인 자기모순 메시지 →

@@ -7,8 +7,9 @@ import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+// maxBuffer: 기본 1MB로는 대형 diff(대량 rebase 등)에서 ENOBUFS로 원인 불명 크래시(digest 제안 5).
 function git(repo, args, env) {
-  return execFileSync("git", ["-C", repo, ...args], { env: { ...process.env, ...env }, encoding: "utf8" })
+  return execFileSync("git", ["-C", repo, ...args], { env: { ...process.env, ...env }, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
 }
 
 /**

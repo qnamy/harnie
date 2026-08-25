@@ -385,12 +385,18 @@ test("apply CLI: CR은 --artifact 필수, --root 필수", () => {
   assert.equal(runFailRaw(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--artifact", captureTree(base)]), 2) // root 누락
 })
 
-test("apply CLI: --artifact는 DR에서 금지, 잘못된 형식은 die", () => {
+test("apply CLI: DR --artifact는 dr:<sha256>만(설계 리비전 바인딩, 0.11) — tree SHA는 거부, CR은 dr: 거부", () => {
   const base = tmpBase()
-  const dr = unitOf(base, "dr"); writeFileSync(R(dr), ["VERDICT: REJECT", "ISSUES:", "- [DR-001] (blocking) (open) [x] a → b → c"].join("\n"))
-  assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(dr), "--review", R(dr), "--ns", "DR", "--state", S(dr), "--artifact", captureTree(base)]), 2) // DR 금지
+  const DR_REJ = ["VERDICT: REJECT", "ISSUES:", "- [DR-001] (blocking) (open) [x] a → b → c"].join("\n")
+  const dr = unitOf(base, "dr"); writeFileSync(R(dr), DR_REJ)
+  assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(dr), "--review", R(dr), "--ns", "DR", "--state", S(dr), "--artifact", captureTree(base)]), 2) // DR에 tree SHA 금지
+  const drOk = unitOf(base, "dr-ok"); writeFileSync(R(drOk), DR_REJ)
+  const drHash = "dr:" + "a".repeat(64)
+  runRaw(["apply", "--root", base, "--ledger", L(drOk), "--review", R(drOk), "--ns", "DR", "--state", S(drOk), "--artifact", drHash])
+  assert.equal(JSON.parse(readFileSync(S(drOk), "utf8")).reviewedPostSHA, drHash) // 권위 state에 리비전 바인딩 저장
   const fmt = unitOf(base, "fmt"); writeFileSync(R(fmt), REJ)
   assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(fmt), "--review", R(fmt), "--ns", "CR", "--state", S(fmt), "--artifact", "nothex"]), 2) // 형식
+  assert.equal(runFailRaw(["apply", "--root", base, "--ledger", L(fmt), "--review", R(fmt), "--ns", "CR", "--state", S(fmt), "--artifact", drHash]), 2) // CR에 dr: 금지
 })
 
 test("apply CLI: ledger/state가 .harnie 밖(소스 경로) → die", () => {

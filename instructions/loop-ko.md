@@ -1,81 +1,65 @@
-# harnie 루프 상태머신 (canonical) — quick·plan 공통
+# Harnie 리뷰 루프 상태 기계 (canonical)
 
-리뷰 루프·정체 방지의 **단일 정의**이자 **출력 스키마의 소유자**(스키마 텍스트는 리뷰어의 저비용 읽기를 위해 `review-schema.md`로 추출). 두 트랙 스킬은 이 파일을 사용할 모델(오케스트레이터, 디자이너, 리뷰어)에게 **canonical path에서 직접 Read하도록 지시한다** — 위임 프롬프트에 내용을 붙여넣지 않고. 경로 참조만으로는 읽힘이 보장되지 않으므로, 각 소비자의 자체 진입점(agent body) 또는 Step 0(오케스트레이터)이 Read 지시를 담고, 소비자가 자신이 읽은 것을 행동 전에 명명한다. agent body = 1회 역할 불변규칙, 이 파일 = 다단계 조율.
+리뷰 루프의 단일 정의: ledger 규칙, 상태 전이, progress, contest 게이트, 재리뷰 범위. 출력 스키마는 `review-schema.md`에 있다(리뷰어는 그것만 읽는다). 오케스트레이터는 이 계약을 `scripts/loop.mjs`로 집행한다 — 절대 수동으로 하지 않는다.
 
-## 역할 바인딩 (producer는 중립)
-- **producer** = 산출물 저자(역할 중립). quick/plan 스킬이 단계별 바인딩:
-  - 코드 리뷰 루프 → producer = **builder** / 설계 리뷰 루프 → producer = **designer**
-- **reviewer** = producer의 **반대 프로바이더**(v0: Codex).
+## 역할
 
-## 리뷰 출력 스키마 — 텍스트는 `review-schema.md`로 추출
-스키마 텍스트(VERDICT/ISSUES 형식, ID 안정성, 상태, 심각도 규칙)는 **`review-schema.md`** 한 파일에 있다 — 리뷰어의 매 기동 읽기를 싸게 유지하려고 추출했다: 리뷰어는 그 파일만 읽고 이 파일은 읽지 않는다. 이 파일은 그 스키마를 둘러싼 루프 계약(아래의 ledger 규칙·상태 전이·progress·재리뷰 범위)의 정본으로 남는다.
+- **생산자(Producer)** = 산출물의 저자: 설계 루프에서는 designer(Claude), 코드 루프에서는 builder(Codex).
+- **리뷰어(Reviewer)** = 생산자의 **반대 제공자**, 항상 read-only. 설계 = Codex가 리뷰; 코드 = Claude가 리뷰.
 
-## Aggregate issue ledger (승인 게이트의 근거)
-승인은 단일 응답이 아니라 **누적 receipt의 issue ledger**로 계산한다. ledger는 **orchestrator(스킬)가 소유**한다.
-- receipt = stable ID를 key로 하는 aggregate ledger.
-- 재리뷰어는 재리뷰 대상인 **모든 기존 open 이슈**에 open|resolved를 명시해야 한다.
-- **누락 처리 정책**: 응답에서 빠진 open 이슈는 **방어적으로 open 유지**(누락 ≠ resolved). 누락 자체는 **protocol violation**으로 receipt에 기록한다.
-  - 누락된 것이 **blocking이거나** verdict 정합성이 깨지면 → **재요청**.
-  - 누락된 것이 **non-blocking뿐**이면 → ledger 유지한 채 진행 가능.
-- 새 이슈는 새 stable ID로 추가.
-- orchestrator가 응답을 ledger에 적용한 뒤 **open blocking 수로 verdict를 검증**한다.
-- **정합성 불변**(어기면 응답 무효 → 재요청): `APPROVE ↔ open blocking = 0` / `REJECT ↔ open blocking ≥ 1`.
-- **resolved 정의**: 현재 범위·결정 아래 더 이상 blocking/non-blocking 위험이 성립하지 않음을 **검증한** 상태. 누락·producer 완료주장 ≠ resolved. 이후 delta로 재발하면 **같은 ID를 open으로 되돌린다.**
+## Ledger (승인 증거)
 
-## 상태 전이
-**progress는 리뷰 결과가 나온 뒤(REVIEWING)에만 판정**한다. **모든 수정은 반드시 리뷰된다.** 가드는 배타적이며 stagnation은 **증가 후 값**으로 비교한다(limit 기본 3).
+승인은 모든 영수증에 걸친 집계 이슈 ledger에서 계산된다 — 하나의 응답에서가 아니다.
+
+- 모든 재리뷰는 **범위 내 이전 open 이슈 전부**에 대해 `open` 또는 `resolved`를 보고한다. 누락 ≠ 해소: 누락된 이슈는 방어적으로 open 유지(**blocking** 이슈 누락 또는 verdict 일관성 붕괴 → 리뷰 재요청; non-blocking 누락 → 프로토콜 위반 기록 후 계속).
+- **일관성 불변식**: `APPROVE ↔ open blocking = 0`; `REJECT ↔ open blocking ≥ 1`. 위반 시 그 응답은 무효.
+- **Resolved는 검증됨을 의미한다** — 현재 범위와 결정 하에서. 주장됨도, 누락됨도 아니다. 이후 델타가 그 위험을 재도입하면 **같은 ID**를 다시 연다.
+- **ID는 그것이 열린 ledger에 스코프된다.** Final 게이트의 ID는 태스크 유닛의 ID가 될 수 없고 그 반대도 마찬가지다; "유닛 X로 이월"된 발견은 X 자신의 ledger에서 새로 열지, 거기 존재한다고 가정하지 않는다.
+
+## 상태 전이 (limit 기본 3)
+
 ```
 REVIEWING ─APPROVE→ APPROVED
-REVIEWING ─REJECT (첫 리뷰)→ REVISING
-REVISING  ─fix-delta 제출→ REVIEWING
-REVIEWING ─REJECT + progress→ REVISING (stagnation = 0)
-REVIEWING ─REJECT + no progress + (stagnation+1 < limit)→ REVISING (stagnation += 1)
-REVIEWING ─REJECT + no progress + (stagnation+1 ≥ limit)→ STALLED (stagnation += 1)
-STALLED   ─유효 재진입→ REVISING (stagnation = 0)
+REVIEWING ─REJECT(first review)→ REVISING
+REVISING  ─submit fix delta→ REVIEWING
+REVIEWING ─REJECT+progress→ REVISING (stagnation=0)
+REVIEWING ─REJECT+no progress+(stagnation+1<limit)→ REVISING (stagnation+=1)
+REVIEWING ─REJECT+no progress+(stagnation+1≥limit)→ STALLED
+STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 ```
-- **round** = 한 번의 수정 + 그 결과 리뷰. **stagnation** = 연속 무진행 라운드 수(reset = progress 또는 유효 재진입).
-- **progress =** 셋 중 하나, **orchestrator가 인정 기준+근거를 receipt에 기록**:
-  - ① **새 증거** — 원인 범위를 줄이거나 다음 결정을 바꾸는(몰랐던 위험을 좁힌 경우 포함).
-  - ② **산출물 개선** — 수용 기준 또는 실패 게이트에 측정 가능한 개선.
-  - ③ **검증 게이트 전진** — ledger 적용 후 **open blocking count가 이전보다 작아짐**(count 기반 — 파서가 계산; 스키마에 severity 없음). **blocker를 닫으며 새 blocker를 만들어 count가 그대로면 gate progress 아님(whack-a-mole).** 단 새 blocker가 regression이 아니라 몰랐던 위험을 좁힌 것이면 ①(새 증거)로 정성 판단해 인정 가능.
-  - **progress 아님**: 단순 코드변경·로그추가·접근변경 자체·같은 결과 재실행·blocker whack-a-mole 맞바꾸기(count 불변).
-- **STALLED**: 증거+blocker+미검증 범위 남기고 정지, 사용자 보고.
-- **유효 재진입**(넷 중 하나): 새 증거·외부 상태 변화·필요한 사용자 결정·범위 변경(사용자 승인된 것만).
 
-## human-gated blocking 이슈: 루프 돌리지 말고 escalate
-어떤 blocking 이슈는 런 내부의 어떤 코드·설계 수정으로도 해소될 수 없다 — 사람이나 외부 환경만이 제공할 수 있는 행동(실제 외부 시스템 대상 검증, 크리덴셜·계정, 수동 QA)을 요구한다. 이런 이슈를 상대로 반복 수정하는 것은 정의상 progress를 만들지 못한다.
-- **판별**: 리뷰 응답을 ledger에 적용한 후, 오케스트레이터는 각 open blocking 이슈의 fix direction을 확인한다. 해소에 런 밖 행동이 필요하면 **human-gated**로 분류하고 그 분류를 receipt에 기록한다.
-- **반복 금지**: human-gated 이슈를 겨냥한 재수정을 producer에게 지시하지 말고, 그 이슈로 stagnation 라운드를 소모하지 않는다. 이슈 ID, 필요한 외부 행동, 미루었을 때의 위험을 명시해 **즉시 사용자에게 escalate한다**. 이 규칙은 통상의 REVISING 루프보다 우선하며 stagnation limit을 기다리지 않는다.
-- **해제는 사용자만 할 수 있다.** 두 가지 중 하나다: ① 사용자가 그 행동을 수행하거나 위험 수용·유예를 명시적으로 결정 → 오케스트레이터는 그 결정을 receipt에 기록하고(`user-decision` 사유), 리뷰어에게 다음 응답에서 해당 ID를 `resolved`로 닫도록 요청하며, 최종 보고에는 **needs-human-action 섹션에 그 ID와 유예된 위험을 반드시 명시**한다; ② 사용자가 수용하지 않음 → 해당 이슈를 명시하고 `HARNIE_STATUS: INCOMPLETE`로 정직하게 종료한다. 오케스트레이터가 자기 권한으로 human-gated blocker를 닫는 것은 절대 금지다 — 미검증 위험의 자기승인이야말로 이 루프가 막으려는 것이다.
-- **스키마 변경 없음**: ledger는 여전히 `open|resolved`만 가진다. 여기서 `resolved`는 "사용자가 그 위험의 소유권을 인수했다"는 뜻이고, 증거는 receipt가 가진다.
+**Progress** (영수증에 증거와 함께 기록): ① 원인을 좁히거나 다음 결정을 바꾸는 새 증거; ② 측정 가능한 산출물 개선; ③ open-blocking 수 감소(파서가 계산). 단순히 코드를 바꾸는 것, 변경 없는 검사의 재실행, 하나의 blocker를 다른 것으로 바꾸는 것은 progress가 아니다.
 
-## 재리뷰 범위 · diff 귀속 · read 규율
-- **재리뷰 대상 = open 이슈 + 새 fix-delta + 새 delta가 건드린 기존 승인 영역.**
-- **fix-delta는 orchestrator가 독립 생성**(producer 자기보고 아님): 수정 직전 기준점→직후 실제 증분. 신규 untracked·삭제·rename·binary 포함.
-- **귀속 불변**: fix-delta 캡처 구간은 scoped path에 대해 **single-writer**여야 한다. 동시 변경이 가능하면 격리한다(파일 소유권 분리 / worktree). **외부·동시 변경을 감지하면 producer 변경으로 귀속하지 않고 중단하여 조정**한다. (plan 병렬 작업 = 비중첩 경로 보장 또는 격리 worktree.)
-- 리뷰어는 stateful(codex-reply/claude resume)로 원본 컨텍스트 유지, 새로 주는 것은 증분 fix-diff + 검증에 필요한 주변 문맥뿐.
-- **"재-read 금지" = 전체 코드베이스 재탐색 금지.** 변경 diff와 필요한 주변 문맥은 반드시 다시 읽는다.
-- ⚠️ 반복 루프에서 stateless `codex review` 재실행 금지(누적 전체 재-read → 비용 폭증). stateless는 최종 사인오프 1회만.
+**STALLED는 래치된다.** 증거·blocker·미검증 범위를 사용자에게 보고한다; 재개는 표면화 이후 단언된 `apply --reentry <new-evidence|external-state|user-decision|scope-change>`로만 가능하다(scope-change는 사용자 승인 필요). 이후 게이트의 progress가 자동으로 래치를 풀지 않는다.
 
-## 예시 — ledger 2 라운드
-초기 리뷰:
-```
-VERDICT: REJECT
-ISSUES:
-- [CR-001] (blocking) (open) [auth.ts:42] 토큰 만료 미검증 → 만료 경로 반환 없음 → 만료 체크 추가
-- [CR-002] (non-blocking) (open) [auth.ts:60] 만료 실패와 refresh 실패가 같은 운영 메트릭으로 집계 → 장애 원인 분리 어려움 → 기존 메트릭 차원 있으면 구분 검토
-```
-ledger: `{CR-001: open/blocking, CR-002: open/non-blocking}`. open blocking=1 → REJECT ✓
+## Contest 게이트 (0.11) — 발견을 구현하지 않고 반박하기
 
-수정 후 재리뷰(CR-001만 고침):
-```
-VERDICT: REJECT
-ISSUES:
-- [CR-001] (blocking) (resolved) [auth.ts:42] 만료 체크 반영됨
-- [CR-003] (blocking) (open) [auth.ts:45] 만료 체크가 refresh 토큰엔 미적용
-```
-orchestrator ledger 적용: CR-001→resolved, **CR-002 응답에 없음 → 누락 = protocol violation으로 기록하되 non-blocking이므로 open 유지·진행 가능**, CR-003 신규 open/blocking. → open blocking `{CR-003}` = 1. **1→1(count 불변)이라 ③ gate progress 아님.** orchestrator 판정: CR-003이 CR-001 수정이 만든 **regression이면 no progress**(stagnation+1); "refresh 경로"가 원래 있던 미지의 위험을 좁힌 **새 증거면 ①로 progress**(stagnation reset) — **어느 쪽인지 근거와 함께 receipt에 기록.**
+생산자 측이 틀렸다고 믿는 open **blocking** 발견에 대해, 오케스트레이터/러너는 정확히 두 가지 근거로 **수정 대신 contest**할 수 있다:
 
-## 불변
-- 리뷰 receipt(세션·verdict·ledger·progress 판정 근거·수정 요약) 기록. **open blocking 0이 아니면 "done"이 아니다.**
-- 리뷰어 = producer의 반대 프로바이더(크로스-모델 맹점).
+- `altitude` — 그 요구가 현재 리뷰 고도(ARCH / CONTRACT / TASK-DETAIL / code) 밖이다.
+- `overengineering` — 메커니즘 추가로만 충족 가능하며, 리뷰어가 그것이 방지하는 구체적 실수 시나리오를 제시하지 않았다.
+
+계약:
+
+1. 다음 리뷰어 호출에 `CONTEST [ID] reason=<altitude|overengineering> : <2–3문장 근거>` 블록을 전달한다 — 해당 ID에 대한 산출물 변경 없음. 한 라운드에 여러 ID를 contest할 수 있다.
+2. **리뷰어의 다음 응답이 판가름한다**: 인정(concede) → 그 ID를 `resolved`로 보고(선택적으로 새 non-blocking ID 개설); 고수(insist) → `open` 유지하고 구체적 실수 시나리오를 명시.
+3. 고수 시: 재논쟁 없음, stagnation 소모 없음 — **즉시 사용자에게 에스컬레이션**한다(ID, 리뷰어의 시나리오, 네 근거, 각 경로의 비용). 사용자가 위험을 수용 → 기존 `user-decision` 해제 경로; 사용자가 리뷰어 편 → 일반 REVISING.
+4. **Contest 불가**: 정확성·안전·미검증-위험 발견. 그런 발견에 CONTEST를 받은 리뷰어는 고수한다.
+5. **종결 권한은 절대 이동하지 않는다**: ID를 닫는 것은 리뷰어의 응답 또는 사용자 결정뿐이다. 각 contest 라운드를 `<dir>/contest-N.txt` 사이드카에 기록한다(CONTEST 원문, verdict, `--progress yes` 근거 `contest-adjudication`, 에스컬레이션 여부) — harness-digest가 이를 감사한다.
+6. 판정(adjudication) 라운드는 blocking 수가 그대로여도 정당하다 — 사이드카 근거와 함께 `--progress yes`를 전달해 stagnation을 소모하지 않게 한다.
+
+## 사람 게이트 blocking 이슈: 루프 돌지 말고 에스컬레이션
+
+이슈 해소에 run 밖 행동(실제 외부 시스템, 자격증명, 수동 QA)이 필요하면, 영수증에서 human-gated로 분류하고 **즉시 에스컬레이션**한다 — 절대 그것을 두고 반복하지 않는다. 해제는 사용자만 한다: 사용자가 조치하거나 명시적으로 위험을 수용하면(`user-decision`; 리뷰어가 다음 라운드에 ID를 닫고 최종 보고서가 needs-human-action 아래에 나열), 아니면 run은 정직하게 `HARNIE_STATUS: INCOMPLETE`로 끝난다.
+
+## 재리뷰 범위와 diff 귀속
+
+- 재리뷰 범위 = open 이슈 + 새 fix delta + delta가 건드린 기승인 영역. 이후 라운드는 1라운드보다 비용이 적어야 한다 — 새로운 전체 스캔은 계약 밖이다.
+- **오케스트레이터가 fix delta를 독립적으로 캡처한다**(전체 워킹 트리, baseline → post). 각 캡처 윈도우의 writer는 하나다: 동시 생산자는 격리된 worktree가 필요하고, 공유 트리는 write-and-capture 윈도우를 직렬화한다. `outOfScope`가 비어 있지 않으면 → 생산자에게 귀속하지 말고, 멈추고 조율한다.
+- 리뷰어를 상태 유지형으로 유지한다(`codex-reply` / 이전 ledger 경로); 루프 안에서 stateless 전체 리뷰를 재실행하지 않는다.
+
+## 불변식
+
+- 모든 수정은 리뷰된다; blocking 이슈가 하나라도 열려 있는 동안 작업은 완료가 아니다.
+- 라운드마다 영수증을 보존한다: verdict, ledger, progress 근거, 수정 요약(그리고 contest 사이드카).
+- 리뷰어는 절대 생산자의 제공자가 아니고, 절대 쓰지 않는다.

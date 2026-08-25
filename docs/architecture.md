@@ -2,6 +2,8 @@
 
 > 한 세션 안에서 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, 각 단계를 **반대 모델이 리뷰**해 맹점을 없앤다. 구독 auth만으로, 두 프로바이더(Claude·Codex)를 한 세션에서 조합한다.
 >
+> **0.11 현행 구조는 [design-0.11-process.md](design-0.11-process.md)(아키텍처)와 [design-0.11-detail.md](design-0.11-detail.md)(상세)가 정본이다** — 단일 파이프라인(S/M/L), 3층 설계 고도(ARCH/CONTRACT/TASK-DETAIL), contest 게이트, dev-solo. 이 문서의 트랙(quick/plan)·단계(A/B) 서술은 0.10까지의 구조 근거·이력으로 남긴다.
+>
 > 이 문서는 **설계 근거·구조**를 담는다. 실행 규칙(상태 전이·검증 tier·리뷰 기준)의 정본은 [`instructions/`](../instructions/)이며(§7), 재서술하지 않는다.
 
 ## 핵심 아이디어

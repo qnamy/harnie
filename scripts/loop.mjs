@@ -60,7 +60,7 @@ function out(obj) {
 const VALID_MACHINE_STATES = new Set(["REVISING", "APPROVED", "STALLED"])
 const REENTRY_REASONS = new Set(["new-evidence", "external-state", "user-decision", "scope-change"])
 const PROGRESS_FLAGS = new Set(["auto", "yes", "no"])
-const CONTROL_BASENAMES = new Set(["manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json", "errata.md", ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json"])
+const CONTROL_BASENAMES = new Set(["manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json", "errata.md", ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json", ".arm-rebind.json", ".pending-rebind.json"])
 
 function parseLimit(v) {
   if (v == null) return 3
@@ -287,12 +287,19 @@ function cmdApply({ flags }) {
   const artifact = flags.artifact || null
   if (namespace === "CR" && artifact == null) die(`CR(코드 리뷰) apply는 --artifact <postSHA> 필수(리뷰된 tree 바인딩)`)
   if (artifact != null) {
-    if (namespace !== "CR") die(`--artifact는 CR(코드 리뷰)에서만 — DR은 금지(설계는 리뷰된 tree 개념 없음)`)
-    if (!/^(?:[0-9a-f]{40}|ws:[0-9a-f]{64})$/.test(artifact))
-      die(`--artifact는 40-hex tree SHA 또는 workspace 합성 ws:<sha256>여야 함 (got ${JSON.stringify(artifact)})`)
-    const acceptable = acceptableArtifacts(root)
-    if (!acceptable.includes(artifact))
-      die(`--artifact(${artifact})가 현재 working tree(${acceptable.join(", ")})와 불일치 — stale/임의 SHA 또는 리뷰 후 변경. 재캡처 후 재리뷰 필요`)
+    if (namespace === "CR") {
+      if (!/^(?:[0-9a-f]{40}|ws:[0-9a-f]{64})$/.test(artifact))
+        die(`--artifact는 40-hex tree SHA 또는 workspace 합성 ws:<sha256>여야 함 (got ${JSON.stringify(artifact)})`)
+      const acceptable = acceptableArtifacts(root)
+      if (!acceptable.includes(artifact))
+        die(`--artifact(${artifact})가 현재 working tree(${acceptable.join(", ")})와 불일치 — stale/임의 SHA 또는 리뷰 후 변경. 재캡처 후 재리뷰 필요`)
+    } else {
+      // DR(설계 리뷰): 승인을 설계 내용+권위 리비전에 바인딩하는 `dr:<sha256>`만 허용(0.11 리비전 바인딩).
+      // 해시 키 산출은 호출측 계약(설계 내용 ‖ planHash ‖ 에디션 토큰 ‖ errata 커서); 여기선 형식만 검증해
+      // reviewedPostSHA에 저장한다 — 재개 시 호출측이 현재 권위로 재계산해 대조한다.
+      if (!/^dr:[0-9a-f]{64}$/.test(artifact))
+        die(`DR --artifact는 dr:<sha256> 형식만(설계 리비전 바인딩) — tree SHA는 CR 전용 (got ${JSON.stringify(artifact)})`)
+    }
   }
   const prevState = readState(statePath)
   const wasStalled = prevState.machineState === "STALLED"
