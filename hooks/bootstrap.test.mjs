@@ -10,7 +10,7 @@ import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 
-import { slugify, hasPendingRoute, getRouteState } from "../scripts/execution.mjs"
+import { slugify, hasPendingRoute, getRouteState, writePendingRoute } from "../scripts/execution.mjs"
 import { worktreeDirFor } from "../scripts/worktree.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -82,11 +82,15 @@ test("UserPromptSubmit /harnie:dev-quick → no-op exit 0(quick 이연)", () => 
   assert.equal(active(root), null)
 })
 
-test("UserPromptSubmit 라우터 /harnie:dev → pending-route 기록·exit 0(P1-2)", () => {
+test("UserPromptSubmit /harnie:dev → 즉시 부트스트랩(0.11 단일 파이프라인 — 라우터·pending-route 폐지), mode=sizing", () => {
   const root = gitRepo()
   assert.equal(run(ups("/harnie:dev add a thing", root)).code, 0)
-  assert.equal(active(root), null) // 아직 active run 없음
-  assert.ok(pending(root))         // pending-route 게이트 활성
+  assert.equal(active(root), null)                 // main root에는 run 상태 없음(T2)
+  assert.equal(pending(root), false)               // pending-route를 만들지 않는다
+  const s = active(wtFor(root, "add a thing"))
+  assert.ok(s)
+  assert.equal(s.track, "plan")
+  assert.equal(s.mode, "sizing")                   // 크기 확정 전 보수 기본값
 })
 
 test("UserPromptSubmit 비-harnie prompt → no-op exit 0", () => {
@@ -179,16 +183,20 @@ test("git repo도 하위 repo도 없는 디렉터리 → exit 2(run 미생성)",
   assert.equal(active(wtFor(empty, "some task")), null)
 })
 
-test("워크스페이스 라우터 /harnie:dev → pending-route 기록(exit 0)", () => {
+test("워크스페이스 /harnie:dev → workspace run 즉시 부트스트랩(0.11)", () => {
   const { w } = workspaceDir()
   assert.equal(run(ups("/harnie:dev cross repo task", w)).code, 0)
-  assert.ok(pending(w))
+  assert.equal(pending(w), false)
+  const s = active(wtFor(w, "cross repo task"))
+  assert.ok(s)
+  assert.equal(s.workspaceRoot, w)
 })
 
-test("비-git·비-워크스페이스 라우터 → exit 2·pending 미생성", () => {
+test("비-git·비-워크스페이스 /harnie:dev → exit 2·run 미생성", () => {
   const empty = mkdtempSync(join(tmpdir(), "harnie-empty-"))
   assert.equal(run(ups("/harnie:dev anything", empty)).code, 2)
   assert.equal(pending(empty), false)
+  assert.equal(active(wtFor(empty, "anything")), null)
 })
 
 test("워크스페이스 같은 작업 재호출 → resume(같은 run root·같은 slug)", () => {
@@ -208,25 +216,28 @@ test("빈 stdin → exit 2(fail-closed, P2-4)", () => {
   assert.equal(runRaw("").code, 2)
 })
 
-test("PreToolUse Skill harnie:dev-quick → pending-route 해소·exit 0", () => {
+// 0.11: 아무것도 pending-route를 만들지 않지만(라우터 폐지) 게이트·해소 경로는 0.10 세션의 잔존 route
+// 파일 방어로 유지된다 — stale route를 직접 만들어 해소 경로를 검증한다.
+test("PreToolUse Skill harnie:dev-quick → 잔존 pending-route 해소·exit 0", () => {
   const root = gitRepo()
-  run(ups("/harnie:dev route me", root))
+  writePendingRoute(root, SID) // 0.10 잔존 상태 재현
   assert.ok(pending(root))
   assert.equal(run(skill("harnie:dev-quick", "route me", root)).code, 0)
   assert.equal(pending(root), false) // quick으로 라우팅 해소
 })
 
-test("dev-full bootstrap이 pending-route 해소", () => {
+test("Skill harnie:dev 부트스트랩이 잔존 pending-route 해소 + run 생성", () => {
   const root = gitRepo()
-  run(ups("/harnie:dev something", root))
+  writePendingRoute(root, SID)
   assert.ok(pending(root))
-  assert.equal(run(skill("harnie:dev-full", "something", root)).code, 0)
+  assert.equal(run(skill("harnie:dev", "something", root)).code, 0)
   assert.equal(pending(root), false)
+  assert.ok(active(wtFor(root, "something")))
 })
 
 test("pending-route는 session-scoped — 다른 세션이 해제 못 함(P1-3)", () => {
   const root = gitRepo()
-  run(ups("/harnie:dev task A", root, "sessA")) // 세션 A pending
+  writePendingRoute(root, "sessA") // 세션 A의 잔존 pending
   assert.ok(pending(root, "sessA"))
   run(skill("harnie:dev-quick", "task B", root, "sessB")) // 세션 B가 dev-quick 해소 시도
   assert.ok(pending(root, "sessA")) // A의 pending은 그대로(B가 못 지움)
@@ -239,14 +250,14 @@ test("UserPromptSubmit /harnie:dev(빈 인자) → exit 2·pending 미생성(P1-
   assert.equal(pending(root), false)
 })
 
-test("라우터 실패 흐름: 이미 다른 run에 바인딩된 세션이 라우팅 시도 → Skill(dev-full) 실패 → pending 삭제", () => {
+test("부트스트랩 실패 시 잔존 pending-route 삭제(fail-closed 정리)", () => {
   const root = gitRepo()
   run(ups("/harnie:dev-full task A", root, "sessB"))     // sessB가 이미 task A run에 바인딩
-  run(ups("/harnie:dev task B", root, "sessB"))          // 같은 세션이 다른 작업으로 라우터 진입 → pending
+  writePendingRoute(root, "sessB")                       // 잔존 route 재현
   assert.equal(getRouteState(root, "sessB"), "pending")
-  const r = run(skill("harnie:dev-full", "task B", root, "sessB")) // 라우팅 시도 → 이미 다른 run에 바인딩돼 block
+  const r = run(skill("harnie:dev", "task B", root, "sessB")) // 같은 세션의 다른 작업 → 한 세션=한 run block
   assert.equal(r.code, 2)
-  assert.equal(getRouteState(root, "sessB"), null)
+  assert.equal(getRouteState(root, "sessB"), null)       // 실패해도 route는 정리(게이트 잔존 방지)
 })
 
 // ── hooks.json 배선 검증 (dispatcher 레벨 — matcher가 bootstrap.mjs로 실제 발화하는가; 라운드 11 P0 교훈) ──

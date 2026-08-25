@@ -16,7 +16,9 @@ import {
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
   detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
   errataAdd, errataArm, errataSetDisposition, listErrata, recordPendingErrata, bindErrata, rebindTask,
+  setMode, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
 } from "./execution.mjs"
+import { captureTree } from "./delta.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CLI = join(HERE, "execution.mjs")
@@ -599,7 +601,7 @@ test("워치독 상태: 빌더 호출 기록·미등록 no-op·사용량 조회"
   assert.equal(taskWatchdogUsage(root, "feat-x", { taskId: "missing" }), null)
 })
 
-test("watchdog-extend: 예산 리셋·연장 이력, 사유 없으면 fail-closed", () => {
+test("watchdog-extend: 카운터 리셋 없이 연장 이력만 누적(0.11 — effective 예산 확대), 사유 없으면 fail-closed", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
@@ -608,8 +610,10 @@ test("watchdog-extend: 예산 리셋·연장 이력, 사유 없으면 fail-close
   recordBuilderCall(root, "feat-x", "builder-1")
   assert.equal(watchdogExtend(root, "feat-x", "T1", "사용자 승인").extensions, 1)
   const usage = taskWatchdogUsage(root, "feat-x", { taskId: "T1" })
-  assert.equal(usage.codexCalls, 0)
+  assert.equal(usage.codexCalls, 1) // 리셋 없음 — 누적 유지(예산 우회 방지)
+  assert.equal(usage.extensions, 1)
   assert.ok(usage.startedAt)
+  assert.ok(usage.builderBoundAt) // 첫 바인딩 시각(워치독 기산점)
   assert.throws(() => watchdogExtend(root, "feat-x", "T1", ""), FailClosed)
 })
 
@@ -698,12 +702,12 @@ test("errata 승인 arm은 arm·pending 계획 승인과 상호 배타", () => {
   run(["init", "--root", root, "--slug", "feat-x"])
   const { id } = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D3", defect: "정정 필요" })
   armApproval(root, "feat-x")
-  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /계획 승인/)
+  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /상호배제/)
   recordPendingApproval(root, "feat-x", "ask-1")
-  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /계획 승인/)
+  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /상호배제/)
 })
 
-test("rebind-task: correction producer 라운드는 watchdog 사용량만 초기화", () => {
+test("rebind-task: correction 라운드도 카운터·기산점을 리셋하지 않는다(0.11 DR-107 — 예산 우회 방지)", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
@@ -713,14 +717,31 @@ test("rebind-task: correction producer 라운드는 watchdog 사용량만 초기
   const ex = JSON.parse(readFileSync(execPath, "utf8"))
   ex.tasks.T1.runStatus = "built"
   ex.tasks.T1.startedAt = "2000-01-01T00:00:00.000Z"
+  ex.tasks.T1.builderBoundAt = "2000-01-01T00:00:00.000Z"
   ex.tasks.T1.codexCalls = 7
   ex.tasks.T1.watchdogExtensions = [{ at: "earlier", reason: "auto-cap" }]
   writeFileSync(execPath, JSON.stringify(ex))
   rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" })
   const rebound = JSON.parse(readFileSync(execPath, "utf8")).tasks.T1
-  assert.notEqual(rebound.startedAt, "2000-01-01T00:00:00.000Z")
-  assert.equal(rebound.codexCalls, 0)
+  assert.equal(rebound.startedAt, "2000-01-01T00:00:00.000Z")
+  assert.equal(rebound.builderBoundAt, "2000-01-01T00:00:00.000Z")
+  assert.equal(rebound.codexCalls, 7)
+  assert.equal(rebound.builderThreadId, null)
   assert.deepEqual(rebound.watchdogExtensions, [{ at: "earlier", reason: "auto-cap" }])
+})
+
+test("rebind-task: finding:<unit>:CR-NNN·verification:integration 사유도 correction과 동일한 마커 경로", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "old-thread")
+  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:CR-042" }), /형식 오류/)      // 유닛 식별자 필수
+  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:DR-001" }), /형식 오류/)
+  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:CR-042" }).pendingRunRootBootstrap, "T1")
+  rebindTask(root, "feat-x", { taskId: "T1", reason: `approved-artifact:${"a".repeat(40)}`, cancel: true })
+  registerBuilderThread(root, "feat-x", "T1", "new-thread")
+  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "verification:integration" }).pendingRunRootBootstrap, "T1")
 })
 
 test("rebind-task: 중복 marker 거부·cancel 감사 기록", () => {
@@ -1170,4 +1191,267 @@ test("completion: workspace run — 멤버 repo 바인딩으로 스냅샷 산출
   assert.equal(c.complete, false)
   assert.ok(c.blockers.some((b) => /task T1: ledger 없음/.test(b)), c.blockers.join("; "))
   assert.ok(c.blockers.some((b) => /task T2: repo 바인딩 실패/.test(b)), c.blockers.join("; "))
+})
+
+// ── 0.11: mode(S/M/L)·통합 검증·rebind-arm·CLI 권위 ──────────────────────
+const IV = [{ executable: "node", args: ["--version"], cwd: ".", timeout: 30000 }]
+const L_MANIFEST = { ...GOOD_MANIFEST, gates: [{ name: "final-review", reviewUnit: "final-review" }], integrationVerification: IV }
+const M_MANIFEST = { tasks: [{ id: "t1", deps: [], reviewUnit: "code", scope: ["src/"], verification: VER() }], gates: [], integrationVerification: IV }
+
+test("validateManifest(mode): L=final-review 1개·M=게이트 없음, integrationVerification 필수, integration 유닛 예약", () => {
+  assert.deepEqual(validateManifest(L_MANIFEST, { mode: "L" }), [])
+  assert.deepEqual(validateManifest(M_MANIFEST, { mode: "M" }), [])
+  assert.ok(validateManifest({ ...L_MANIFEST, gates: GATES }, { mode: "L" }).some((e) => /final-review/.test(e)))
+  assert.ok(validateManifest({ ...M_MANIFEST, gates: [{ name: "final-review", reviewUnit: "final-review" }] }, { mode: "M" }).some((e) => /게이트 없음/.test(e)))
+  const noIv = { ...L_MANIFEST }; delete noIv.integrationVerification
+  assert.ok(validateManifest(noIv, { mode: "L" }).some((e) => /integrationVerification 필수/.test(e)))
+  assert.ok(validateManifest(noIv, { mode: "M" }).some((e) => /integrationVerification 필수/.test(e)))
+  const reserved = { ...L_MANIFEST, tasks: [{ id: "T1", deps: [], reviewUnit: "integration", scope: ["s/"], verification: VER() }] }
+  assert.ok(validateManifest(reserved, { mode: "L" }).some((e) => /예약어/.test(e)))
+  // mode 미지정 = 레거시 4게이트 규칙 그대로
+  assert.deepEqual(validateManifest(GOOD_MANIFEST), [])
+  // canonicalManifest는 integrationVerification 포함(있을 때만 — 레거시 planHash 불변)
+  assert.equal(canonicalManifest(L_MANIFEST).integrationVerification, IV)
+  assert.deepEqual(Object.keys(canonicalManifest(GOOD_MANIFEST)), ["tasks", "gates"])
+})
+
+test("set-mode: 상향 전이만, sentinel/execution 불일치 fail-closed, S는 암묵 t1 등록", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  assert.equal(readMode(root, "plan", "feat-x"), "sizing")
+  assert.equal(setMode(root, "feat-x", "S").mode, "S")
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.equal(ex.tasks.t1.runStatus, "building")
+  assert.throws(() => setMode(root, "feat-x", "S"), /상향 전이만/) // 동급 재설정 금지
+  assert.equal(setMode(root, "feat-x", "L").mode, "L")
+  assert.throws(() => setMode(root, "feat-x", "M"), /상향 전이만/) // 하향 금지
+  const sPath = join(root, ".harnie", "active.json")
+  const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "S"; writeFileSync(sPath, JSON.stringify(s))
+  assert.throws(() => setMode(root, "feat-x", "L"), /불일치/)
+  assert.equal(loadContext(root).failClosed, true) // 훅 문맥도 fail-closed
+})
+
+test("computeCompletion(S): APPROVED + 현재 트리 바인딩만 complete, 트리 변경·미승인은 blocker", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "S")
+  const c0 = computeCompletion(root, "plan", "feat-x")
+  assert.equal(c0.complete, false)
+  assert.ok(c0.blockers.some((b) => /미승인/.test(b)))
+  const unitDir = join(root, ".harnie", "plan", "feat-x", "review", "code")
+  mkdirSync(unitDir, { recursive: true })
+  writeFileSync(join(unitDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  assert.equal(computeCompletion(root, "plan", "feat-x").complete, true)
+  writeFileSync(join(root, "changed.txt"), "post-review change\n") // 리뷰 후 변경
+  const c2 = computeCompletion(root, "plan", "feat-x")
+  assert.equal(c2.complete, false)
+  assert.ok(c2.blockers.some((b) => /리뷰 후 변경/.test(b)))
+})
+
+test("registerBuilderAuto(S): run root cwd만 암묵 t1에 귀속, 타 cwd는 fail-closed", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "S")
+  const elsewhere = gitRepo()
+  assert.equal(registerBuilderAuto(root, "feat-x", "th-1", elsewhere).ok, false)
+  assert.equal(registerBuilderAuto(root, "feat-x", "th-1", root).ok, true)
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.equal(ex.tasks.t1.builderThreadId, "th-1")
+  assert.ok(ex.tasks.t1.builderBoundAt)
+})
+
+test("verify --integration: 유효 키(트리+planHash+계약 해시) receipt, 동일 키 pass는 skip", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  const r1 = run(["verify", "--root", root, "--slug", "feat-x", "--integration"])
+  assert.equal(r1.ok, true)
+  assert.ok(r1.receipt.artifact && r1.receipt.verificationHash)
+  const r2 = run(["verify", "--root", root, "--slug", "feat-x", "--integration"])
+  assert.equal(r2.skipped, "existing-receipt") // 무변화 중복 실행 금지
+  writeFileSync(join(root, "new.txt"), "tree change\n")
+  const r3 = run(["verify", "--root", root, "--slug", "feat-x", "--integration"])
+  assert.equal(r3.skipped, undefined) // 트리 변경 → 재실행
+  // completion: 통합 receipt가 현재 트리와 일치해야 함
+  writeFileSync(join(root, "again.txt"), "another change\n")
+  const c = computeCompletion(root, "plan", "feat-x")
+  assert.ok(c.blockers.some((b) => /통합 검증 후 변경/.test(b)), c.blockers.join("; "))
+})
+
+test("completion: 통합 receipt의 planHash·verificationHash 위조/불일치는 blocker(유효 키 3요소)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  run(["verify", "--root", root, "--slug", "feat-x", "--integration"])
+  const rPath = join(root, ".harnie", "plan", "feat-x", "review", "integration", "receipt.json")
+  const good = JSON.parse(readFileSync(rPath, "utf8"))
+  writeFileSync(rPath, JSON.stringify({ ...good, planHash: "forged" }))
+  assert.ok(computeCompletion(root, "plan", "feat-x").blockers.some((b) => /통합 receipt planHash 불일치/.test(b)))
+  writeFileSync(rPath, JSON.stringify({ ...good, verificationHash: "forged" }))
+  assert.ok(computeCompletion(root, "plan", "feat-x").blockers.some((b) => /integrationVerification 계약과 불일치/.test(b)))
+})
+
+test("M e2e: 승인 → task receipt(verify) → 통합 receipt → completion complete(게이트 없음)", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, "src"), { recursive: true })
+  writeFileSync(join(root, "src", "a.js"), "x\n")
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  const unitDir = join(root, ".harnie", "plan", "feat-x", "review", "code")
+  mkdirSync(unitDir, { recursive: true })
+  writeFileSync(join(unitDir, "ledger.json"), "{}")
+  writeFileSync(join(unitDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  assert.equal(run(["verify", "--root", root, "--slug", "feat-x", "--task", "t1"]).ok, true)
+  assert.equal(run(["verify", "--root", root, "--slug", "feat-x", "--integration"]).ok, true)
+  const c = computeCompletion(root, "plan", "feat-x")
+  assert.equal(c.complete, true, c.blockers.join("; "))
+})
+
+test("validateRepoBinding: 비-workspace run에서 integrationVerification[].repo 지정은 승인 거부(CR-005)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const block = { ...M_MANIFEST, integrationVerification: [{ ...IV[0], repo: "repoA" }] }
+  assert.match(validateRepoBinding(root, block), /workspace run에서만 유효/)
+  assert.equal(validateRepoBinding(root, M_MANIFEST), null)
+})
+
+test("CLI 공통 가드(CR-001): 변이 서브커맨드는 활성 run 불일치·mode mirror 손상에서 fail-closed", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  // 활성 run과 다른 slug — set-task/seal/errata-add 모두 진입부에서 거부
+  for (const args of [
+    ["set-task", "--root", root, "--slug", "other", "--task", "T1", "--run-status", "building"],
+    ["seal", "--root", root, "--slug", "other"],
+    ["errata-add", "--root", root, "--slug", "other", "--severity", "note", "--design-ref", "x", "--defect", "y"],
+  ]) {
+    const e = runFail(args)
+    assert.ok(e && /불일치/.test(String(e.stderr)), args[0])
+  }
+  // mode mirror 손상(sentinel만 변조) — 변이 서브커맨드 전부 fail-closed
+  const sPath = join(root, ".harnie", "active.json")
+  const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "L"; writeFileSync(sPath, JSON.stringify(s))
+  const e2 = runFail(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
+  assert.ok(e2 && /mode 불일치/.test(String(e2.stderr)))
+})
+
+test("L arm 거부: mode L에서 레거시 4게이트·integrationVerification 부재 manifest는 승인 arm 불가(CR-009)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x") // GOOD_MANIFEST: 4게이트, iv 없음 — mode 미지정(레거시)에선 유효
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "L")
+  const r = armApproval(root, "feat-x")
+  assert.equal(r.ok, false)
+  assert.match(r.reason, /final-review/)
+  assert.match(r.reason, /integrationVerification 필수/)
+  const cli = runFail(["arm-approval", "--root", root, "--slug", "feat-x", "--approve-option", "승인"])
+  assert.ok(cli) // 공개 CLI 진입점에서도 거부
+})
+
+test("workspace L e2e: iv repo 누락은 arm 거부, 등록 repo로 승인 → verify --integration이 member workroot에서 실행·ws: receipt(CR-009)", () => {
+  const { repo, runRoot, slug } = workspaceRun("ws-int")
+  const { key } = repoAdd(runRoot, repo)
+  // 통합 명령은 member workroot에만 존재하는 파일(src/a.txt)을 상대경로로 확인 — run root(비-git 상태 디렉터리)에서
+  // 실행되면 반드시 실패하므로, exec root 해석이 실제로 member workroot임을 검증한다(false-positive 방지).
+  const IV_WS = { executable: "node", args: ["-e", "require('fs').accessSync('src/a.txt');console.log('member-workroot-ok')"], cwd: ".", timeout: 30000 }
+  const L_WS = {
+    tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a.txt"], verification: VER(), repo: key }],
+    gates: [{ name: "final-review", reviewUnit: "final-review" }],
+    integrationVerification: [IV_WS], // repo 누락
+  }
+  const dir = join(runRoot, ".harnie", "plan", slug)
+  mkdirSync(dir, { recursive: true })
+  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(L_WS, null, 2) + "\n```\n")
+  setMode(runRoot, slug, "L")
+  const rejected = armApproval(runRoot, slug)
+  assert.equal(rejected.ok, false)
+  assert.match(rejected.reason, /integrationVerification\[0\]: workspace run은 repo 키 필수/)
+  // repo 키를 채워 승인 → 통합 검증이 member workroot에서 돌고 ws: 합성 아티팩트에 바인딩된다
+  const fixed = { ...L_WS, integrationVerification: [{ ...IV_WS, repo: key }] }
+  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(fixed, null, 2) + "\n```\n")
+  armApproval(runRoot, slug, { approveOption: "승인" })
+  recordPendingApproval(runRoot, slug, "tu-ws")
+  assert.equal(bindApproval(runRoot, slug, "tu-ws", { answers: { q: "승인" } }).ok, true)
+  const r = run(["verify", "--root", runRoot, "--slug", slug, "--integration"])
+  assert.equal(r.ok, true)
+  assert.match(r.receipt.artifact, /^ws:[0-9a-f]{64}$/)
+  assert.equal(r.receipt.results[0].exitCode, 0)
+  assert.equal(run(["verify", "--root", runRoot, "--slug", slug, "--integration"]).skipped, "existing-receipt")
+})
+
+test("registerBuilderThread: 레거시(rebind 이력·builderBoundAt 부재) task는 startedAt을 anchor로 보존(CR-006)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  const execPath = join(root, ".harnie", "plan", "feat-x", "execution.json")
+  const ex = JSON.parse(readFileSync(execPath, "utf8"))
+  ex.tasks.T1.startedAt = "2000-01-01T00:00:00.000Z" // 레거시 anchor
+  ex.threadRebindings = [{ action: "rebind", taskId: "T1", oldThreadId: "old", reason: "correction:E-001", at: "t" }]
+  writeFileSync(execPath, JSON.stringify(ex))
+  registerBuilderThread(root, "feat-x", "T1", "new-th")
+  const t = JSON.parse(readFileSync(execPath, "utf8")).tasks.T1
+  assert.equal(t.builderBoundAt, "2000-01-01T00:00:00.000Z") // now로 리셋되지 않음(예산 우회 차단)
+  // 신규 task(rebind 이력 없음)의 첫 바인딩은 현재 시각
+  setTaskRunStatus(root, "feat-x", "T2", "building")
+  registerBuilderThread(root, "feat-x", "T2", "th-2")
+  const t2 = JSON.parse(readFileSync(execPath, "utf8")).tasks.T2
+  assert.notEqual(t2.builderBoundAt, "2000-01-01T00:00:00.000Z")
+})
+
+test("rebind-arm: terminal 증거·old-thread 대조·질문 본문 대조·승인 바인딩·원샷 상호배제", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "dead-th")
+  const EV = "MCP error: Session not found for thread_id dead-th"
+  assert.throws(() => rebindArm(root, "feat-x", { taskId: "T1", oldThread: "dead-th", evidence: "idle timeout 1800s" }), /terminal 마커/)
+  assert.throws(() => rebindArm(root, "feat-x", { taskId: "T1", oldThread: "wrong-th", evidence: EV }), /old-thread 불일치/)
+  assert.equal(rebindArm(root, "feat-x", { taskId: "T1", oldThread: "dead-th", evidence: EV }).ok, true)
+  // 원샷 상호배제: rebind arm pending 중 계획 승인 arm 불가
+  assert.equal(armApproval(root, "feat-x").ok, false)
+  recordPendingRebind(root, "feat-x", "tu-r1")
+  // 질문 본문에 증거 원문·task·old thread가 없으면 비바인딩
+  const bad = bindRebind(root, "feat-x", "tu-r1", { questions: [{ question: "재바인딩할까요?" }] }, { answers: { q: "승인" } })
+  assert.equal(bad.ok, false)
+  // 다시 arm → 본문 제시 + 정확 승인 → 원자 전이(threadId 해제 + 마커, 카운터 불리셋)
+  rebindArm(root, "feat-x", { taskId: "T1", oldThread: "dead-th", evidence: EV })
+  recordPendingRebind(root, "feat-x", "tu-r2")
+  const q = { questions: [{ question: `task T1의 빌더 스레드 dead-th를 해제할까요? 증거: ${EV}` }] }
+  const ok = bindRebind(root, "feat-x", "tu-r2", q, { answers: { q: "승인" } })
+  assert.equal(ok.ok, true)
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.equal(ex.tasks.T1.builderThreadId, null)
+  assert.equal(ex.pendingRunRootBootstrap, "T1")
+  assert.ok(ex.tasks.T1.builderBoundAt) // 기산점 불리셋(DR-107)
+})
+
+test("approve(CLI): authority=cli run 전용 — hook run에서는 fail-closed", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"]) // hook-authority run(기본)
+  setMode(root, "feat-x", "M")
+  assert.throws(() => approveCli(root, "feat-x", "whatever"), /authority=cli run 전용/)
+  // cli-authority run: sentinel에 authority 기록 후 planHash 일치 시 승인 — manifest·phase·sentinel 갱신
+  const sPath = join(root, ".harnie", "active.json")
+  const s = JSON.parse(readFileSync(sPath, "utf8")); s.authority = "cli"; writeFileSync(sPath, JSON.stringify(s))
+  assert.throws(() => approveCli(root, "feat-x", "wrong-hash"), /plan-hash가 현재 plan.md와 불일치/)
+  const planMd = readFileSync(join(root, ".harnie", "plan", "feat-x", "plan.md"), "utf8")
+  const ph = computePlanHash(planMd, canonicalManifest(extractManifestBlock(planMd)))
+  const r = approveCli(root, "feat-x", ph)
+  assert.equal(r.ok, true)
+  assert.equal(r.phase, "executing")
+  const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
+  assert.equal(ex.cliApprovals.length, 1) // 감사 기록
 })

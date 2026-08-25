@@ -3,7 +3,7 @@
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
-import { loadContext, recordPendingApproval, recordPendingErrata, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
+import { loadContext, recordPendingApproval, recordPendingErrata, recordPendingRebind, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, taskIdFromActiveTaskWorktree } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
@@ -46,7 +46,10 @@ try {
     }
     allow()
   } else {
-    const phase = ctx.failClosed ? "planning" : ctx.phase
+    // S mode(0.11): 승인 게이트가 없으므로 planning-phase 제약(소스 쓰기·서브에이전트·codex read-only)을 걷는다 —
+    // 유효 phase를 executing으로 매핑해 post-approval 규칙(빌더 게이팅·threadId 귀속)만 적용한다. control 보호는 불변.
+    const rawPhase = ctx.failClosed ? "planning" : ctx.phase
+    const phase = !ctx.failClosed && ctx.mode === "S" ? "executing" : rawPhase
     const slug = ctx.failClosed ? " " : ctx.slug // 매칭 불가 슬러그 → 모든 소스 쓰기 deny
     const track = ctx.track || "plan"
     if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" || toolName === "NotebookEdit") {
@@ -104,6 +107,7 @@ try {
       } else if (toolName === "AskUserQuestion" && !ctx.failClosed && track === "plan") {
         try { recordPendingApproval(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         try { recordPendingErrata(root, slug, p.tool_use_id) } catch { /* best-effort */ }
+        try { recordPendingRebind(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         allow()
       } else allow()
     }

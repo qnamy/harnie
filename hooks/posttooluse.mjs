@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Observe successful tool results to bind threads and approval without trusting main narration.
 import { readStdin, resolveRoot, classifyCodex, extractThreadId, isOwnerSession, allow, allowPostTool } from "./lib.mjs"
-import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval, bindErrata } from "../scripts/execution.mjs"
-import { decideWatchdog, WATCHDOG_DEFAULTS } from "../scripts/guards.mjs"
+import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval, bindErrata, bindRebind } from "../scripts/execution.mjs"
+import { decideWatchdog } from "../scripts/guards.mjs"
 
 try {
   let watchdogWarning = null
@@ -31,11 +31,13 @@ try {
     } else if (toolName === "AskUserQuestion" && ctx.track === "plan") {
       bindApproval(root, ctx.slug, p.tool_use_id, response)
       bindErrata(root, ctx.slug, p.tool_use_id, response)
+      bindRebind(root, ctx.slug, p.tool_use_id, input, response)
     }
     if (watchdogWarning && watchdogWarning.warn && !watchdogWarning.deny) {
       const elapsed = watchdogWarning.elapsedMs == null ? "시간 정보 없음" : `${Math.floor(watchdogWarning.elapsedMs / 60_000)}분`
-      const used = Math.max(watchdogWarning.calls / WATCHDOG_DEFAULTS.maxCodexCalls, watchdogWarning.elapsedMs == null ? 0 : watchdogWarning.elapsedMs / WATCHDOG_DEFAULTS.wallClockBudgetMs)
-      allowPostTool(`harnie 워치독 경고: task ${watchdogWarning.taskId} 예산 ${Math.ceil(used * 100)}% 소진(경과 ${elapsed}/30분, 빌더 호출 ${watchdogWarning.calls}/15). 마무리를 계획하거나 사용자에게 상황을 보고하라.`)
+      const budgetMin = watchdogWarning.wallClockBudgetMs / 60_000
+      const used = Math.max(watchdogWarning.calls / watchdogWarning.maxCodexCalls, watchdogWarning.elapsedMs == null ? 0 : watchdogWarning.elapsedMs / watchdogWarning.wallClockBudgetMs)
+      allowPostTool(`harnie 워치독 경고: task ${watchdogWarning.taskId} 예산 ${Math.ceil(used * 100)}% 소진(경과 ${elapsed}/${budgetMin}분, 빌더 호출 ${watchdogWarning.calls}/${watchdogWarning.maxCodexCalls}). 마무리를 계획하거나 사용자에게 상황을 보고하라.`)
     }
   }
 } catch { /* 관찰-전용: 오류가 게이트를 열거나 닫지 않는다 */ }
