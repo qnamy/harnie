@@ -9,7 +9,7 @@ This is the **output contract** used when `harnie-designer` produces an **archit
 ## Lightweight Output (Default)
 1. **Executive Summary** — Explain the problem and proposal for non-technical stakeholders, the three to five key design decisions, and the three largest risks. Add optional `DEC-001` identifiers only when traceability is useful.
 2. **Goals, Scope, Non-Goals, and Constraints** — Include success metrics.
-3. **Key Requirements** — Assign `FR-001` and `NFR-001` identifiers only to important FRs and NFRs. Quantify NFRs where possible: SLO, latency, concurrency, data growth and retention, RTO/RPO, and cost limits.
+3. **Key Requirements** — State the FRs and NFRs that drive the architecture. Identifiers (`FR-001`, `NFR-001`) are optional — use them only where traceability genuinely helps (no forced ID scheme or traceability matrix). Quantify NFRs where possible: SLO, latency, concurrency, data growth and retention, RTO/RPO, and cost limits.
 4. **Architecture Alternatives** — Compare at least two alternatives in a table across structure, requirement coverage, complexity, operational burden, fault isolation, performance, cost, and vendor lock-in. State when each alternative fits. **Do not signal the conclusion before the comparison.**
 5. **Recommended Architecture** — Give the rationale and a C4 Container-level Mermaid diagram. Label every arrow with its protocol, data, and purpose. Define each container's single responsibility, data ownership, and synchronous or asynchronous communication.
 6. **Key Scenarios** — Provide one normal flow and one or two representative failure flows, such as an external integration failure, timeout, or partial outage, using Mermaid `sequenceDiagram`.
@@ -21,7 +21,7 @@ For a small task, compress this contract into a few lines; do not force verbose 
 Expand the lightweight output into the following complete structure while retaining proportional depth and duplication control.
 1. Executive Summary
 2. Goals and Scope — goals, success metrics, scope, explicit non-goals, constraints, and terminology
-3. Requirements — FRs (`FR-001`); NFRs (`NFR-001`) quantified across availability/SLO, latency/throughput, concurrent users, data growth/retention, RTO/RPO, security/privacy, cost limits, and scale targets; priorities and conflicts
+3. Requirements — FRs and NFRs quantified across availability/SLO, latency/throughput, concurrent users, data growth/retention, RTO/RPO, security/privacy, cost limits, and scale targets; priorities and conflicts. Identifiers are optional (use only where traceability genuinely helps — no forced ID scheme)
 4. System Context — users, external systems, responsibilities, trust boundaries, and a C4 System Context Mermaid diagram
 5. Architecture Alternatives — table comparison across structure, requirement coverage, complexity, operational burden, fault isolation, performance/scalability, security, cost, vendor lock-in, strengths, weaknesses, and fit conditions
 6. Recommended Architecture — rationale; C4 Container Mermaid diagram; single responsibility per container; synchronous/asynchronous communication; data stores and ownership; external integrations; technology and version principles; prohibited cyclic dependencies
@@ -31,7 +31,7 @@ Expand the lightweight output into the following complete structure while retain
 10. Reliability and Operations — SLI/SLO candidates, failure modes, timeout/retry/backoff/circuit-breaker policy, capacity assumptions and peak handling, logs/metrics/traces, alert thresholds, deployment/rollback/DR, and operator intervention points
 11. Security and Threats — critical assets, authentication and authorization, trust boundaries, least privilege, encryption and key management, audit logs, major threats and mitigations, and abuse cases
 12. Deployment and Migration — deployment topology, progressive rollout, backward compatibility, data migration, rollback conditions, and coexistence with the current system
-13. Verification Plan — FR/NFR-to-test, load-test, fault-injection, security-review, and operational-rehearsal mapping
+13. Verification Plan — how requirements will be verified (tests, load tests, fault injection, security review, operational rehearsal); a requirement-to-test mapping table is optional, not required (coverage is judged by the reviewer's lens)
 14. Risks and Unresolved Decisions — likelihood, impact, mitigation, owner, decision deadline, and `[UNRESOLVED]` items
 15. ADRs — for each important decision: title, status, context, alternatives considered, decision, tradeoffs, and reconsideration conditions
 16. Detailed-Design Handoff — APIs, data, state, errors, concurrency, and tests that each component's detailed design must define
