@@ -17,7 +17,7 @@ Delegate via Codex MCP `codex` (`sandbox:"workspace-write"`, `approval-policy:"n
 ```
 node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <paths> --out <dir>/delta.patch
 ```
-Baseline is captured immediately before each producer window (`loop.mjs capture <repo> [--record <dir>]`). Non-empty `outOfScope` → stop per the attribution invariant. The `<out>.json` sidecar records actual changed paths per round. Design loops have no delta: `.harnie` docs are excluded — pass the artifact **path** instead (below).
+Baseline is captured immediately before each producer window (`loop.mjs capture <repo> --record <dir>` — `--record` is mandatory: the `baseline-N.json` receipt is the round's anchor evidence). Non-empty `outOfScope` → stop per the attribution invariant. The `<out>.json` sidecar records actual changed paths per round. Design loops have no delta: `.harnie` docs are excluded — pass the artifact **path** instead (below).
 
 ## R2. Invoke the reviewer
 

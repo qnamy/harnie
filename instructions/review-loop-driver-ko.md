@@ -17,7 +17,7 @@ Codex MCP `codex`로 위임한다(`sandbox:"workspace-write"`, `approval-policy:
 ```
 node <ROOT>/scripts/loop.mjs delta <repo> <baselineSHA> --scope <paths> --out <dir>/delta.patch
 ```
-baseline은 각 생산자 윈도우 직전에 캡처한다(`loop.mjs capture <repo> [--record <dir>]`). `outOfScope`가 비어 있지 않으면 → 귀속 불변식에 따라 멈춘다. `<out>.json` 사이드카가 라운드별 실제 변경 경로를 기록한다. 설계 루프에는 delta가 없다: `.harnie` 문서는 제외 — 대신 산출물 **경로**를 전달한다(아래).
+baseline은 각 생산자 윈도우 직전에 캡처한다(`loop.mjs capture <repo> --record <dir>` — `--record`는 필수: `baseline-N.json` 영수증이 라운드의 앵커 증거다). `outOfScope`가 비어 있지 않으면 → 귀속 불변식에 따라 멈춘다. `<out>.json` 사이드카가 라운드별 실제 변경 경로를 기록한다. 설계 루프에는 delta가 없다: `.harnie` 문서는 제외 — 대신 산출물 **경로**를 전달한다(아래).
 
 ## R2. 리뷰어 호출
 
