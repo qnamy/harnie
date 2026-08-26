@@ -1,6 +1,6 @@
 # harnie 아키텍처 — 크로스-모델 빌드/리뷰 루프
 
-> 한 세션 안에서 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, 각 단계를 **반대 모델이 리뷰**해 맹점을 없앤다. 구독 auth만으로, 두 프로바이더(Claude·Codex)를 한 세션에서 조합한다.
+> 한 세션 안에서 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, 각 단계를 **반대 모델이 리뷰**해 맹점을 없앤다(`harnie:dev` 기준 — dev-solo는 fresh Codex 셀프리뷰로 대체하는 예외다). 구독 auth만으로, 두 프로바이더(Claude·Codex)를 한 세션에서 조합한다.
 >
 > **0.11 현행 구조는 [design-0.11-process.md](design-0.11-process.md)(아키텍처)와 [design-0.11-detail.md](design-0.11-detail.md)(상세)가 정본이다** — 단일 파이프라인(S/M/L), 3층 설계 고도(ARCH/CONTRACT/TASK-DETAIL), contest 게이트, dev-solo. 이 문서의 트랙(quick/plan)·단계(A/B) 서술은 0.10까지의 구조 근거·이력으로 남긴다.
 >
@@ -8,7 +8,7 @@
 
 ## 핵심 아이디어
 
-- **대칭 크로스-모델**: 산출물의 producer와 그 리뷰어를 **항상 다른 프로바이더**로 둔다. 같은 모델이 자기 산출물을 리뷰하면 같은 맹점을 공유하기 때문이다.
+- **대칭 크로스-모델**(`harnie:dev` 기준): 산출물의 producer와 그 리뷰어를 **항상 다른 프로바이더**로 둔다. 같은 모델이 자기 산출물을 리뷰하면 같은 맹점을 공유하기 때문이다. **예외 = dev-solo**: Claude 구독 없이 Codex만으로 완주해야 하므로 리뷰어도 Codex다(fresh 서브프로세스 셀프리뷰 — 컨텍스트를 공유하지 않아 완전한 맹점 공유는 아니지만, 크로스-프로바이더도 아니다).
   - **설계** = Claude 산출 → **Codex** 리뷰
   - **개발** = Codex 산출 → **Claude** 리뷰
 - **공유 컨텍스트 위 리뷰**: 리뷰어는 diff만 맨눈으로 보지 않고 계획·의도·제약을 주입받은 상태에서 판단한다.
@@ -19,7 +19,7 @@
 
 ## 1. 역할 로스터
 
-각 단계를 **반대 프로바이더가 리뷰**한다(불변식). 에이전트 지침은 `agents/`에 자기완결 번들로 둔다.
+각 단계를 **반대 프로바이더가 리뷰**한다(`harnie:dev` 기준 불변식 — dev-solo 예외는 위 "핵심 아이디어" 참고). 에이전트 지침은 `agents/`에 자기완결 번들로 둔다.
 
 | 역할 | 프로바이더 | 실행 | 쓰기 | 지침 |
 |---|---|---|---|---|
@@ -30,7 +30,7 @@
 | `harnie-reviewer` (코드 리뷰어) | **Claude** | read-only 서브에이전트 | ✕ | `code-review.md` + `verification-tiers.md`, REJECT 편향 |
 | `harnie-task-runner` (태스크 러너, v0.10.0) | **Claude** (유닛 리뷰 티어) | 서브에이전트(태스크당 1개, 병렬) | 리뷰 라운드 파일만(소스 ✕ — 소스는 Codex 빌더) | 자기완결 브리프 + 인라인 유닛 리뷰(빌더=Codex이므로 크로스모델 유지) |
 
-- **불변식**: 리뷰어 = producer의 반대 프로바이더. read-only는 `tools` allowlist로 기계 강제.
+- **불변식**(`harnie:dev` 기준, dev-solo 예외): 리뷰어 = producer의 반대 프로바이더. read-only는 `tools` allowlist로 기계 강제.
 - **루프 코어는 프로바이더 무관**: `scripts/loop.mjs`·`ledger.mjs`·`delta.mjs`는 상태머신·ledger 정합·델타 캡처만 결정적으로 처리하므로, producer/reviewer 프로바이더를 바꿔도 코드 변경이 없다.
 - `harnie-builder`(Claude)는 역스왑(Claude 개발) 구성용 alternate로 유지되며 기본 흐름에선 호출되지 않는다.
 - 참조 규약: 에이전트는 **bare 이름**(사용자 override 허용), 트랙 스킬은 **네임스페이스**(`/harnie:…`, 충돌 안전).
@@ -46,7 +46,7 @@
 2. 리뷰어 → VERDICT(APPROVE|REJECT) + 안정 ID 이슈 목록 (REJECT 편향)
 3. REJECT면: producer가 수정 → **델타만 재리뷰**(stateful: codex-reply / 재개, 전체 재-read 금지)
 4. open blocking 0(APPROVE)까지 반복 — 유한 stagnation 캡, 사용자 중단 가능
-5. (옵션) 최종 사인오프 = producer의 **반대 프로바이더로** fresh 리뷰
+5. (옵션) 최종 사인오프 = producer의 **반대 프로바이더로** fresh 리뷰(`harnie:dev`; dev-solo는 라운드마다의 셀프리뷰 자체가 사인오프 — 별도 단계 없음, `review-loop-driver.md` R5 참고)
 ```
 
 - **효율 3원칙**: 실패 차원만 재실행 / stateful이라 재-read 금지 / fresh 리뷰는 최종 1회만.
@@ -70,6 +70,8 @@
 ---
 
 ## 4. `quick` 트랙 (장애·작은 수정)
+
+> **0.10 이력** — 0.11에서 단일 파이프라인으로 통합됐고, `dev-quick` 스킬은 0.12.0에서 완전히 삭제됐다. 아래는 당시 구조의 역사적 기록이며, `/harnie:dev-full` 등 문중의 명령은 더 이상 존재하지 않는다. 현재 유일한 진입점은 `/harnie:dev`다.
 
 인라인 경량 + 엄격 실행 + 크로스-모델 리뷰. 인터뷰·승인 게이트·플랜 파일·오케스트레이션은 없지만 **리뷰는 축약하지 않는다**.
 
@@ -132,6 +134,8 @@ plan 트랙은 **비-git 워크스페이스 디렉터리**(repo 여러 개를 �
 ---
 
 ## 6. `/harnie:dev` 라우터 + 트랙 스킬
+
+> **0.10 이력** — 이 절 전체(라우터 + `dev-full`/`dev-quick` 트랙 스킬 2개 구조)는 0.11에서 폐기됐다: `/harnie:dev` 자신이 곧 파이프라인 진입점이 됐고(라우터 불필요), `dev-full`/`dev-quick`은 0.12.0에서 스킬 자체가 삭제됐다. 아래 코드블록의 명령들은 더 이상 유효하지 않다 — 현재 계약은 `skills/dev/SKILL.md`·`commands/dev.md`를 참고.
 
 진입점 = **커맨드 `/harnie:dev`(라우터) 1개 + 트랙 스킬 `dev-full`·`dev-quick`(직접 진입) 2개.** 겹치던 command↔skill 이름·역할을 분리하고, 트랙을 스킬 직접 진입으로 두어 본문이 결정적으로 로드된다(부트스트랩 갭 방지 — [bootstrap-adherence.md](bootstrap-adherence.md)).
 

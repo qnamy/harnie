@@ -95,8 +95,8 @@ export function validateManifest(obj, { mode = null } = {}) {
   if (!Array.isArray(obj.tasks) || obj.tasks.length === 0) errors.push("tasks는 비어있지 않은 배열")
   if (!Array.isArray(obj.gates)) errors.push("gates는 배열")
   // difficulty(선택): run 난이도 — 실행 워치독 예산 티어의 소스. A5에서 manifest와 함께 승인된다.
-  if (obj.difficulty != null && !["easy", "medium", "hard"].includes(obj.difficulty))
-    errors.push(`difficulty는 "easy"|"medium"|"hard" (선택; got ${JSON.stringify(obj.difficulty)})`)
+  if (obj.difficulty != null && !["easy", "medium", "hard", "very-hard"].includes(obj.difficulty))
+    errors.push(`difficulty는 "easy"|"medium"|"hard"|"very-hard" (선택; got ${JSON.stringify(obj.difficulty)})`)
   const taskIds = new Set()
   const reviewUnits = new Set()
   const claimUnit = (u, where) => {
@@ -229,6 +229,35 @@ export function setMode(root, slug, mode) {
     writeJSONAtomic(execPath, ex)
     writeJSONAtomic(sentinelPath(root), s)
     return { ok: true, mode, slug: s.slug }
+  })
+}
+
+// ── 0.12 set-difficulty — 재판정 값 갱신(매니페스트 불변, planHash 안전) ──
+// difficulty는 A5 승인 시 manifest.json에 함께 봉인되고 canonicalManifest()가 planHash 계산에 포함하므로,
+// 승인 후 manifest.json의 difficulty를 직접 고치면 이미 승인된 TASK-DETAIL dr: 해시가 부당하게 무효화된다.
+// 재판정(model-matrix.md §2의 두 체크포인트)은 그래서 execution.json의 별도 필드에만 기록한다. 상향/하향
+// 판단은 오케스트레이터(MUST 규칙, skills/dev/SKILL.md)의 책임이며, 이 CLI는 enum 검증과 활성 run 식별
+// 일치만 본다(승인 성격이 아니라 "다음 스테이지가 참조할 값 갱신"이므로 훅 강제를 새로 얹지 않는다).
+const DIFFICULTY_VALUES = ["easy", "medium", "hard", "very-hard"]
+export function setDifficulty(root, slug, difficulty) {
+  if (!DIFFICULTY_VALUES.includes(difficulty))
+    throw new FailClosed(`set-difficulty: --difficulty는 easy|medium|hard|very-hard (${difficulty})`)
+  return withStateLock(root, () => {
+    const readStrictOrFail = (path, label) => {
+      try { return readJSONStrict(path) }
+      catch (e) {
+        if (e.code === "ENOENT") throw new FailClosed(`set-difficulty: ${label} 없음(활성 run 아님) — fail-closed`)
+        throw new FailClosed(`set-difficulty: ${label} 손상 — ${e.message}`)
+      }
+    }
+    const s = readStrictOrFail(sentinelPath(root), "sentinel")
+    if (s.track !== "plan") throw new FailClosed("set-difficulty: plan track 전용")
+    if (s.slug !== slug) throw new FailClosed(`set-difficulty: --slug(${slug})가 활성 run(${s.slug})과 불일치 — fail-closed`)
+    const execPath = join(planDir(root, "plan", s.slug), "execution.json")
+    const ex = readStrictOrFail(execPath, "execution.json")
+    ex.difficulty = difficulty
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, difficulty, slug: s.slug }
   })
 }
 
@@ -985,8 +1014,17 @@ export function recordBuilderCall(root, slug, threadId) {
     task.codexCalls = Number.isInteger(task.codexCalls) && task.codexCalls >= 0 ? task.codexCalls + 1 : 1
     if (!task.startedAt) task.startedAt = new Date().toISOString()
     writeJSONAtomic(execPath, ex)
-    return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt, builderBoundAt: task.builderBoundAt || null, extensions: Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions.length : 0 }
+    const difficulty = resolveTaskDifficulty(root, slug)
+    return { ok: true, taskId, codexCalls: task.codexCalls, startedAt: task.startedAt, builderBoundAt: task.builderBoundAt || null, extensions: Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions.length : 0, ...(difficulty ? { difficulty } : {}) }
   })
+}
+
+// execution.json.difficulty(재판정) 우선, 없으면 A5 승인 시 manifest.json에 봉인된 값으로 폴백.
+function resolveTaskDifficulty(root, slug) {
+  const ex = readJSONOrNull(join(planDir(root, "plan", slug), "execution.json"))
+  if (ex && typeof ex.difficulty === "string") return ex.difficulty
+  const manifest = readJSONOrNull(join(planDir(root, "plan", slug), "manifest.json"))
+  return manifest && typeof manifest.difficulty === "string" ? manifest.difficulty : undefined
 }
 
 export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null } = {}) {
@@ -998,9 +1036,7 @@ export function taskWatchdogUsage(root, slug, { threadId = null, taskId = null }
       : taskId != null && ex.tasks[taskId] ? [taskId, ex.tasks[taskId]] : null
     if (!found) return null
     const [id, task] = found
-    // manifest의 difficulty(A5에서 함께 승인)로 워치독 예산 티어를 결정한다 — 없으면 기본 티어.
-    const manifest = readJSONOrNull(join(planDir(root, "plan", slug), "manifest.json"))
-    const difficulty = manifest && typeof manifest.difficulty === "string" ? manifest.difficulty : undefined
+    const difficulty = resolveTaskDifficulty(root, slug)
     return { taskId: id, codexCalls: task.codexCalls, startedAt: task.startedAt, builderBoundAt: task.builderBoundAt || null, extensions: Array.isArray(task.watchdogExtensions) ? task.watchdogExtensions.length : 0, ...(difficulty ? { difficulty } : {}) }
   } catch { return null } // advisory 읽기 실패는 훅 차단 근거가 아니다.
 }
@@ -1573,6 +1609,10 @@ function cmdSetMode({ flags }) {
   out(setMode(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.mode || die("--mode S|M|L 필요"))) // slug·mirror 검증은 setMode 내부
 }
 
+function cmdSetDifficulty({ flags }) {
+  out(setDifficulty(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), flags.difficulty || die("--difficulty easy|medium|hard|very-hard 필요")))
+}
+
 function cmdApprove({ flags }) {
   guardActive(flags, "plan")
   out(approveCli(flags.root, flags.slug, flags["plan-hash"] || die("--plan-hash 필요")))
@@ -1631,6 +1671,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "rebind-task": cmdRebindTask(args); break
       case "rebind-arm": cmdRebindArm(args); break
       case "set-mode": cmdSetMode(args); break
+      case "set-difficulty": cmdSetDifficulty(args); break
       case "approve": cmdApprove(args); break
       case "set-phase": cmdSetPhase(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)

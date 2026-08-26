@@ -5,7 +5,7 @@
 ## 역할
 
 - **생산자(Producer)** = 산출물의 저자: 설계 루프에서는 designer(Claude), 코드 루프에서는 builder(Codex).
-- **리뷰어(Reviewer)** = 생산자의 **반대 제공자**, 항상 read-only. 설계 = Codex가 리뷰; 코드 = Claude가 리뷰.
+- **리뷰어(Reviewer)** = `harnie:dev`에서 생산자의 **반대 제공자**, 항상 read-only. 설계 = Codex가 리뷰; 코드 = Claude가 리뷰. **예외는 dev-solo다**: 생산자와 리뷰어가 둘 다 Codex다 — fresh하고 컨텍스트가 격리된 `codex exec --sandbox read-only` 셀프리뷰 서브프로세스가 크로스-프로바이더 리뷰어를 대신한다(`skills/dev-solo/SKILL.md` 참고).
 
 ## Ledger (승인 증거)
 
@@ -62,4 +62,4 @@ STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 
 - 모든 수정은 리뷰된다; blocking 이슈가 하나라도 열려 있는 동안 작업은 완료가 아니다.
 - 라운드마다 영수증을 보존한다: verdict, ledger, progress 근거, 수정 요약(그리고 contest 사이드카).
-- 리뷰어는 절대 생산자의 제공자가 아니고, 절대 쓰지 않는다.
+- `harnie:dev`에서 리뷰어는 절대 생산자의 제공자가 아니고, 절대 쓰지 않는다. 예외는 dev-solo다(위 "역할" 참고): 리뷰어가 서브에이전트가 아니라 fresh하고 컨텍스트가 격리된 서브프로세스라는 점만 다를 뿐, 쓰지 않는다는 제약은 어느 쪽이든 동일하다.

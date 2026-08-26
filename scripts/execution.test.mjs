@@ -16,7 +16,7 @@ import {
   bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
   detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
   errataAdd, errataArm, errataSetDisposition, listErrata, recordPendingErrata, bindErrata, rebindTask,
-  setMode, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
+  setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
 } from "./execution.mjs"
 import { captureTree } from "./delta.mjs"
 
@@ -102,10 +102,11 @@ test("validateManifest: evidencePolicy는 선택이지만 값이 규약 밖이�
   assert.ok(validateManifest(withVer({ ...base, evidencePolicy: "whatever" })).some((e) => /evidencePolicy/.test(e)))
 })
 
-test("validateManifest: difficulty는 선택 — easy|medium|hard 외 값은 거부", () => {
+test("validateManifest: difficulty는 선택 — easy|medium|hard|very-hard 외 값은 거부", () => {
   const withDiff = (difficulty) => ({ ...GOOD_MANIFEST, ...(difficulty === undefined ? {} : { difficulty }) })
   assert.deepEqual(validateManifest(withDiff(undefined)), [])
   assert.deepEqual(validateManifest(withDiff("hard")), [])
+  assert.deepEqual(validateManifest(withDiff("very-hard")), [])
   assert.ok(validateManifest(withDiff("extreme")).some((e) => /difficulty/.test(e)))
   // canonicalManifest: difficulty 있을 때만 포함(기존 manifest planHash 불변)
   assert.deepEqual(Object.keys(canonicalManifest(GOOD_MANIFEST)), ["tasks", "gates"])
@@ -1230,6 +1231,72 @@ test("set-mode: 상향 전이만, sentinel/execution 불일치 fail-closed, S는
   const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "S"; writeFileSync(sPath, JSON.stringify(s))
   assert.throws(() => setMode(root, "feat-x", "L"), /불일치/)
   assert.equal(loadContext(root).failClosed, true) // 훅 문맥도 fail-closed
+})
+
+test("set-difficulty: CLI 경유 — 승인된 manifest.json 바이트·planHash 불변, execution.json.difficulty만 갱신", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  const approved = approveFlow(root, "feat-x")
+  const dir = join(root, ".harnie", "plan", "feat-x")
+  const manifestBytesBefore = readFileSync(join(dir, "manifest.json"))
+  const r = run(["set-difficulty", "--root", root, "--slug", "feat-x", "--difficulty", "very-hard"])
+  assert.equal(r.ok, true)
+  assert.equal(r.difficulty, "very-hard")
+  const manifestBytesAfter = readFileSync(join(dir, "manifest.json"))
+  assert.ok(manifestBytesBefore.equals(manifestBytesAfter))
+  const manifestAfter = JSON.parse(manifestBytesAfter.toString("utf8"))
+  assert.equal(manifestAfter.planHash, approved.planHash)
+  const ex = JSON.parse(readFileSync(join(dir, "execution.json"), "utf8"))
+  assert.equal(ex.difficulty, "very-hard")
+})
+
+test("setDifficulty: enum 밖 값·비활성 slug는 fail-closed, 유효 값은 반복 호출 가능(멱등)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  assert.throws(() => setDifficulty(root, "feat-x", "extreme"), FailClosed)
+  assert.throws(() => setDifficulty(root, "other-slug", "hard"), FailClosed)
+  assert.equal(setDifficulty(root, "feat-x", "very-hard").difficulty, "very-hard")
+  assert.equal(setDifficulty(root, "feat-x", "very-hard").difficulty, "very-hard")
+})
+
+test("set-difficulty CLI: 비활성 run(sentinel 없음)에 호출하면 exit 2 + FailClosed 메시지(raw ENOENT/스택 트레이스 아님)", () => {
+  const root = gitRepo()
+  const e = runFail(["set-difficulty", "--root", root, "--slug", "no-such-run", "--difficulty", "hard"])
+  assert.equal(e.status, 2)
+  assert.match(e.stderr.toString(), /^harnie-exec: set-difficulty: sentinel 없음\(활성 run 아님\)/m)
+  assert.doesNotMatch(e.stderr.toString(), /at readJSONStrict|ENOENT/)
+})
+
+test("taskWatchdogUsage: execution.json.difficulty 우선, 없으면 manifest.json.difficulty로 폴백", () => {
+  const root = gitRepo()
+  const manifestWithDifficulty = { ...M_MANIFEST, difficulty: "hard" }
+  writePlan(root, "feat-x", manifestWithDifficulty)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  setTaskRunStatus(root, "feat-x", "t1", "building")
+  registerBuilderThread(root, "feat-x", "t1", "builder-1")
+  assert.equal(taskWatchdogUsage(root, "feat-x", { taskId: "t1" }).difficulty, "hard")
+  run(["set-difficulty", "--root", root, "--slug", "feat-x", "--difficulty", "very-hard"])
+  assert.equal(taskWatchdogUsage(root, "feat-x", { taskId: "t1" }).difficulty, "very-hard")
+})
+
+test("recordBuilderCall: 반환값에 difficulty 포함(execution.json 우선, manifest.json 폴백) — posttooluse의 decideWatchdog(recorded) 소비 경로용", () => {
+  const root = gitRepo()
+  const manifestWithDifficulty = { ...M_MANIFEST, difficulty: "hard" }
+  writePlan(root, "feat-x", manifestWithDifficulty)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  setTaskRunStatus(root, "feat-x", "t1", "building")
+  registerBuilderThread(root, "feat-x", "t1", "builder-1")
+  assert.equal(recordBuilderCall(root, "feat-x", "builder-1").difficulty, "hard")
+  run(["set-difficulty", "--root", root, "--slug", "feat-x", "--difficulty", "very-hard"])
+  assert.equal(recordBuilderCall(root, "feat-x", "builder-1").difficulty, "very-hard")
+  assert.equal(recordBuilderCall(root, "feat-x", "builder-1").codexCalls, 3)
 })
 
 test("computeCompletion(S): APPROVED + 현재 트리 바인딩만 complete, 트리 변경·미승인은 blocker", () => {

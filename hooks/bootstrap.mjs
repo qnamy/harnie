@@ -1,10 +1,19 @@
 #!/usr/bin/env node
 // 진입점 bootstrap 훅 — 스킬 A0의 자체 init을 대체해 sentinel을 결정적으로 생성한다(부트스트랩 갭 제거).
 // 설계: docs/bootstrap-adherence.md.
-//   UserPromptSubmit(직접 slash): `/harnie:dev-full` → worktree 생성 + bootstrap(T2 DEC-001). `/harnie:dev`(라우터)
-//     → pending-route 기록(P1-2). `/harnie:dev-quick`·비-harnie → no-op.
-//   PreToolUse(Skill): tool_input.skill === "harnie:dev-full" → worktree 생성 + bootstrap. "harnie:dev-quick" →
-//     라우팅 해소. 기타 → no-op.
+//   UserPromptSubmit(직접 slash): `/harnie:dev` → 즉시 worktree 생성 + bootstrap(T2 DEC-001; 0.11: 라우터 폐지 —
+//     pending-route 없이 곧장 부트스트랩한다, mode는 sizing으로 시작). `/harnie:dev-full`·`/harnie:dev-quick`도
+//     사용자가 직접 타이핑하면 이 매치들은 여전히 살아있다(스킬 존재를 확인하지 않는 prompt 정규식 매치 —
+//     0.12.0 스킬 삭제로 차단되지 않는다). 둘의 동작은 다르다(DR-012 정정) — `/harnie:dev-full`은 부트스트랩
+//     자체가 실행되지만 0.12.0부터 이어질 dev-full 스킬 본문이 없는 저하된 경로가 된다(하드 에러는 아님).
+//     `/harnie:dev-quick`은 애초에 부트스트랩을 하지 않는다 — `clearPendingRoute`만 호출하는 무해한 stale
+//     pending-route 정리 경로다(부트스트랩 여부와 무관하게 원래도 그랬다). 둘 다 deprecated compatibility
+//     route — 실제 로직 정리는 0.12.1로 분리. `writePendingRoute`의 프로덕션 호출은 0건(확인됨).
+//     비-harnie → no-op.
+//   PreToolUse(Skill): tool_input.skill === "harnie:dev" → 즉시 worktree 생성 + bootstrap. "harnie:dev-full"·
+//     "harnie:dev-quick"은 0.12.0에서 스킬 자체가 삭제돼 정상 스킬 디스패치로는 더 이상 자연 발생하지 않지만,
+//     이 payload가 직접 전달되면(예: 테스트 픽스처) 훅은 스킬 존재를 검사하지 않으므로 여전히 동일하게
+//     처리한다 — retained compatibility branch, 코드 수준에서 도달 불가능해진 것은 아니다. 기타 → no-op.
 // 성공·no-op = exit 0. 실패(빈 인자·malformed payload·손상·미완료 run 충돌·이미 바인딩된 세션·예외) = exit 2 → invocation 차단(fail-closed).
 //
 // worktree-per-run(T2): dev-full은 매 run마다 `<mainRoot>/.harnie-wt/harnie-<slug>` worktree를 만들고 run 상태
@@ -137,13 +146,16 @@ try {
 
   if (event === "UserPromptSubmit") {
     const prompt = typeof p.prompt === "string" ? p.prompt : ""
+    // 0.12.0에서 dev-full 스킬 삭제 후에도 이 매치는 살아있다(스킬 존재를 확인하지 않는 prompt 정규식 —
+    // 직접 타이핑하면 여전히 부트스트랩됨, 다만 이어질 스킬 본문이 없어 저하된 UX). deprecated compatibility
+    // route — 분기 제거·재작업은 0.12.1.
     const mFull = prompt.match(/^\/harnie:dev-full(?:\s+([\s\S]*))?$/) // 정확 prefix(뒤=공백|끝); `dev-full-x` 오매치 방지
     if (mFull) {
       const base = slugify((mFull[1] || "").trim())
       if (!base) fail("작업 인자가 비어 있음 — `/harnie:dev-full <작업 설명>` 형태로 실행하세요")
       doBootstrap(base, (wt, wsMode) => okContext(runMessage(wt, wsMode)))
     }
-    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 0.11: alias — 본문이 harnie:dev 스킬로 체이닝하면 Skill 훅이 부트스트랩
+    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 0.11: alias — 본문이 harnie:dev 스킬로 체이닝하면 Skill 훅이 부트스트랩. 0.12.0에서 스킬 삭제 후에도 이 매치는 살아있다(직접 타이핑 시 여전히 clearPendingRoute만 수행하는 무해한 경로) — deprecated compatibility route, 재작업은 0.12.1
     const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 0.11 단일 파이프라인 진입(정확 prefix; dev-full/dev-quick은 위에서 처리)
     if (mDev) {
       const base = slugify((mDev[1] || "").trim())
@@ -155,12 +167,13 @@ try {
     ok() // 비-harnie·미스매치
   } else if (event === "PreToolUse" && p.tool_name === "Skill") {
     const skill = p.tool_input && p.tool_input.skill
+    // "harnie:dev-full" 분기는 0.12.0에서 스킬 삭제 후 정상 스킬 디스패치로는 자연 발생하지 않는다(호출할 스킬 이름 자체가 없음) — 다만 이 payload가 직접 전달되면(예: hooks/bootstrap.test.mjs 픽스처) 훅은 여전히 동일하게 처리한다(스킬 존재를 검사하지 않음). "harnie:dev"는 라이브 경로다. 분기 제거는 0.12.1.
     if (skill === "harnie:dev-full" || skill === "harnie:dev") {
       const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim())
       if (!base) fail(`작업 인자가 비어 있음 — ${skill} skill args 필요`)
       doBootstrap(base, (wt, wsMode) => okAllow(runMessage(wt, wsMode)))
     }
-    if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // 0.11 alias: 본문이 harnie:dev로 체이닝
+    if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // 0.11 alias: 본문이 harnie:dev로 체이닝. 0.12.0에서 스킬 삭제 후 정상 스킬 디스패치로는 자연 발생하지 않음(호출할 스킬 이름 자체가 없음) — 직접 전달된 payload는 여전히 동일하게 처리(스킬 존재 미검사); 분기 제거는 0.12.1
     ok() // 기타 skill
   } else {
     ok() // 미지원 이벤트

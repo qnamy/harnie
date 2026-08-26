@@ -2,7 +2,7 @@
 
 `loop.md`가 계약(ledger, 전이, progress, contest)을 소유하고, 이 파일은 그것을 결정적으로 실행하는 방법을 소유한다. ledger 병합이나 상태 전이 판정을 절대 수동으로 하지 않는다 — `scripts/loop.mjs`가 거짓 승인을 막는다.
 
-**리뷰어 = 생산자의 반대 제공자.** 설계 루프(`DR`): 생산자 Claude designer → 리뷰어 Codex(`sandbox:"read-only"`). 코드 루프(`CR`): 생산자 Codex builder → 리뷰어 Claude(`harnie-reviewer` 서브에이전트 — 또는 L 러너 경로에서는 해당 태스크의 `harnie-task-runner` 인라인, 소스를 쓰지 않으므로 정당하다).
+**리뷰어 = `harnie:dev`에서 생산자의 반대 제공자.** 설계 루프(`DR`): 생산자 Claude designer → 리뷰어 Codex(`sandbox:"read-only"`). 코드 루프(`CR`): 생산자 Codex builder → 리뷰어 Claude(`harnie-reviewer` 서브에이전트 — 또는 L 러너 경로에서는 해당 태스크의 `harnie-task-runner` 인라인, 소스를 쓰지 않으므로 정당하다). **예외는 dev-solo다**: 생산자와 리뷰어가 둘 다 Codex다 — 리뷰어는 서브에이전트가 아니라 fresh하고 컨텍스트가 격리된 `codex exec --sandbox read-only` 셀프리뷰 서브프로세스다(`skills/dev-solo/SKILL.md` 참고).
 
 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = 리뷰 유닛 디렉터리(`.harnie/plan/<slug>/review/<unit>/`, 또는 태스크 worktree 내부의 `.harnie/review/<design|code>/`). `<repo>` = 이 루프가 다루는 루트 — run workroot, 또는 L 경로에서 태스크의 격리 worktree / 멤버 레포 workroot.
 
@@ -45,6 +45,6 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> --ledger <dir>/ledger.json \
 
 ## R5. 선택적 최종 사인오프
 
-실질적 변경에는: 신선한 크로스-모델 사인오프 1회(코드 → 미커밋 diff에 대한 새 Claude 리뷰; 설계 → 새 Codex 리뷰). 루프 안에서는 절대 stateless 재리뷰를 하지 않는다.
+실질적 변경에는: 신선한 크로스-모델 사인오프 1회(코드 → 미커밋 diff에 대한 새 Claude 리뷰; 설계 → 새 Codex 리뷰). 루프 안에서는 절대 stateless 재리뷰를 하지 않는다. **dev-solo에는 별도 사인오프 단계가 없다**: 라운드마다의 셀프리뷰(fresh `codex exec` 서브프로세스)가 이미 사인오프이므로, 그 위에 얹을 크로스모델 리뷰어가 없다.
 
 > 불변식: 모든 수정은 리뷰된다; 영수증을 보존한다(verdict, ledger, progress 근거, contest 사이드카, 수정 요약). blocking 이슈가 열려 있는 동안 완료가 아니다.

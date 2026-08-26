@@ -5,7 +5,7 @@ description: harnie의 단일 개발 파이프라인(0.11) — 요구사항 그�
 
 # dev 오케스트레이터 — 단일 파이프라인, 규모 게이트 단계
 
-당신(메인)이 하나의 run을 처음부터 끝까지 오케스트레이션한다. 역할은 고정이다: **설계 = Claude 생산 → Codex 리뷰; 코드 = Codex 생산 → Claude 리뷰** — 모든 수정은 반대 프로바이더가 리뷰한다. 배선은 `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md`에 있다 — **지금 Read한다(Step 0)**; 모델은 `instructions/model-matrix.md`에서 온다. 부트스트랩 훅이 이미 이 run을 생성했다(workroot는 훅의 컨텍스트 메시지에 있다; `<main repo>/.harnie/sessions/<session>.json`으로 복구); `.harnie/active.json`이 존재하는지 확인한다 — 없으면 STOP하고 보고한다(절대 자체 초기화하지 않는다).
+당신(메인)이 하나의 run을 처음부터 끝까지 오케스트레이션한다. 이 `harnie:dev` 파이프라인에서 역할은 고정이다: **설계 = Claude 생산 → Codex 리뷰; 코드 = Codex 생산 → Claude 리뷰** — 모든 수정은 반대 프로바이더가 리뷰한다(예외는 dev-solo 하나뿐이다: 프로듀서와 리뷰어가 둘 다 Codex이며, fresh 셀프리뷰 서브프로세스로 대체한다 — `dev-solo/SKILL.md` 참고). 배선은 `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md`에 있다 — **지금 Read한다(Step 0)**; 모델은 `instructions/model-matrix.md`에서 온다. 부트스트랩 훅이 이미 이 run을 생성했다(workroot는 훅의 컨텍스트 메시지에 있다; `<main repo>/.harnie/sessions/<session>.json`으로 복구); `.harnie/active.json`이 존재하는지 확인한다 — 없으면 STOP하고 보고한다(절대 자체 초기화하지 않는다).
 
 ## 규모(S/M/L) — 잠정 → 확정, 상향 전용
 
@@ -14,6 +14,7 @@ description: harnie의 단일 개발 파이프라인(0.11) — 요구사항 그�
 - **S** — 국소 수정: 그라운딩 → 베이스라인 캡처 → 빌드 → 티어 검증 → 코드 리뷰 루프 → 보고. 승인 게이트 없음, 매니페스트 없음.
 - **M** — 설계 판단이 있는 리뷰 유닛 하나: 그라운딩 → 경량 플랜(접근법 + 단일 태스크 매니페스트 `t1`/`code`, 스코프 테스트, `integrationVerification`, `gates: []`, 사람 검증 항목) → **승인** → TASK-DETAIL 설계 + 설계 리뷰 → `set-task --task t1 --run-status building`(빌더 스레드 바인딩 + 워치독 활성화) → 베이스라인/seal → 빌드 → 코드 리뷰 루프 → `verify --task t1` → `verify --integration` → 보고.
 - **L** — 확정되면 `stages/large.md`를 읽는다.
+- **난이도 재판정**: 두 체크포인트(그라운딩 직후; M/L은 승인 게이트 직전, S는 빌드 호출 직전)가 상향(자동+한 줄 통보) 또는 하향(`AskUserQuestion` 필요)을 결정한다; `execution.mjs set-difficulty --root <repo> --slug <slug> --difficulty <easy|medium|hard|very-hard>`로 기록한다 — M/L은 arming 전에 `plan.md`에도 동기화한다(`model-matrix.md` §2 참고).
 
 ## MUST
 
@@ -32,7 +33,7 @@ description: harnie의 단일 개발 파이프라인(0.11) — 요구사항 그�
 - 유닛 단계에서 전체 테스트 스위트를 실행하거나, 변경 없는 검증을 재실행하지 않는다.
 - 원장을 수작업으로 병합하거나, ID를 닫거나, 판정을 선언하지 않는다; 자기 승인 금지; 사용자에게 표면화된 `--reentry` 없이 STALLED를 해제하지 않는다.
 - 구체적 실수 시나리오 없이 메커니즘을 추가하는 리뷰 파인딩이나 현재 고도 밖의 파인딩을 수용하지 않는다 — 컨테스트한다.
-- 리뷰어가 프로듀서와 프로바이더를 공유하게 하거나, 어떤 리뷰어든 쓰기를 하게 두지 않는다.
+- 리뷰어가 프로듀서와 프로바이더를 공유하게 하거나(dev-solo는 예외 — `dev-solo/SKILL.md` 참고), 어떤 리뷰어든 쓰기를 하게 두지 않는다.
 - 문서가 정의하지 않은 스케줄러, 의존성 엔진, 백오프 재시도, 실행 인프라를 만들지 않는다 — 가드가 예상 밖으로 거부하면 STOP하고 보고하며, 절대 우회하지 않는다.
 - 승인된 CLI 외에 `.harnie`를 참조하는 Bash를 실행하지 않는다; 컨트롤 파일을 수작업 편집하지 않는다.
 

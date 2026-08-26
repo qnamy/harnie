@@ -67,7 +67,24 @@ writeFileSync(join(repoB, "b.txt"), "b\nCHANGED\n")
 t("captureWorkspaceTree: 멤버 repo 변경이 합성값을 바꿈", () => assert.notEqual(captureWorkspaceTree(reposMap), ws1))
 t("captureWorkspaceTree: 빈 repos는 null", () => assert.equal(captureWorkspaceTree({}), null))
 
+// ── captureTree: .harnie가 gitignore에 등재된 상태에서도 예외 없이 성공 + 결과 tree에 .harnie 없음 ──
+const repoC = mkdtempSync(join(tmpdir(), "harnie-fx-c-"))
+sh(repoC, "init", "-q"); sh(repoC, "config", "user.email", "t@t"); sh(repoC, "config", "user.name", "t")
+writeFileSync(join(repoC, ".gitignore"), ".harnie\n")
+sh(repoC, "add", "-A"); sh(repoC, "commit", "-qm", "gitignore .harnie")
+mkdirSync(join(repoC, ".harnie"), { recursive: true })
+writeFileSync(join(repoC, ".harnie", "receipt.json"), '{"x":1}')
+writeFileSync(join(repoC, "tracked-c.txt"), "c\n")
+let capturedC = null, threwC = false
+try { capturedC = captureTree(repoC) } catch { threwC = true }
+t(".harnie가 gitignore된 상태에서도 captureTree가 예외 없이 성공(구 pathspec-exclude 버그 회귀 재현)", () => assert.equal(threwC, false))
+t(".harnie가 gitignore된 상태에서도 캡처된 tree에 .harnie 항목 없음", () => {
+  const lsTree = sh(repoC, "ls-tree", "-r", "--name-only", capturedC)
+  assert.ok(!lsTree.split("\n").some((p) => p === ".harnie" || p.startsWith(".harnie/")))
+})
+
 rmSync(repo, { recursive: true, force: true })
 rmSync(repoB, { recursive: true, force: true })
+rmSync(repoC, { recursive: true, force: true })
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail ? 1 : 0)
