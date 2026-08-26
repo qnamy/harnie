@@ -48,6 +48,14 @@ Contract:
 5. **Closure authority never moves**: only the reviewer's response or a user decision closes an ID. Record each contest round in a `<dir>/contest-N.txt` sidecar (verbatim CONTEST, the verdict, the `--progress yes` rationale `contest-adjudication`, any escalation) — harness-digest audits these.
 6. An adjudication round legitimately leaves the blocking count unchanged — pass `--progress yes` with the sidecar rationale so it doesn't burn stagnation.
 
+## Finding acceptance — necessity, not severity
+
+Accept or reject each finding by whether fixing it is *necessary*, not by its severity label. Accept: it prevents a concrete failure or misreading, it names a real defect (factual error, broken reference), or it's low-cost with clear value. Reject: it adds a mechanism with no concrete mistake scenario, expands scope, or is a taste-only polish. Never accept everything wholesale, and never leave everything unfixed wholesale.
+
+Accepted non-blocking fixes ride in the same round as blocking fixes — no separate non-blocking-only re-review round.
+
+Rejected findings are passed to the next reviewer call with the rejection reason so they're excluded from re-review scope (no reappearing). Blocking rejections follow the contest gate above (altitude/overengineering grounds, reviewer settles it); non-blocking rejections need only be passed along. Completion is unchanged: blocking count zero.
+
 ## Human-gated blocking issues: escalate, do not loop
 
 If resolving an issue requires an out-of-run action (real external systems, credentials, manual QA), classify it human-gated in the receipt and **escalate immediately** — never iterate on it. Only the user releases it: they act or explicitly accept the risk (`user-decision`; the reviewer closes the ID next round and the final report lists it under needs-human-action), or the run ends honestly as `HARNIE_STATUS: INCOMPLETE`.

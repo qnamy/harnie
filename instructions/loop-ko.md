@@ -48,6 +48,14 @@ STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 5. **종결 권한은 절대 이동하지 않는다**: ID를 닫는 것은 리뷰어의 응답 또는 사용자 결정뿐이다. 각 contest 라운드를 `<dir>/contest-N.txt` 사이드카에 기록한다(CONTEST 원문, verdict, `--progress yes` 근거 `contest-adjudication`, 에스컬레이션 여부) — harness-digest가 이를 감사한다.
 6. 판정(adjudication) 라운드는 blocking 수가 그대로여도 정당하다 — 사이드카 근거와 함께 `--progress yes`를 전달해 stagnation을 소모하지 않게 한다.
 
+## 발견 수용 — 심각도가 아니라 필요성
+
+각 발견의 수용/기각은 심각도 라벨이 아니라 수정이 *필요한지*로 판단한다. 수용: 구체적 실패나 오독을 막거나, 명백한 실결함(사실 오류, 깨진 참조)이거나, 비용은 낮고 가치는 분명한 것. 기각: 구체적 실수 시나리오 없이 메커니즘을 추가하는 것, 스코프 확장, 취향성 다듬기. 전부 일괄 수용도, 전부 일괄 미수정도 하지 않는다.
+
+수용한 non-blocking 수정은 blocking 수정과 같은 라운드에 실린다 — non-blocking 전용 재리뷰 라운드를 따로 만들지 않는다.
+
+기각한 발견은 사유와 함께 다음 리뷰어 호출에 전달해 재리뷰 스코프에서 제외한다(재등장 방지). blocking 기각은 위 contest 게이트를 따른다(altitude/overengineering 근거, 리뷰어가 판가름). non-blocking 기각은 전달만으로 충분하다. 완료 조건은 그대로 blocking 0이다.
+
 ## 사람 게이트 blocking 이슈: 루프 돌지 말고 에스컬레이션
 
 이슈 해소에 run 밖 행동(실제 외부 시스템, 자격증명, 수동 QA)이 필요하면, 영수증에서 human-gated로 분류하고 **즉시 에스컬레이션**한다 — 절대 그것을 두고 반복하지 않는다. 해제는 사용자만 한다: 사용자가 조치하거나 명시적으로 위험을 수용하면(`user-decision`; 리뷰어가 다음 라운드에 ID를 닫고 최종 보고서가 needs-human-action 아래에 나열), 아니면 run은 정직하게 `HARNIE_STATUS: INCOMPLETE`로 끝난다.
