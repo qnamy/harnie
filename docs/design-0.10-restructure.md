@@ -252,3 +252,66 @@ Agent Teams 도입 없음(실험·재개 불가), dev-quick 변경 없음, 스�
 - **ⓑ 러너의 codex 호출:** 데스크톱 세션 서브에이전트에서 실호출 SUCCESS(threadId 수신, 응답 "OK"). 헤드리스에서도 서브에이전트 호출 SUCCESS — 단 MCP 도구가 deferred 상태라 **서브에이전트가 ToolSearch로 스키마를 로드한 뒤 호출**했다 → W2의 러너 에이전트 문서에 "codex 도구가 deferred면 ToolSearch로 먼저 로드"를 1줄 계약으로 반영한다.
 
 **판정: D2 본선(cwd→task 매핑) 확정.** 폴백(bind-thread·thread.json·record-builder-call, DR-011 분기 ⓘⓘ/ⓘⓘⓘ)은 구현하지 않는다 — 설계에는 W0 부정 결과였을 경우의 계약으로만 남긴다(사용 조건 미충족 명시). 잔여 확인 1건: 첫 0.10.0 실전 run의 A0에서 플러그인 네임스페이스(`mcp__plugin_harnie_codex__*`) 환경의 훅 발화를 같은 방식으로 1회 재확인(로거 없이 execution.json의 threadId 자동 바인딩 성공 여부로 판정 — 실패 시 그 run만 직렬 경로 폴백).
+
+## 11. Harness Digest — `fcl-hmm-airflow-users-bakgyunam-tradlinx-4b860e3d` (2026-08-25, harnie 0.10.0/0.10.5 혼재 run)
+
+`harnie:harness-digest` 스킬로 완료된 dev-full plan-track run(15 task + Final Wave 4게이트, 여러 세션에 걸침) 사후 분석. 스킬 자체는 파일을 쓰지 않으므로 개편 검토용으로 이 절에 옮겨 적는다. 원 회차 결과는 해당 세션 트랜스크립트 참조.
+
+### run 요약
+
+| 유닛 | 최종 라운드 | 비고 |
+|---|---:|---|
+| w9-transform-stage | 8 | 실제 버그 다수 발견 — 낭비 아님 |
+| w7-persistence | 9 | **이상치 — 아래 §11.2** |
+| w14-final-verification | 6 | 대형 문서 재작성 유닛, 예상 범위 |
+| w13-ops-sql-tests | 5 | 실결함 1건(SQL 마커 drift) + 하우스키핑 |
+| w1/w10/w12 | 3–4 | 정상 |
+| final-coverage/quality/runtime/scope (4게이트) | 각 2 | 라운드1 REJECT → 라운드2 APPROVE, 예상 형태 |
+
+이 세션 중 watchdog 연장 9회(태스크 7개에 걸침) — 전부 사용자 승인, 전부 정당(리뷰/조사로 인한 예산 증가 또는 죽은 Codex 세션 복구).
+
+### 11.1 — `rebind-task`가 "Codex MCP 세션 소실"을 처리 못함(errata correction 전용)
+
+**증거:** 이 세션에서만 Codex 빌더 세션이 **6회 이상** 죽었다(W7·W9·W10·W12·W13·W14 — `Session not found for thread_id` 또는 무응답 1800초 타임아웃으로 확인). 매번 사용자가 VS Code로 `execution.json`의 `builderThreadId`를 직접 `null`로 편집해야 했다 — `rebind-task`의 `reason` 필드가 `correction:E-\d{3}`(design errata) 또는 `approved-artifact:<sha>`(cancel 경로)로만 정규식 고정돼 있어 "Codex 서버가 세션을 잃었다"는 인프라 사실에 맞는 경로가 없기 때문. 이 갭은 이 run 자신의 `notepad.md` M-028(2026-08-20)에서 이미 식별됐고, **나흘 뒤 같은 run에서 미해결 상태로 재발**했다.
+
+**제안:** `rebind-task`에 세 번째 reason 형태, 예: `dead-session:<자유 텍스트>`를 추가해 errata ID 없이 `builderThreadId` null 처리 + `pendingRunRootBootstrap` 마커 설정을 사용자가 하던 수동 편집과 동일한 효과로, 신뢰 CLI를 통해 수행하게 한다. §9의 DR-007 계열(마커 생명주기)과 직접 연관 — 정상 종료 경로(`--cancel --reason approved-artifact:...`)와 나란히 "빌더 세션 자체가 죽어 새 세션이 필요한" 경로를 추가하는 것으로 볼 수 있다.
+**예상 절감:** 이 run에서만 6회 이상의 사용자 왕복(파일 경로 안내 실수·따옴표 이스케이프 문제까지 겹쳐 일부는 4~5턴 소요) 제거.
+**위험:** 낮음 — 추가 전용 CLI 경로, 기존 fail-closed 가드는 그대로. **불변식 저촉 없음.**
+
+### 11.2 — w7-persistence의 9라운드: 브리핑 결함이지 스코프 크리프가 아니었다
+
+**증거:** CR-010/011/012/013/015/201/202/210/211/220/221 — 11건의 후속 발견이 거의 전부 **파일 하나**(`tests/test_claim_integration.py`)에서, 실제 SQL Server 드라이버 동작(`DATETIME2(0)` 절단, `SET NOCOUNT`의 세션 스코프, 배치 후 `rowcount` 신뢰성) 관련이었다 — 원래 task brief가 전혀 예고하지 않은 내용. "한 유닛에 3라운드 이상 = 브리핑/설계절 결함" 클러스터의 교과서적 사례.
+**제안:** `design-authoring-detail.md`의 Environment Fact Sheet "runtime configuration constraints" 항목이 `pyodbc`/SQL Server 통합 테스트를 언급하는 태스크 브리핑에서는 **배치 스코프 SET 옵션·datetime 정밀도 절단·배치 후 rowcount 신뢰성** 같은 알려진 드라이버 함정을 명시적으로 프롬프트하게 한다 — A1 grounding 단계에서 표면화시켜 라운드당 비용을 피한다.
+**예상 절감:** 9라운드 중 4~5라운드(드라이버 관련 발견이 라운드 3~9에 걸쳐 뒤늦게 나온 정도로 추정).
+**위험:** 낮음, 추가 프롬프트 가이드만. **불변식 저촉 없음.**
+
+### 11.3 — ledger 네임스페이스 혼동: Final-Wave 게이트 ID vs 유닛 ID, cross-unit "이관" ID
+
+**증거:** 오케스트레이터(나)가 두 번, 다른 ledger에 속한 ID를 유닛 round-N.txt에 "resolved"로 잘못 적었다 — 한 번은 Final-Wave 게이트 자체 CR 번호를 태스크 유닛 것과 혼동, 한 번은 cross-unit 이관 항목(CR-407, w9→w1로 이관)을 잘못된 ledger에서 닫으려 함. `loop.mjs apply`가 "미지 ID … 처음부터 resolved" 로 fail-closed 처리해 실질적 피해는 없었지만, 매번 진단→재작성→재적용 사이클 소요.
+**제안:** `review-loop-driver.md` R4 절에 한 줄 추가: "ID는 그것이 열린 ledger에 스코프된다 — Final-Wave 게이트 ID는 태스크 유닛 ID가 아니고 그 역도 아니다. 'unit X로 이관' 처분은 **unit X 자신의 ledger**에서 열고/닫는다, 이미 거기 있다고 가정하지 않는다."
+**예상 절감:** 이번 run 2회 낭비 사이클(합산 15–20k 토큰 추정); cross-unit 이관이나 Final Wave 시정이 있는 모든 run에서 재발 가능.
+**위험:** 없음 — 문서만. **불변식 저촉 없음.**
+
+### 11.4 — 한 워크스페이스에서 여러 유닛의 apply/verify를 인터리빙하면 seal이 stale해짐
+
+**증거:** 이 세션에서 SEAL MISMATCH 3회(전부 오탐, M-029 4단계 체크+재-seal로 확인) — 매번 유닛 A용으로 seal한 뒤 유닛 A의 빌더를 호출하기 *전에* 유닛 B의 `apply`+`verify`(정당하게 `.harnie` 권위 파일을 건드림)를 실행한 게 원인이었다. "라운드마다 빌더 호출 직전 재-seal" 규칙 자체는 맞지만 이 인터리빙 패턴을 경고하지 않는다.
+**제안:** 같은 절에 추가: "한 세션에서 여러 유닛을 다루는 워크스페이스 run에서는, 한 유닛의 라운드(build→verify-seal→apply→verify)를 완전히 끝내고서야 다른 유닛의 빌더 호출을 시작하라 — seal은 run 전체 스코프라 다른 유닛의 apply/verify만으로도 대기 중인 seal이 무효화된다(빌더 위반이 아니어도)."
+**예상 절감:** 이번 run 3회의 재-seal+재확인 사이클; 엔진 변경 없이 문서/규율만으로 해결.
+**위험:** 없음. **불변식 저촉 없음.**
+
+### 11.5 — `loop.mjs delta`의 `git diff`에 출력 크기 가드 없음(대형 diff에서 ENOBUFS)
+
+**증거:** run 종료 후 PR 생성을 위해 upstream 171커밋에 rebase했더니 `delta.mjs`의 `execFileSync('git', ['diff', ...])`가 정보성 실패 대신 `ENOBUFS`로 죽었다.
+**제안:** `delta.mjs`의 git 호출에 `maxBuffer` 오버라이드(또는 스트리밍 전환).
+**예상 절감:** 낮음 — dev-full의 정식 추적 대상이 아닌 post-run rebase 상황, 1회 발생. 강건성 참고용.
+**위험:** 없음, 사소한 수정. **불변식 저촉 없음.** (단발성이라 rule-of-three 기준 미달 — 저심각도 항목도 원하면 포함.)
+
+### 11.6 — 15태스크 중 disjoint-scope 유닛 다수인데 직렬 경로 사용, 근거 미기록
+
+**증거:** run 전체(여러 세션에 걸침)가 두 레포 모두에서 공유 워크트리 기반 직렬 경로를 썼다 — `phase-b.md`는 러너(병렬) 경로가 기본값이라고 명시한다. 직렬 선택 근거가 `notepad.md`나 인수인계 문서 어디에도 없다.
+**제안:** 구체안 없음 — 관찰만. 이 세션 이전의 phase-B 결정이라 재구성 불가, 절감 효과도 counterfactual이라 측정 불가. 향후 run의 phase-B가 기본(병렬) 대신 직렬을 고르면, 그 결정 시점에 `notepad.md`에 근거를 남겨 추후 감사 가능하게 할 것.
+**위험:** 해당 없음(제안 아님). **불변식 저촉 없음.**
+
+---
+
+§11.1~11.5 중 어느 것도 인시던트 유래 불변식(fail-closed apply, seal/권위파일 보호, `.harnie` Bash-쓰기 가드)을 건드리지 않는다 — 전부 추가 전용 CLI 경로이거나 문서 보강이다. 사용자가 채택 여부를 결정한다.
