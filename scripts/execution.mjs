@@ -605,39 +605,6 @@ export function withStateLock(root, fn) {
   try { return fn() } finally { releaseLock(lock) }
 }
 
-function sanitizeSession(sessionId) {
-  const s = String(sessionId || "")
-  if (!NAME_RE.test(s) || s === "." || s === "..") throw new FailClosed(`pending-route: 부적합 session_id ${JSON.stringify(sessionId)}`)
-  return s
-}
-
-function routeFile(root, sessionId) { return join(root, ".harnie", "pending-route", sanitizeSession(sessionId) + ".json") }
-
-export function writePendingRoute(root, sessionId) {
-  if (!sessionId) throw new FailClosed("pending-route: session_id 필요")
-  writeJSONAtomic(routeFile(root, sessionId), { state: "pending", at: new Date().toISOString() })
-}
-
-export function clearPendingRoute(root, sessionId) {
-  if (!sessionId) return
-  const f = routeFile(root, sessionId)
-  rmSync(f, { force: true }) // ENOENT 무시, 권한/IO 오류는 throw
-  if (existsSync(f)) throw new FailClosed(`pending-route 정리 실패(파일 잔존) — gate가 남을 수 있음: ${f}`)
-}
-
-export function getRouteState(root, sessionId) {
-  if (!sessionId) return null
-  const f = routeFile(root, sessionId)
-  if (!existsSync(f)) return null
-  const e = readJSONStrict(f)
-  if (!e || typeof e !== "object" || Array.isArray(e) || e.state !== "pending") {
-    throw new FailClosed(`pending-route 손상(알 수 없는 state) — 수동 확인 필요: ${f}`)
-  }
-  return e.state
-}
-
-export function hasPendingRoute(root, sessionId) { return getRouteState(root, sessionId) !== null }
-
 function collisionFreeSlug(root, track, base) {
   validateSlug(base)
   let slug = base
@@ -706,7 +673,6 @@ export function bootstrapRun(root, { base, track = "plan", sessionId = null, wor
     else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, workspaceRoot, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
     else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 완료하거나, 별도 worktree checkout에서 이 스킬을 다시 실행해 새 run을 시작하세요.`)
-    clearPendingRoute(root, sessionId) // 부트스트랩 성공 = 이 세션 라우팅 해소(§3.9, per-session 파일이라 lock-free)
     return result
   })
 }

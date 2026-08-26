@@ -1,48 +1,43 @@
 #!/usr/bin/env node
 // 진입점 bootstrap 훅 — 스킬 A0의 자체 init을 대체해 sentinel을 결정적으로 생성한다(부트스트랩 갭 제거).
 // 설계: docs/bootstrap-adherence.md.
-//   UserPromptSubmit(직접 slash): `/harnie:dev` → 즉시 worktree 생성 + bootstrap(T2 DEC-001; 0.11: 라우터 폐지 —
-//     pending-route 없이 곧장 부트스트랩한다, mode는 sizing으로 시작). `/harnie:dev-full`·`/harnie:dev-quick`도
-//     사용자가 직접 타이핑하면 이 매치들은 여전히 살아있다(스킬 존재를 확인하지 않는 prompt 정규식 매치 —
-//     0.12.0 스킬 삭제로 차단되지 않는다). 둘의 동작은 다르다(DR-012 정정) — `/harnie:dev-full`은 부트스트랩
-//     자체가 실행되지만 0.12.0부터 이어질 dev-full 스킬 본문이 없는 저하된 경로가 된다(하드 에러는 아님).
-//     `/harnie:dev-quick`은 애초에 부트스트랩을 하지 않는다 — `clearPendingRoute`만 호출하는 무해한 stale
-//     pending-route 정리 경로다(부트스트랩 여부와 무관하게 원래도 그랬다). 둘 다 deprecated compatibility
-//     route — 실제 로직 정리는 0.12.1로 분리. `writePendingRoute`의 프로덕션 호출은 0건(확인됨).
-//     비-harnie → no-op.
-//   PreToolUse(Skill): tool_input.skill === "harnie:dev" → 즉시 worktree 생성 + bootstrap. "harnie:dev-full"·
-//     "harnie:dev-quick"은 0.12.0에서 스킬 자체가 삭제돼 정상 스킬 디스패치로는 더 이상 자연 발생하지 않지만,
-//     이 payload가 직접 전달되면(예: 테스트 픽스처) 훅은 스킬 존재를 검사하지 않으므로 여전히 동일하게
-//     처리한다 — retained compatibility branch, 코드 수준에서 도달 불가능해진 것은 아니다. 기타 → no-op.
+//   UserPromptSubmit(직접 slash): `/harnie:dev`만 즉시 worktree 생성 + bootstrap(T2 DEC-001; mode는
+//     sizing으로 시작). 0.12.2에서 제거된 `/harnie:dev-full`·`/harnie:dev-quick` 호환 라우트는
+//     부트스트랩하지 않고 `/harnie:dev` 사용 안내만 반환한다. 비-harnie → no-op.
+//   PreToolUse(Skill): tool_input.skill === "harnie:dev"만 즉시 worktree 생성 + bootstrap. 제거된 두 호환
+//     라우트 이름이 payload로 직접 전달되면 같은 안내만 반환한다. 기타 → no-op.
 // 성공·no-op = exit 0. 실패(빈 인자·malformed payload·손상·미완료 run 충돌·이미 바인딩된 세션·예외) = exit 2 → invocation 차단(fail-closed).
 //
-// worktree-per-run(T2): dev-full은 매 run마다 `<mainRoot>/.harnie-wt/harnie-<slug>` worktree를 만들고 run 상태
+// worktree-per-run(T2): `/harnie:dev` run은 매번 `<mainRoot>/.harnie-wt/harnie-<slug>` worktree를 만들고 run 상태
 // (`.harnie/`)를 그 worktree 안에 둔다. 세션 cwd는 계속 main 작업트리이므로, 이 훅은 성공 시 워크루트 절대경로를
 // 오케스트레이터에게 알려준다(additionalContext/permissionDecisionReason) — 그 뒤 모든 execution.mjs·loop.mjs
 // `--root`와 codex builder `cwd`는 이 워크루트여야 한다(main root 아님).
 //
 // 워크스페이스 run(멀티레포, v0.4.0): root가 git repo가 아니어도 직속 하위에 git repo가 있으면(예: ~/Tradlinx)
-// dev-full을 허용한다 — run root는 `<workspace>/.harnie-wt/harnie-<slug>/` **평범한 디렉터리**이고 sentinel에
+// `/harnie:dev` run을 허용한다 — run root는 `<workspace>/.harnie-wt/harnie-<slug>/` **평범한 디렉터리**이고 sentinel에
 // workspaceRoot·repos가 실린다. 멤버 repo worktree는 이후 `execution.mjs repo-add`가 만든다. 워크스페이스 root
-// 자체에는 active.json을 만들지 않아(세션 바인딩·pending-route만) 다른 세션·작업은 게이트에 걸리지 않는다.
+// 자체에는 active.json을 만들지 않아 다른 세션·작업은 게이트에 걸리지 않는다.
 import { existsSync, mkdirSync, readdirSync } from "node:fs"
 import { join, resolve, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
 import { findRoot, readSessionBinding, writeSessionBinding } from "./lib.mjs"
-import { bootstrapRun, slugify, clearPendingRoute } from "../scripts/execution.mjs"
+import { bootstrapRun, slugify } from "../scripts/execution.mjs"
 import { createWorktree, worktreeDirFor } from "../scripts/worktree.mjs"
 
 const SCRIPTS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
+const RETIRED_ROUTE_MSG =
+  "harnie: `/harnie:dev-full`·`/harnie:dev-quick`는 0.12.2에서 제거된 호환 라우트입니다(스킬 본문은 0.12.0에서 이미 삭제됨) — " +
+  "부트스트랩하지 않았습니다. 대신 `/harnie:dev <작업 설명>`으로 시작하세요(크기 S/M/L은 파이프라인이 판정)."
 
 function fail(msg) { process.stderr.write(`harnie bootstrap: ${msg}\n`); process.exit(2) }
 function ok() { process.exit(0) }
-// UserPromptSubmit 성공 경로: 워크루트를 오케스트레이터 컨텍스트에 주입(직접 `/harnie:dev-full` 진입).
+// UserPromptSubmit 성공 경로: `/harnie:dev` UPS 결과를 오케스트레이터 컨텍스트에 주입한다.
 function okContext(text) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "UserPromptSubmit", additionalContext: text } }) + "\n")
   process.exit(0)
 }
 // PreToolUse(Skill) 성공 경로: additionalContext 지원 여부가 불확실하므로 permissionDecisionReason도 함께 채운다
-// (라우터 `/harnie:dev` → Skill(harnie:dev-full) 경로).
+// (`harnie:dev` Skill 성공 경로).
 function okAllow(text) {
   process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: "PreToolUse", permissionDecision: "allow", permissionDecisionReason: text, additionalContext: text } }) + "\n")
   process.exit(0)
@@ -101,8 +96,8 @@ try {
 try {
   const event = p.hook_event_name || ""
   const root = findRoot(p.cwd)
-  const sessionId = p.session_id // pending-route는 session-scoped(P1-3): 다른 세션이 해제하지 못하게
-  // bootstrap 실패면 pending-route를 지우고 호출을 fail-closed한다. 성공은 emit이 그 이벤트에 맞는 방식으로 exit.
+  const sessionId = p.session_id // 세션→run 바인딩에 사용한다.
+  // bootstrap 성공은 emit이 이벤트에 맞는 방식으로 exit하고, 실패는 호출을 fail-closed한다.
   const doBootstrap = (base, emit) => {
     try {
       // 실행 가능 root 판정: ① root 자체가 git repo → repo 모드(worktree-per-run) ② 비-git이지만 직속 하위에
@@ -116,7 +111,7 @@ try {
       const targetPath = worktreeDirFor(root, branch) // 두 모드 모두 <root>/.harnie-wt/harnie-<base>
       const existing = readSessionBinding(root, sessionId)
       if (existing && existsSync(existing.workroot) && existing.workroot !== targetPath)
-        throw new Error(`이 세션은 이미 다른 run에 바인딩됨(${existing.workroot}) — 한 세션 = 한 run(v1). 다른 작업은 새 세션에서 /harnie:dev-full로 시작하세요.`)
+        throw new Error(`이 세션은 이미 다른 run에 바인딩됨(${existing.workroot}) — 한 세션 = 한 run(v1). 다른 작업은 새 세션에서 /harnie:dev로 시작하세요.`)
       let workroot
       if (workspaceMode) {
         // workspace run: run root는 git worktree가 아니라 평범한 디렉터리. 멤버 repo worktree는 나중에
@@ -131,49 +126,38 @@ try {
         bootstrapRun(worktreePath, { base, track: "plan", sessionId })
         workroot = worktreePath
       }
-      // bootstrapRun 내부의 pending-route 해소는 (workroot, sessionId) 기준이라 항상 no-op이 된다 —
-      // pending-route는 main root(세션 cwd)에 기록되므로 여기서 명시적으로 해소한다(멱등: 없으면 그냥 통과).
-      clearPendingRoute(root, sessionId)
       // session_id 없는 호출(구버전 하위호환·payload 부재)은 바인딩을 기록할 키가 없다 — 이런 호출은 이후
       // resolveRoot로 자기 worktree를 못 찾아 게이트가 느슨해질 수 있음을 알고 감내한다(적대적 방어 비목표,
       // 실제 Claude Code 훅은 항상 session_id를 준다). 식별 가능한 호출만 기록한다.
       if (sessionId) writeSessionBinding(root, sessionId, workroot)
       emit(workroot, workspaceMode)
-    } catch (e) { const msg = e && e.message ? e.message : String(e); clearPendingRoute(root, sessionId); fail(msg) }
+    } catch (e) { const msg = e && e.message ? e.message : String(e); fail(msg) }
   }
   const runMessage = (wt, workspaceMode) =>
     workspaceMode ? workspaceWorkrootMessage(root, sessionId, wt) : workrootMessage(root, sessionId, wt)
 
   if (event === "UserPromptSubmit") {
     const prompt = typeof p.prompt === "string" ? p.prompt : ""
-    // 0.12.0에서 dev-full 스킬 삭제 후에도 이 매치는 살아있다(스킬 존재를 확인하지 않는 prompt 정규식 —
-    // 직접 타이핑하면 여전히 부트스트랩됨, 다만 이어질 스킬 본문이 없어 저하된 UX). deprecated compatibility
-    // route — 분기 제거·재작업은 0.12.1.
+    // 0.12.2에서 제거된 호환 라우트는 정확한 경계로만 안내한다(`dev-full-x`는 완전한 no-op).
     const mFull = prompt.match(/^\/harnie:dev-full(?:\s+([\s\S]*))?$/) // 정확 prefix(뒤=공백|끝); `dev-full-x` 오매치 방지
-    if (mFull) {
-      const base = slugify((mFull[1] || "").trim())
-      if (!base) fail("작업 인자가 비어 있음 — `/harnie:dev-full <작업 설명>` 형태로 실행하세요")
-      doBootstrap(base, (wt, wsMode) => okContext(runMessage(wt, wsMode)))
-    }
-    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) { clearPendingRoute(root, sessionId); ok() } // 0.11: alias — 본문이 harnie:dev 스킬로 체이닝하면 Skill 훅이 부트스트랩. 0.12.0에서 스킬 삭제 후에도 이 매치는 살아있다(직접 타이핑 시 여전히 clearPendingRoute만 수행하는 무해한 경로) — deprecated compatibility route, 재작업은 0.12.1
+    if (mFull) okContext(RETIRED_ROUTE_MSG)
+    if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) okContext(RETIRED_ROUTE_MSG)
     const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 0.11 단일 파이프라인 진입(정확 prefix; dev-full/dev-quick은 위에서 처리)
     if (mDev) {
       const base = slugify((mDev[1] || "").trim())
       if (!base) fail("`/harnie:dev`에 작업 설명이 필요합니다 — `/harnie:dev <작업>`") // 빈 인자 → exit 2(P1-1)
-      // 0.11: 라우터 폐지 — /harnie:dev가 곧 파이프라인 진입이므로 pending-route 없이 즉시 부트스트랩한다
-      // (mode는 sizing으로 시작하고 오케스트레이터가 set-mode로 확정한다).
+      // `/harnie:dev`는 유일한 라이브 진입점이며 즉시 부트스트랩한다(mode는 sizing으로 시작).
       doBootstrap(base, (wt, wsMode) => okContext(runMessage(wt, wsMode)))
     }
     ok() // 비-harnie·미스매치
   } else if (event === "PreToolUse" && p.tool_name === "Skill") {
     const skill = p.tool_input && p.tool_input.skill
-    // "harnie:dev-full" 분기는 0.12.0에서 스킬 삭제 후 정상 스킬 디스패치로는 자연 발생하지 않는다(호출할 스킬 이름 자체가 없음) — 다만 이 payload가 직접 전달되면(예: hooks/bootstrap.test.mjs 픽스처) 훅은 여전히 동일하게 처리한다(스킬 존재를 검사하지 않음). "harnie:dev"는 라이브 경로다. 분기 제거는 0.12.1.
-    if (skill === "harnie:dev-full" || skill === "harnie:dev") {
+    if (skill === "harnie:dev-full" || skill === "harnie:dev-quick") okAllow(RETIRED_ROUTE_MSG)
+    if (skill === "harnie:dev") {
       const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim())
       if (!base) fail(`작업 인자가 비어 있음 — ${skill} skill args 필요`)
       doBootstrap(base, (wt, wsMode) => okAllow(runMessage(wt, wsMode)))
     }
-    if (skill === "harnie:dev-quick") { clearPendingRoute(root, sessionId); ok() } // 0.11 alias: 본문이 harnie:dev로 체이닝. 0.12.0에서 스킬 삭제 후 정상 스킬 디스패치로는 자연 발생하지 않음(호출할 스킬 이름 자체가 없음) — 직접 전달된 payload는 여전히 동일하게 처리(스킬 존재 미검사); 분기 제거는 0.12.1
     ok() // 기타 skill
   } else {
     ok() // 미지원 이벤트

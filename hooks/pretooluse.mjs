@@ -3,7 +3,7 @@
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
-import { loadContext, recordPendingApproval, recordPendingErrata, recordPendingRebind, hasPendingRoute, taskWatchdogUsage } from "../scripts/execution.mjs"
+import { loadContext, recordPendingApproval, recordPendingErrata, recordPendingRebind, taskWatchdogUsage } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, taskIdFromActiveTaskWorktree } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
@@ -14,8 +14,8 @@ const input = p.tool_input || {}
 
 try {
   // worktree-per-run(T2): 세션 cwd는 main 작업트리에 남아 있으므로, 이 세션이 바인딩된 run이 있으면 그 worktree를
-  // root로 쓴다(①세션 바인딩 파일 ②없으면 findRoot 그대로). mainRoot(plain findRoot)은 route 게이트와 "밖" 판정
-  // 보정(아래)에 쓴다 — pending-route·세션 바인딩 파일은 항상 main 작업트리에 있다.
+  // root로 쓴다(①세션 바인딩 파일 ②없으면 findRoot 그대로). mainRoot(plain findRoot)은 "밖" 판정
+  // 보정(아래)에 쓴다 — 세션 바인딩 파일은 항상 main 작업트리에 있다.
   const root = resolveRoot(p.cwd, p.session_id)
   const mainRoot = findRoot(p.cwd)
   if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" || toolName === "NotebookEdit") {
@@ -28,14 +28,6 @@ try {
     // 위 isControlPath(rel)만으론 못 잡는다).
     const foreign = harnieControlSuffix(abs)
     if (foreign && isControlPath(foreign)) denyPreTool(`다른 harnie run의 control 파일 직접 쓰기 금지(${abs}) — 훅/CLI만`)
-  }
-  // route 파일은 항상 mainRoot(세션 cwd)에 있다 — resolveRoot로 worktree에 바인딩된 뒤에는 root≠mainRoot가 되어
-  // 여기서 찾아야 늘 존재하지 않는 경로를 보게 되므로 게이트가 무력해진다.
-  if (hasPendingRoute(mainRoot, p.session_id)) {
-    const gated = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "Bash"].includes(toolName) || classifyCodex(toolName).isCodex
-    // 0.12.1에서 dev-full/dev-quick 문구 제거 예정(스킬은 이미 0.12.0에서 삭제됨) — 이 메시지는 과거 pending-route
-    // 잔존이라는 극단적 엣지케이스 방어용이며, 사용자가 실제로 이 경로를 아직 밟을 수 있으므로 안내 자체는 유효하다.
-    if (gated) denyPreTool("라우팅 미완료(pending-route) — 먼저 track 스킬(dev-full/dev-quick)을 호출하거나 `/harnie:dev-full`로 직접 진입하세요")
   }
   const ctx = loadContext(root)
   if (!ctx.active || !isOwnerSession(root, ctx, p.session_id)) {

@@ -89,6 +89,8 @@ bootstrap 실패(파싱 오류·빈 args·lock 경합·init 예외·rollover blo
 `quick`은 **현행 no-op**(bootstrap 안 함). `plan` execution machine을 그대로 연결하면 `phase=planning`에 갇혀 quick 쓰기가 차단됨. quick의 상태·쓰기 허용 계약은 **별도 ADR/변경**으로 설계한다. 이번 변경은 공통 기반(stdin 파싱·원자 sentinel·exit2·complete/incomplete rollover)만 future-proof하게 만든다.
 
 ### 3.9 라우터 `/harnie:dev`의 pending-route 게이트 (P1-2)
+> **0.12.2 제거 메모:** pending-route 상태 머신은 `writePendingRoute`의 프로덕션 호출 지점이 0건이라 게이트가 영구 no-op인 orphan이었으므로 제거됐다. 같은 문서의 §3.3과 §5에 있는 pending-route/dev-full 참조도 이제 역사적 기록이다. 또한 이 절과 §5에서 다섯 번 언급되는 `markRouteFailed`는 이번 제거 전의 `execution.mjs`에도 존재하지 않았으므로, 이 절을 이번 변경 직전까지 정확했던 현행 설명으로 읽으면 안 된다.
+
 `/harnie:dev`는 command이며 모델에게 track 스킬 호출을 지시한다 — 모델이 Skill 호출을 생략하고 인라인으로 작업하면 active sentinel 없이 진행해 H1/H2가 dormant(직접 `/dev-full`은 강화됐지만 대표 라우터 `/dev`에서 갭 재현). 닫기:
 - 저장은 **per-session 파일** `.harnie/pending-route/<session_id>.json` = `{state: "pending"|"failed", reason?, at}`. per-session이라 **state lock 불필요**(각 세션이 자기 파일만 씀 → `markRouteFailed`가 lock 경합에 막히지 않음, P1-1). session_id는 파일명 안전 검증. **이 디렉터리는 control path**(guards.isControlPath)라 tool 쓰기/삭제가 차단됨.
 - UserPromptSubmit `/harnie:dev <작업>` → bootstrap이 pending 기록(track 미정이라 run은 아직). **빈 인자 → exit 2**(P1-1).
