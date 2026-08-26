@@ -47,7 +47,7 @@
 
 **고정:** `harnie-scout` = haiku (frontmatter 고정).
 
-**effort 오버라이드 각주:** Claude 서브에이전트 스폰별 effort 오버라이드와 이에 상당하는 Codex MCP reasoning-effort 파라미터 지원 여부는 미검증이다 — 호출 지점이 둘 중 하나를 지원하지 않으면 very-hard 열은 그 지점에서 모델 상향만으로 낮춰진다(존재하지 않는 플래그를 지어내지 않는다).
+**effort 오버라이드 각주(2026-08-26 검증 완료):** Codex MCP 호출 지점은 `config: {model_reasoning_effort: "high"}`로 호출 범위 reasoning effort를 설정할 수 있다. 정확한 `model_reasoning_effort` 키에 오타가 있으면 Codex가 조용히 무시하므로 철자가 중요하다. Agent 도구로 디스패치한 Claude 서브에이전트에는 effort 필드가 전혀 없음이 확인됐으므로, 해당 호출 지점의 very-hard 티어는 effort 오버라이드 없이 모델 티어 상향만 사용할 수 있다. 검증 출처: `~/Tradlinx/task2-recovery/effort-e2e.md`.
 
 **dev-solo(Codex 단독) 역전:** 모든 스테이지에서 생산자가 Codex이고, 리뷰어도 마찬가지다 — **fresh `codex exec --sandbox read-only -m gpt-5.6-sol` 셀프리뷰 서브프로세스**(very-hard에서만 effort high)가 모든 고도의 설계·코드 리뷰 전체 경로다; 대체할 크로스모델 리뷰어가 없다. 이것은 격하된 폴백이 아니다: dev-solo는 Claude 사용량/토큰이 소진됐을 때도 Codex 단독으로 개발을 이어가기 위해 존재하며, 그 시나리오에서는 크로스모델 리뷰어가 구조적으로 불가능하다 — 수용되고 문서화된 트레이드오프다(`skills/dev-solo/SKILL.md` 참고).
 

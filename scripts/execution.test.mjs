@@ -13,7 +13,7 @@ import {
   armApproval, recordPendingApproval, bindApproval, registerBuilderThread, registerReadonlyThread,
   registerBuilderAuto,
   setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
-  bootstrapRun, slugify, withStateLock, writePendingRoute, clearPendingRoute, hasPendingRoute, getRouteState,
+  bootstrapRun, slugify, withStateLock,
   detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
   errataAdd, errataArm, errataSetDisposition, listErrata, recordPendingErrata, bindErrata, rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
@@ -949,34 +949,6 @@ test("withStateLock: fn 실행 + lock 파일 정리(P1-3)", () => {
   assert.ok(!existsSync(join(root, ".harnie", "state.lock")))
 })
 
-test("pending-route: session-scoped pending + clear + 세션 격리", () => {
-  const root = gitRepo()
-  mkdirSync(join(root, ".harnie"), { recursive: true })
-  assert.equal(getRouteState(root, "a"), null)
-  writePendingRoute(root, "a")
-  assert.equal(getRouteState(root, "a"), "pending")
-  assert.equal(getRouteState(root, "b"), null) // 세션 격리
-  clearPendingRoute(root, "b") // b가 해제해도 a는 유지
-  assert.equal(getRouteState(root, "a"), "pending")
-  clearPendingRoute(root, "a")
-  assert.equal(getRouteState(root, "a"), null)
-  assert.equal(hasPendingRoute(root, "a"), false)
-  assert.throws(() => writePendingRoute(root, null), FailClosed) // session_id 필수
-})
-
-test("getRouteState: 유효 JSON이지만 알 수 없는 state는 fail-closed(P1 — Stop 우회 차단)", () => {
-  const root = gitRepo()
-  const dir = join(root, ".harnie", "pending-route")
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "corrupt.json"), JSON.stringify({ state: "unexpected", at: "x" }))
-  // hasPendingRoute(pretooluse)는 막지만 Stop이 pending/failed 분기 미매치로 통과하던 fail-open → 이제 throw로 양쪽 fail-closed.
-  assert.throws(() => getRouteState(root, "corrupt"), FailClosed)
-  writeFileSync(join(dir, "noState.json"), JSON.stringify({ at: "x" })) // state 필드 자체 부재
-  assert.throws(() => getRouteState(root, "noState"), FailClosed)
-  writeFileSync(join(dir, "notObj.json"), JSON.stringify(["pending"])) // 배열(비 plain object)
-  assert.throws(() => getRouteState(root, "notObj"), FailClosed)
-})
-
 test("bootstrapRun 동시성: 서로 다른 base 8개 동시 실행 → 정확히 1개만 새 run·나머지 block·active.json 일관(P1-5)", async () => {
   const root = gitRepo()
   const childPath = join(mkdtempSync(join(tmpdir(), "harnie-child-")), "child.mjs")
@@ -1010,13 +982,6 @@ test("state lock: 일시 경합은 bounded retry 후 획득", async () => {
   assert.equal(withStateLock(root, () => 7), 7)
   await removed
   assert.ok(!existsSync(lock))
-})
-
-test("clearPendingRoute는 strict — 삭제 실패면 throw(부재 재확인, P1-3)", () => {
-  const root = gitRepo()
-  mkdirSync(join(root, ".harnie", "pending-route"), { recursive: true })
-  mkdirSync(join(root, ".harnie", "pending-route", "s1.json")) // 파일 자리에 디렉터리 → rmSync(force, non-recursive)가 throw
-  assert.throws(() => clearPendingRoute(root, "s1")) // 삼키지 않고 throw(성공 오보 방지)
 })
 
 function readyForVerify(root, manifest, slug = "feat-x", unit = "task-a") {

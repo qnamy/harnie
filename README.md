@@ -2,6 +2,8 @@
 
 **AI 서브에이전트 개발 하네스 + 스킬 허브** — Claude Code 플러그인. 한 세션에서 Claude와 Codex(GPT)를 조합해 **설계 → 설계 리뷰 → 개발 → 코드 리뷰**를 돌린다. 구독 로그인만으로 동작하며 API 키는 필요 없다.
 
+> **v0.12.2** · 테스트 304 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · GitHub 공개, 마켓플레이스 설치 · dev-full/dev-quick 진입 라우트를 안내 no-op으로 정리하고 pending-route 고아 기계 제거
+
 > **v0.12.1** · team-collab 프로파일 배선(ARCH/CONTRACT 설계 스텝에 포인터 추가, DRAFT 해제) — 문서 전용
 
 > **v0.12.0** · 테스트 319 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · GitHub 공개, 마켓플레이스 설치 · 0.12는 난이도 4등급화(very hard 신설) + 재판정 체크포인트 + dev-solo Codex 셀프리뷰 전환

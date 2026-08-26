@@ -47,7 +47,7 @@ Judge **easy / medium / hard / very hard** at entry, alongside the provisional s
 
 **Fixed:** `harnie-scout` = haiku (frontmatter-pinned).
 
-**Effort-override footnote:** per-spawn Claude subagent effort override and an equivalent Codex MCP reasoning-effort parameter are unverified — where a call site doesn't support either, the very-hard column degrades to model-upgrade-only there (no invented flag).
+**Effort-override footnote (VERIFIED 2026-08-26):** Codex MCP call sites can set call-scoped reasoning effort with `config: {model_reasoning_effort: "high"}`; a typo in the exact `model_reasoning_effort` key is silently ignored by Codex, so its spelling matters. Claude subagents dispatched through the Agent tool have no effort field (confirmed absent), so those call sites can only use model-tier upgrades for the very-hard tier, never an effort override. Verification source: `~/Tradlinx/task2-recovery/effort-e2e.md`.
 
 **dev-solo (Codex-standalone):** the producer is Codex at every stage, and so is the reviewer — a **fresh `codex exec --sandbox read-only -m gpt-5.6-sol` self-review subprocess** (effort high only at `very-hard`) is the entire review path for both design and code reviews, at every altitude; there is no cross-model reviewer to fall back to. This is not a degraded fallback: dev-solo exists so development can continue Codex-standalone when Claude usage/tokens are exhausted, and in that scenario a cross-model reviewer is unavailable by construction — an accepted, documented tradeoff (see `skills/dev-solo/SKILL.md`).
 

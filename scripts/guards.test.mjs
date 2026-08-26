@@ -2,14 +2,14 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isActiveTaskWorktree, taskIdFromActiveTaskWorktree } from "./guards.mjs"
 
-test("isControlPath: 권위 파일·route·lock 보호, 일반 산출물 허용", () => {
+test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
     ".harnie/active.json", ".harnie/plan/x/manifest.json", ".harnie/plan/x/execution.json",
     ".harnie/plan/x/review/u/ledger.json", ".harnie/plan/x/review/u/state.json",
-    ".harnie/plan/x/review/u/receipt.json", ".harnie/pending-route/s.json", ".harnie/state.lock",
+    ".harnie/plan/x/review/u/receipt.json", ".harnie/state.lock",
     ".harnie/plan/x/design/errata.md", ".harnie/plan/x/.arm-errata.json", ".harnie/plan/x/.pending-errata.json",
   ]) assert.equal(isControlPath(p), true, p)
-  for (const p of [".harnie/plan/x/plan.md", ".harnie/plan/x/review/u/round-1.txt", ".harnie/plan/x/review/u/delta.patch", "src/x.ts"])
+  for (const p of [".harnie/pending-route/s.json", ".harnie/plan/x/plan.md", ".harnie/plan/x/review/u/round-1.txt", ".harnie/plan/x/review/u/delta.patch", "src/x.ts"])
     assert.equal(isControlPath(p), false, p)
 })
 
@@ -27,7 +27,7 @@ test("referencesHarnie: .harnie-wt 컨테이너 안의 평범한 파일은 매�
   assert.equal(referencesHarnie("rm -rf .harnie-wt"), true)                          // 컨테이너 자체(모든 run 삭제)
   assert.equal(referencesHarnie("ls .harnie-wt/harnie-foo/.harnie/active.json"), true) // nested 권위 상태
   assert.equal(referencesHarnie("rm -rf .harnie"), true)                             // 기존 단일 .harnie 보호 유지
-  assert.equal(referencesHarnie("cat .harnie/pending-route/x.json"), true)
+  assert.equal(referencesHarnie("cat .harnie/sessions/x.json"), true)
   // trailing slash·glob도 "컨테이너 전체"를 뜻하므로 매치돼야 한다(셸 탭완성·정리 명령의 흔한 형태).
   assert.equal(referencesHarnie("rm -rf .harnie-wt/"), true)
   assert.equal(referencesHarnie("rm -rf .harnie-wt/*"), true)
