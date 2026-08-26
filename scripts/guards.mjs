@@ -9,7 +9,6 @@ const CONTROL_BASENAMES = new Set([
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")
   if (!p.startsWith(".harnie/")) return false
-  if (p.startsWith(".harnie/pending-route/")) return true
   if (p.startsWith(".harnie/sessions/")) return true // 세션→run(worktree) 바인딩 보호(T2 DEC-001)
   if (p === ".harnie/state.lock") return true
   const base = p.split("/").pop()
