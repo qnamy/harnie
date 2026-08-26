@@ -1,8 +1,8 @@
-<!-- DRAFT — not wired; activation gated on Agent Teams E2E stage 2 -->
+<!-- wired 2026-08-26; see §8 for runtime gate -->
 
 # Team Collaboration Profile (harnie layer)
 
-General Agent Teams rules — routing (5-question test), hard rules, member axes, templates, known limitations — live in `~/workspace/agent-ops/claude/agent-teams.md` and are **not restated here**. Read that file first; this document adds only what is harnie-specific. On conflict, the general file owns team mechanics and this file owns harnie's pipeline integration.
+General Agent Teams rules — routing (5-question test), hard rules, member axes, templates, known limitations — live in `~/workspace/agent-ops/claude/agent-teams.md` and are **not restated here**. Read that file first; this document adds only what is harnie-specific. On conflict, the general file owns team mechanics and this file owns harnie's pipeline integration. If that file is unreadable in this environment, see §8 gate 4 — the profile stays inert rather than proceeding on an unresolved test.
 
 ## 1. Where it applies
 
@@ -48,10 +48,13 @@ A solo `harnie-designer` that finds it needs collaboration does not form a team 
 
 ## 8. Preconditions
 
-All three must hold before any team is formed, and are checked at the stage boundary:
+Preconditions met (2026-08-26: 2 blocking E2E PASS, flag globally enabled).
+
+All four remain runtime gates before any team is formed, and are checked at the stage boundary:
 
 1. `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1` is in effect for this session.
 2. The session is **interactive** — headless `-p` always takes the existing single-subagent path, flag or not.
 3. Both stage-2 E2E checks **PASS**: ① plugin hooks fire inside teammate sessions, ② unnamed dispatches remain ordinary subagents while the flag is on.
+4. The general rules file (`~/workspace/agent-ops/claude/agent-teams.md`, §1's normative source) is **readable in this environment**. This path is machine-local, not shipped inside the plugin — an installation without it (e.g. via the marketplace, without the author's `agent-ops` checkout) cannot resolve the ≥3-of-5 test or the team mechanics it defines. On any read failure, this profile **stays inert** and `harnie:dev` takes the single-`harnie-designer` path — never form a team on an unresolved gating criterion.
 
-Until all three hold, this profile is inert and `harnie:dev` runs the existing solo-designer path.
+Preconditions are met, but this profile stays inactive in any session where gate 1, 2, or 4 does not hold.
