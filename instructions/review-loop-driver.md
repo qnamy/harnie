@@ -2,7 +2,7 @@
 
 `loop.md` owns the contract (ledger, transitions, progress, contest); this file owns how to run it deterministically. Never merge ledgers or judge state transitions by hand — `scripts/loop.mjs` prevents false approval.
 
-**Reviewer = producer's opposite provider.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent — or the task's `harnie-task-runner` inline on the L runner path, legitimate because it writes no source).
+**Reviewer = producer's opposite provider, in `harnie:dev`.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent — or the task's `harnie-task-runner` inline on the L runner path, legitimate because it writes no source). **dev-solo is the exception**: both producer and reviewer are Codex — the reviewer is a fresh, context-isolated `codex exec --sandbox read-only` self-review subprocess, not a subagent (see `skills/dev-solo/SKILL.md`).
 
 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = the review-unit directory (`.harnie/plan/<slug>/review/<unit>/`, or `.harnie/review/<design|code>/` inside a task worktree). `<repo>` = the root this loop concerns — the run workroot, or the task's isolated worktree / member repo workroot on the L path.
 
@@ -45,6 +45,6 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> --ledger <dir>/ledger.json \
 
 ## R5. Optional final sign-off
 
-For substantial changes: one fresh cross-model sign-off (code → fresh Claude review of the uncommitted diff; design → fresh Codex review). Never stateless re-review inside the loop.
+For substantial changes: one fresh cross-model sign-off (code → fresh Claude review of the uncommitted diff; design → fresh Codex review). Never stateless re-review inside the loop. **dev-solo has no separate sign-off step**: its per-round self-review (fresh `codex exec` subprocess) already is the sign-off — there is no cross-model reviewer to add on top of it.
 
 > Invariant: every modification is reviewed; keep receipts (verdict, ledger, progress rationale, contest sidecars, fix summary). Not done while any blocking issue is open.

@@ -33,8 +33,10 @@ function gitCommonDir(repo) {
 
 // `.harnie-wt/`만 info/exclude에 멱등 등록한다(커밋 불필요·.gitignore 비침습). main root의 tree 캡처가
 // nested worktree를 embedded content로 걷지 않게 하는 데 필요한 항목이다. `.harnie/`는 delta.mjs의
-// captureTree pathspec이 이미 제외하며, gitignore-style exclude에도 넣으면 그 명시 pathspec의 `git add`가
-// ignored-path 오류로 실패하므로 여기에 추가하면 안 된다.
+// captureTree가 이제 add 후 `git rm --cached --ignore-unmatch`로 제외한다(과거엔 exclude pathspec을 썼고,
+// `.harnie/`가 .gitignore에도 등재돼 있으면 그 pathspec이 ignored-path 오류로 실패했다 — delta.mjs가
+// 두 단계 방식으로 고쳤다). 그 실패 제약은 사라졌지만, 그렇다고 `.harnie/`를 여기 info/exclude에 추가로
+// 넣을 필요가 생기는 것도 아니다(추가해도 무해하지만 아무 것도 얻지 못한다) — 불필요한 복잡도를 만들지 않는다.
 export function ensureExcludeEntries(repo) {
   const excludePath = join(gitCommonDir(repo), "info", "exclude")
   mkdirSync(dirname(excludePath), { recursive: true })

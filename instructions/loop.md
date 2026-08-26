@@ -5,7 +5,7 @@ Single definition of the review loop: ledger rules, state transitions, progress,
 ## Roles
 
 - **Producer** = the artifact's author: designer (Claude) in design loops, builder (Codex) in code loops.
-- **Reviewer** = the producer's **opposite provider**, always read-only. Design = Codex reviews; code = Claude reviews.
+- **Reviewer** = the producer's **opposite provider**, always read-only, in `harnie:dev`. Design = Codex reviews; code = Claude reviews. **dev-solo is the exception**: producer and reviewer are both Codex — a fresh, context-isolated `codex exec --sandbox read-only` self-review subprocess substitutes for the cross-provider reviewer (see `skills/dev-solo/SKILL.md`).
 
 ## Ledger (approval evidence)
 
@@ -62,4 +62,4 @@ If resolving an issue requires an out-of-run action (real external systems, cred
 
 - Every modification is reviewed; work is not done while any blocking issue is open.
 - Preserve a receipt per round: verdict, ledger, progress rationale, fix summary (and contest sidecars).
-- The reviewer is never the producer's provider, and never writes.
+- The reviewer is never the producer's provider, and never writes — in `harnie:dev`. dev-solo is the exception (see "Roles" above): its reviewer is a fresh, context-isolated subprocess, not a subagent, and never writes either way.

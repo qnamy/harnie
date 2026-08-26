@@ -1,11 +1,11 @@
 ---
 name: harness-digest
-description: Analyze a finished dev-full run's execution state, review ledgers, and archived unit reviews to propose harness improvements — instruction prunes, granularity fixes, tier changes — with measured evidence. Propose only; the user chooses what to adopt, and incident-derived invariants are never auto-removed.
+description: Analyze a finished harnie:dev run's execution state, review ledgers, and archived unit reviews to propose harness improvements — instruction prunes, granularity fixes, tier changes — with measured evidence. Propose only; the user chooses what to adopt, and incident-derived invariants are never auto-removed.
 ---
 
 # Harness Digest (Run Telemetry → Harness-Improvement Proposals)
 
-Apply the quality-digest principle — cluster recurring evidence, propose promotions, never change anything automatically — to **the harness itself**. Input is one or more finished dev-full runs; output is a ranked proposal list the user accepts or rejects. This is the mechanism that turns each run's measured waste into the next version's contract, without self-modifying-harness risk: **this skill writes no files and changes no configuration.**
+Apply the quality-digest principle — cluster recurring evidence, propose promotions, never change anything automatically — to **the harness itself**. Input is one or more finished harnie:dev runs; output is a ranked proposal list the user accepts or rejects. This is the mechanism that turns each run's measured waste into the next version's contract, without self-modifying-harness risk: **this skill writes no files and changes no configuration.**
 
 ## Input (all existing artifacts; no new instrumentation)
 

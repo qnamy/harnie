@@ -26,6 +26,9 @@ export const WATCHDOG_TIERS = {
   easy: WATCHDOG_DEFAULTS,
   medium: WATCHDOG_DEFAULTS,
   hard: { wallClockBudgetMs: 60 * 60_000, maxCodexCalls: 25 },
+  // very-hard: 사용자 지시에 신규 수치 없음 — hard와 동일 예산을 의도적으로 재사용한다.
+  // 실측 후 재조정은 후속 과제(plan.md "가정" 절).
+  "very-hard": { wallClockBudgetMs: 60 * 60_000, maxCodexCalls: 25 },
 }
 export function watchdogBudget(difficulty) {
   return WATCHDOG_TIERS[difficulty] || WATCHDOG_DEFAULTS

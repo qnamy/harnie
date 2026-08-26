@@ -19,7 +19,8 @@ function git(repo, args, env) {
 export function captureTree(repo) {
   const idx = join(mkdtempSync(join(tmpdir(), "harnie-idx-")), "index")
   const env = { GIT_INDEX_FILE: idx }
-  git(repo, ["add", "-A", "--", ".", ":(exclude).harnie"], env)
+  git(repo, ["add", "-A", "--", "."], env)
+  git(repo, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".harnie"], env)
   return git(repo, ["write-tree"], env).trim()
 }
 

@@ -33,6 +33,8 @@ try {
   // 여기서 찾아야 늘 존재하지 않는 경로를 보게 되므로 게이트가 무력해진다.
   if (hasPendingRoute(mainRoot, p.session_id)) {
     const gated = ["Write", "Edit", "MultiEdit", "NotebookEdit", "Task", "Agent", "Bash"].includes(toolName) || classifyCodex(toolName).isCodex
+    // 0.12.1에서 dev-full/dev-quick 문구 제거 예정(스킬은 이미 0.12.0에서 삭제됨) — 이 메시지는 과거 pending-route
+    // 잔존이라는 극단적 엣지케이스 방어용이며, 사용자가 실제로 이 경로를 아직 밟을 수 있으므로 안내 자체는 유효하다.
     if (gated) denyPreTool("라우팅 미완료(pending-route) — 먼저 track 스킬(dev-full/dev-quick)을 호출하거나 `/harnie:dev-full`로 직접 진입하세요")
   }
   const ctx = loadContext(root)

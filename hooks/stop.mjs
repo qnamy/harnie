@@ -18,6 +18,7 @@ try {
   const mainRoot = findRoot(p.cwd)
   const root = resolveRoot(p.cwd, p.session_id)
   const routeState = getRouteState(mainRoot, p.session_id)
+  // 0.12.1에서 dev-full/dev-quick 문구 제거 예정(스킬은 이미 0.12.0에서 삭제됨) — 과거 pending-route 잔존 엣지케이스 방어용 메시지.
   if (routeState === "pending") blockStop("라우팅 미완료(pending-route) — track 스킬(dev-full/dev-quick)을 호출해 라우팅을 완료한 뒤 종료하세요")
   const ctx = loadContext(root)
   if (!ctx.active) allow()

@@ -246,6 +246,17 @@ test("decideWatchdog: difficulty 티어 — hard는 60분/25콜, 미지·미지�
   assert.equal(r.maxCodexCalls, 25)
 })
 
+test("decideWatchdog: very-hard는 hard와 동일 예산 재사용(신규 수치 없음, 의도된 기본값)", () => {
+  const startedAt = "2026-08-18T00:00:00.000Z"
+  const base = Date.parse(startedAt)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 0, now: base + 45 * 60_000, difficulty: "very-hard" }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 20, now: base, difficulty: "very-hard" }).deny, false)
+  assert.equal(decideWatchdog({ startedAt, codexCalls: 25, now: base, difficulty: "very-hard" }).deny, true)
+  const r = decideWatchdog({ startedAt, codexCalls: 0, now: base, difficulty: "very-hard" })
+  assert.equal(r.wallClockBudgetMs, 60 * 60_000)
+  assert.equal(r.maxCodexCalls, 25)
+})
+
 test("decideWatchdog(0.11): 연장 산식 effective=base×(1+ext), pre-call >= 경계, builderBoundAt 기산·startedAt 폴백", () => {
   const base = Date.parse("2026-01-01T00:00:00.000Z")
   const startedAt = new Date(base).toISOString()

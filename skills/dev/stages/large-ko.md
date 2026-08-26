@@ -4,7 +4,7 @@
 
 ## 시퀀스
 
-1. **ARCH 설계 + 리뷰 (ARCH 트리거가 성립할 때만)** — 트리거: ① 신규 컴포넌트/모듈/서비스 ② 경계 또는 모듈/레포 간 계약 변경 ③ 데이터 소유권 또는 스토리지 선택 ④ 기술 선택 ⑤ SPOF/스케일링/가용성 결정. 프로듀서 = `harnie-designer`(fable; 프로파일 경로 `design-authoring-arch.md`, formal)가 `design/arch-rev-N.md`(리비전마다 새 파일)를 작성; 리뷰어 = **ARCH 고도**의 Codex, DR 루프 사용(`review/design-arch/`, 아티팩트 `dr:` 해시). 근거 없는 공식 아키텍처 단계는 스코프 인플레이션이다 — 기존 아키텍처가 유효하면 생략한다.
+1. **ARCH 설계 + 리뷰 (ARCH 트리거가 성립할 때만)** — 트리거: ① 신규 컴포넌트/모듈/서비스 ② 경계 또는 모듈/레포 간 계약 변경 ③ 데이터 소유권 또는 스토리지 선택 ④ 기술 선택 ⑤ SPOF/스케일링/가용성 결정. 프로듀서 = `harnie-designer`(opus — hard는 effort high; very-hard는 `fable`·폴백 opus+effort-high; `model-matrix.md` §3의 ARCH 행 기준; 프로파일 경로 `design-authoring-arch.md`, formal)가 `design/arch-rev-N.md`(리비전마다 새 파일)를 작성; 리뷰어 = **ARCH 고도**의 Codex, DR 루프 사용(`review/design-arch/`, 아티팩트 `dr:` 해시). 근거 없는 공식 아키텍처 단계는 스코프 인플레이션이다 — 기존 아키텍처가 유효하면 생략한다.
 2. **태스크 분할 초안 → 태스크 스코프 그라운딩 → CONTRACT.** 분해 초안을 작성한 뒤, 초안 태스크별로 `harnie-scout`를 병렬 스폰해 해당 코드 경로, 기존 테스트, 런타임/드라이버·세션 시맨틱스를 검증한다 — 태스크별 환경 팩트 시트다. 프로듀서 = `harnie-designer`(프로파일 `design-authoring-contract.md`)가 **그 증거 위에서** `design/contract-rev-N.md`를 작성한다: 분해 테이블(태스크별 독립-리뷰-가치 근거 — 기본 병합 규칙은 프로파일에 있다), 태스크 간 계약, 팩트 시트, 검증 전략(자동/사람). 리뷰어 = **CONTRACT 고도**의 Codex(`review/design-contract/`).
 3. **승인 (1회)** — `plan.md` = CONTRACT 요약 + 매니페스트 블록(`gates: [final-review]`, `integrationVerification` 필수); SKILL.md의 승인 게이트 규칙이 적용된다(증거 증명, arm → 원샷 AskUserQuestion).
 4. **브리프** — 태스크별 `tasks/t<id>-brief.md`: 매니페스트 항목 + 해당 태스크의 분해 행, 관련 계약 섹션, 팩트 시트(발췌) + notepad 발췌 + `builder-contract.md` 경로. 승인된 교정이 인용된 섹션을 건드리면 `.vN+1`(새 파일)로 재발행한다.

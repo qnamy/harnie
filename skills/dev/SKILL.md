@@ -5,7 +5,7 @@ description: harnie's single development pipeline (0.11) — requirements ground
 
 # dev Orchestrator — Single Pipeline, Size-Gated Stages
 
-You (main) orchestrate one run end to end. Roles are fixed: **design = Claude produces → Codex reviews; code = Codex produces → Claude reviews** — every modification is reviewed by the opposite provider. Wiring lives in `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md` — **Read it now (Step 0)**; models come from `instructions/model-matrix.md`. The bootstrap hook already created this run (workroot in its context message; recover via `<main repo>/.harnie/sessions/<session>.json`); confirm `.harnie/active.json` exists — if absent, STOP and report (never self-init).
+You (main) orchestrate one run end to end. Roles are fixed for this `harnie:dev` pipeline: **design = Claude produces → Codex reviews; code = Codex produces → Claude reviews** — every modification is reviewed by the opposite provider (dev-solo is the one exception: producer and reviewer are both Codex, via a fresh self-review subprocess — see `dev-solo/SKILL.md`). Wiring lives in `${CLAUDE_PLUGIN_ROOT}/instructions/review-loop-driver.md` — **Read it now (Step 0)**; models come from `instructions/model-matrix.md`. The bootstrap hook already created this run (workroot in its context message; recover via `<main repo>/.harnie/sessions/<session>.json`); confirm `.harnie/active.json` exists — if absent, STOP and report (never self-init).
 
 ## Size (S/M/L) — provisional → confirmed, upward-only
 
@@ -14,6 +14,7 @@ The entry command judged a provisional size; **if you entered without it** (dire
 - **S** — localized fix: grounding → baseline capture → build → tier verification → code review loop → report. No approval gate, no manifest.
 - **M** — one review unit with design judgment: grounding → lightweight plan (approach + single-task manifest `t1`/`code`, scope tests, `integrationVerification`, `gates: []`, human-verification items) → **approval** → TASK-DETAIL design + design review → `set-task --task t1 --run-status building` (enables builder thread binding + watchdog) → baseline/seal → build → code review loop → `verify --task t1` → `verify --integration` → report.
 - **L** — read `stages/large.md` when confirmed.
+- **Difficulty re-judgment**: two checkpoints (right after grounding; right before the approval gate for M/L, right before the build call for S) drive escalation (automatic + one-line notice) or de-escalation (needs `AskUserQuestion`); record with `execution.mjs set-difficulty --root <repo> --slug <slug> --difficulty <easy|medium|hard|very-hard>` — for M/L, sync into `plan.md` before arming too (see `model-matrix.md` §2).
 
 ## MUST
 
@@ -32,7 +33,7 @@ The entry command judged a provisional size; **if you entered without it** (dire
 - Run full test suites at the unit stage, or re-run an unchanged verification.
 - Merge ledgers, close IDs, or declare verdicts by hand; self-approve; unlatch STALLED without a user-surfaced `--reentry`.
 - Accept a review finding that adds a mechanism without a concrete mistake scenario, or one outside the current altitude — contest it.
-- Let the reviewer share the producer's provider, or let any reviewer write.
+- Let the reviewer share the producer's provider (dev-solo is the exception — see `dev-solo/SKILL.md`), or let any reviewer write.
 - Build schedulers, dependency engines, retries-with-backoff, or any execution infrastructure the docs don't define — if a guard denies something unexpectedly, STOP and report, never work around.
 - Bash anything referencing `.harnie` except the sanctioned CLIs; hand-edit control files.
 
