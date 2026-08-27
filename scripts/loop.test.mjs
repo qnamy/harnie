@@ -427,34 +427,6 @@ test("apply CLI: --ledger traversal(.harnie/../src) → die", () => {
   ]), 2)
 })
 
-// ── 워크스페이스 run root(비-git, active.json에 workspaceRoot·repos) ──
-function workspaceRunRoot() {
-  const w = mkdtempSync(join(tmpdir(), "harnie-loop-ws-"))
-  const repo = join(w, "repoA")
-  execFileSync("git", ["init", "-q", repo])
-  execFileSync("git", ["-C", repo, "config", "user.email", "t@t"])
-  execFileSync("git", ["-C", repo, "config", "user.name", "t"])
-  writeFileSync(join(repo, "a.txt"), "a\n")
-  execFileSync("git", ["-C", repo, "add", "."])
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "init"])
-  const runRoot = join(w, ".harnie-wt", "harnie-ws")
-  mkdirSync(join(runRoot, ".harnie"), { recursive: true })
-  writeFileSync(join(runRoot, ".harnie", "active.json"), JSON.stringify({
-    track: "plan", slug: "ws", planHash: null, readOnlyThreads: [],
-    workspaceRoot: w, repos: { repoA: { repo, workroot: repo } },
-  }) + "\n")
-  return { w, repo, runRoot }
-}
-
-test("capture: workspace run root → ws:<sha256> 합성 아티팩트, 멤버 변경에 반응", () => {
-  const { repo, runRoot } = workspaceRunRoot()
-  const r1 = runRaw(["capture", runRoot])
-  assert.match(r1.baselineSHA, /^ws:[0-9a-f]{64}$/)
-  writeFileSync(join(repo, "a.txt"), "a\nCHANGED\n")
-  const r2 = runRaw(["capture", runRoot])
-  assert.notEqual(r2.baselineSHA, r1.baselineSHA)
-})
-
 test("capture --record: positional repo .harnie에 monotonic baseline-N.json 기록", () => {
   const repo = tmpBase()
   const dir = join(repo, ".harnie", "review", "code")
@@ -466,44 +438,10 @@ test("capture --record: positional repo .harnie에 monotonic baseline-N.json 기
   assert.equal(runFailRaw(["capture", repo, "--record", join(dirname(repo), "outside")]), 2)
 })
 
-test("capture --record: workspace member baseline을 sentinel-verified run root .harnie에 기록", () => {
-  const { repo, runRoot } = workspaceRunRoot()
-  const dir = join(runRoot, ".harnie", "plan", "ws", "review", "task-a")
-  const result = runRaw(["capture", repo, "--record", dir])
-  assert.match(result.recordFile, /\/baseline-1\.json$/)
-  assert.equal(JSON.parse(readFileSync(result.recordFile, "utf8")).baselineSHA, result.baselineSHA)
-  const other = tmpBase()
-  assert.equal(runFailRaw(["capture", other, "--record", dir]), 2)
-})
-
-test("capture: 비-git·비-workspace 디렉터리 → die / delta: workspace run root → die", () => {
+test("capture·delta: 비-git 디렉터리 → die", () => {
   const plain = mkdtempSync(join(tmpdir(), "harnie-loop-plain-"))
   assert.equal(runFailRaw(["capture", plain]), 2)
-  const { runRoot } = workspaceRunRoot()
-  assert.equal(runFailRaw(["delta", runRoot, SHA40]), 2)
-})
-
-test("apply CLI: workspace run root — 합성(ws:)·멤버 repo 40-hex 아티팩트 둘 다 허용, 임의 SHA는 die", () => {
-  const { repo, runRoot } = workspaceRunRoot()
-  const mk = (tag, artifact) => {
-    const dir = join(runRoot, ".harnie", "review", tag)
-    mkdirSync(dir, { recursive: true })
-    writeFileSync(R(dir), REJ)
-    return ["apply", "--root", runRoot, "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir), "--artifact", artifact]
-  }
-  const wsArt = runRaw(["capture", runRoot]).baselineSHA           // 합성
-  assert.equal(runRaw(mk("g", wsArt)).committed, true)             // 게이트형(합성) OK
-  const memberArt = runRaw(["capture", repo]).baselineSHA          // 멤버 40-hex
-  assert.equal(runRaw(mk("t", memberArt)).committed, true)         // task형(멤버) OK
-  assert.equal(runFailRaw(mk("x", SHA40)), 2)                      // 임의 SHA die
-})
-
-test("capture: 등록 repo가 빈 workspace run root → die(repo-add 안내)", () => {
-  const { runRoot } = workspaceRunRoot()
-  writeFileSync(join(runRoot, ".harnie", "active.json"), JSON.stringify({
-    track: "plan", slug: "ws", workspaceRoot: dirname(dirname(runRoot)), repos: {},
-  }) + "\n")
-  assert.equal(runFailRaw(["capture", runRoot]), 2)
+  assert.equal(runFailRaw(["delta", plain, SHA40]), 2)
 })
 
 // 실측 기록(관측 ⑥): 동결 manifest의 파일 수 추정 대비 실제 changedPaths를 사이드카로 남긴다.

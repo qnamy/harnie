@@ -2,7 +2,6 @@
 // 핵심: HEAD가 아니라 **직전 dirty 상태 대비**(기존 사용자 변경 오귀속 방지). `.harnie/` 제외.
 // producer 자기보고에 의존하지 않고 orchestrator가 독립 생성.
 import { execFileSync } from "node:child_process"
-import { createHash } from "node:crypto"
 import { mkdtempSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -22,19 +21,6 @@ export function captureTree(repo) {
   git(repo, ["add", "-A", "--", "."], env)
   git(repo, ["rm", "-r", "-q", "--cached", "--ignore-unmatch", "--", ".harnie"], env)
   return git(repo, ["write-tree"], env).trim()
-}
-
-/**
- * 워크스페이스 run(멀티레포)의 "전체 tree" 아티팩트 — 등록된 멤버 repo workroot들의 captureTree를
- * 키 정렬로 합성한 `ws:<sha256>` 문자열. 단일-repo의 40-hex tree SHA와 같은 자리(게이트 reviewedPostSHA
- * 바인딩)에 쓰이며, 어느 멤버 repo든 변경되면 값이 바뀐다. repos = {key: {workroot}}.
- */
-export function captureWorkspaceTree(repos) {
-  const entries = Object.entries(repos || {}).map(([key, v]) => [key, captureTree(v.workroot)])
-  if (entries.length === 0) return null
-  entries.sort((a, b) => (a[0] < b[0] ? -1 : 1))
-  const canon = entries.map(([k, sha]) => `${k}=${sha}`).join("\n")
-  return "ws:" + createHash("sha256").update(canon).digest("hex")
 }
 
 /**

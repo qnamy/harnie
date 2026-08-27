@@ -114,7 +114,7 @@ export function taskIdFromActiveTaskWorktree(root, slug, candidate) {
   return m ? m[1] : null
 }
 
-function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots = [] }) {
+function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return false
   const toks = String(cmd || "").trim().split(/\s+/)
   if (toks[0] !== "node") return false
@@ -123,8 +123,7 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots
   if (!trustedClis.has(scriptAbs)) return false
   if (activeRoot == null) return true
   const root = resolve(activeRoot)
-  // workspace run(멀티레포): 등록된 멤버 repo workroot도 loop/worktree의 유효 대상이다(활성 run root 외).
-  const roots = [root, ...memberRoots.map((r) => resolve(r))]
+  const roots = [root]
   const rest = toks.slice(2)
   const flagVal = (name) => { const i = rest.lastIndexOf(name); return i >= 0 ? rest[i + 1] : undefined }
   const isActiveRoot = (v) => v !== undefined && resolve(root, v) === root
@@ -149,22 +148,22 @@ function isAutoAllowSanctionedSub(cmd) {
 }
 // 신뢰 CLI를 지목했는데 승인에 실패한 명령의 원인 진단. 이게 없으면 deny 이유가 "loop.mjs로만 하라"인데
 // 정작 loop.mjs를 쓰고 있는 자기모순 메시지가 되어, 실측에서 오케스트레이터가 .sh 우회로 빠졌다.
-function sanctionFailureWhy(cmd, { trustedClis, activeRoot, memberRoots = [] }) {
+function sanctionFailureWhy(cmd, { trustedClis, activeRoot }) {
   if (![...trustedClis].some((p) => cmd.includes(p))) return null
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return "셸 메타문자·리다이렉션 포함(신뢰 CLI는 단일 평문 명령만 승인)"
   const toks = cmd.trim().split(/\s+/)
   if (toks[0] !== "node" || !isAbsolute(toks[1] || "") || !trustedClis.has(resolve(toks[1])))
     return "`node <신뢰 CLI 절대경로> …` 형태가 아님"
-  return `root/repo 인자가 활성 run 바인딩과 불일치(활성 root ${activeRoot}, 등록 멤버 workroot ${memberRoots.length}개) — 인자 오타이거나, 훅이 이 세션의 run 문맥을 읽지 못해(비-owner 세션 등) 멤버 repo가 미등록으로 보이는 경우`
+  return `root/repo 인자가 활성 run 바인딩과 불일치(활성 root ${activeRoot}) — 인자 오타이거나, 훅이 이 세션의 run 문맥을 읽지 못한 경우(비-owner 세션 등)`
 }
-export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null, memberRoots = [] }) {
+export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
   const cmd = String(command || "")
-  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug, memberRoots })) {
+  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
   }
   if (referencesHarnie(cmd)) {
-    const why = sanctionFailureWhy(cmd, { trustedClis, activeRoot, memberRoots })
+    const why = sanctionFailureWhy(cmd, { trustedClis, activeRoot })
     return { deny: true, reason: why ? `Bash로 .harnie 접근 금지 — 신뢰 CLI 형태이나 승인 실패: ${why}` : "Bash로 .harnie 접근 금지 — 상태 접근은 loop.mjs·execution.mjs(신뢰 CLI)로만" }
   }
   return { deny: false, autoAllow: false }
@@ -183,8 +182,8 @@ export function decideTask({ subagentType, phase }) {
   return { deny: false }
 }
 
-// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 repo/멤버 workroot/task worktree cwd만 허용한다.
-export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {}, taskWorktreeExists = {}, memberRoots = [] }) {
+// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 run root cwd만 허용한다.
+export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {} }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
     if (!isReply) {
@@ -200,12 +199,12 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
     if (sandbox === "read-only") return { deny: false }
     if (sandbox !== "workspace-write")
       return { deny: true, reason: `빌더 codex sandbox는 정확히 "workspace-write"만(${JSON.stringify(sandbox)} 차단 — danger-full-access·미지정 불가)` }
-    const roots = [root, ...memberRoots]
+    const roots = [root]
     const taskId = roots.map((r) => taskIdFromActiveTaskWorktree(r, slug, cwd)).find((id) => id != null)
     const directRoot = roots.includes(cwd)
     const allowedCwd = cwd != null && root != null && (directRoot || taskId != null)
     if (!allowedCwd)
-      return { deny: true, reason: `빌더 codex cwd는 활성 repo root·등록된 멤버 repo workroot 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)}·등록 멤버 workroot 또는 그 task worktree)` }
+      return { deny: true, reason: `빌더 codex cwd는 활성 repo root 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)} 또는 그 task worktree)` }
     if (Array.isArray(buildingUnboundTasks)) {
       if (taskId != null && !buildingUnboundTasks.includes(taskId))
         return { deny: true, reason: `task worktree cwd의 task ${taskId}가 building·미바인딩 상태 아님` }
@@ -215,8 +214,8 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
             return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
         } else {
           const serialTaskId = buildingUnboundTasks.length === 1 ? buildingUnboundTasks[0] : null
-          if (!serialTaskId || taskRepoWorkroots[serialTaskId] !== cwd || taskWorktreeExists[serialTaskId] !== false)
-            return { deny: true, reason: "run-root 빌더 부트스트랩은 marker 필요 — marker 없는 serial 예외는 단일 building-unbound·task worktree 부재일 때만" }
+          if (!serialTaskId || taskRepoWorkroots[serialTaskId] !== cwd)
+            return { deny: true, reason: "run-root 빌더 부트스트랩은 marker 필요 — marker 없는 serial 예외는 단일 building-unbound일 때만" }
         }
       }
     } else if (!hasBuildingUnbound)

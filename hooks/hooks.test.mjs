@@ -188,7 +188,6 @@ test("codex: executing 첫 빌더 호출은 building task 자신의 worktree cwd
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root })))
   exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root }), null)
-  assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, cwd: root })))
   // cwd 누락이면 building-unbound라도 deny
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, cwd: root })))
 })
@@ -261,31 +260,11 @@ test("PostToolUse: workspace-write codex 성공 → 유일 building-unbound task
   assert.equal(ex.tasks.T1.builderThreadId, tid)
 })
 
-test("PostToolUse: 복수 building을 tool_input.cwd의 task worktree로 각각 귀속하고 lookalike는 거부", () => {
-  const { root, dir } = setupRepo()
-  const manifest = { ...MANIFEST, tasks: [...MANIFEST.tasks, { id: "T2", deps: [], reviewUnit: "task-b", scope: ["src/b/"], verification: MANIFEST.tasks[0].verification }] }
-  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(manifest, null, 2) + "\n```\n")
-  toExecuting(root)
-  for (const id of ["T1", "T2"]) exec(["set-task", "--root", root, "--slug", "feat-x", "--task", id, "--run-status", "building"])
-  const wt1 = join(root, ".harnie-wt", "harnie-feat-x-tT1")
-  const wt2 = join(root, ".harnie-wt", "harnie-feat-x-tT2")
-  const lookalike = join(root, ".harnie-wt", "harnie-feat-x-tT1-copy")
-  for (const p of [wt1, wt2, lookalike]) mkdirSync(p, { recursive: true })
-  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: lookalike }, tool_response: '{"threadId":"lookalike"}', cwd: root })
-  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: wt2 }, tool_response: '{"threadId":"thread-2"}', cwd: root })
-  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: wt1 }, tool_response: '{"threadId":"thread-1"}', cwd: root })
-  const ex = JSON.parse(readFileSync(join(dir, "execution.json"), "utf8"))
-  assert.equal(ex.tasks.T1.builderThreadId, "thread-1")
-  assert.equal(ex.tasks.T2.builderThreadId, "thread-2")
-  assert.ok(!Object.values(ex.tasks).some((t) => t.builderThreadId === "lookalike"))
-})
-
 test("rebind marker: run-root 호출만 지정 task에 원자 재바인딩하고 marker를 소거", () => {
   const { root, dir } = setupRepo()
   toExecuting(root)
   exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
-  const firstWt = join(root, ".harnie-wt", "harnie-feat-x-tT1"); mkdirSync(firstWt, { recursive: true })
-  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: firstWt }, tool_response: '{"threadId":"old-thread"}', cwd: root })
+  hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, tool_response: '{"threadId":"old-thread"}', cwd: root })
   exec(["rebind-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--reason", "finding:final-review:CR-001"])
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, cwd: root }), null)
   hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, tool_response: '{"threadId":"new-thread"}', cwd: root })
@@ -843,58 +822,6 @@ test("PostToolUse: owner(sessionId 일치)의 등록·승인 흐름은 그대로
   const rid = "019facda-1111-2222-3333-444455550002"
   hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "read-only" }, tool_response: `{"threadId":"${rid}"}`, ...own })
   assert.ok(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).readOnlyThreads.includes(rid))
-})
-
-// ── 워크스페이스 run 통합(멀티레포) ──────────────────────────────────────
-test("워크스페이스 run: 오너 세션 승인 전 멤버 repo 쓰기 deny·run 상태 쓰기 allow, 타 세션은 워크스페이스에서 게이트 없음", () => {
-  const w = mkdtempSync(join(tmpdir(), "harnie-hooks-ws-"))
-  const repoA = join(w, "repoA")
-  execFileSync("git", ["init", "-q", repoA])
-  execFileSync("git", ["-C", repoA, "config", "user.email", "t@t"])
-  execFileSync("git", ["-C", repoA, "config", "user.name", "t"])
-  mkdirSync(join(repoA, "src"), { recursive: true }); writeFileSync(join(repoA, "src", "x.js"), "x")
-  execFileSync("git", ["-C", repoA, "add", "."])
-  execFileSync("git", ["-C", repoA, "commit", "-q", "-m", "init"])
-  const own = { cwd: w, session_id: "s-ws" }
-  // 실제 bootstrap 훅으로 workspace run 생성(세션 바인딩 포함)
-  hook(BOOT, { hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev ws hook task", ...own })
-  const slug = slugify("ws hook task")
-  const runRoot = worktreeDirFor(w, `harnie/${slug}`)
-  assert.ok(existsSync(join(runRoot, ".harnie", "active.json")))
-  const added = exec(["repo-add", "--root", runRoot, "--repo", repoA])
-  assert.equal(added.key, "repoA")
-  // 오너 세션: 승인 전 멤버 workroot 소스 쓰기 deny(워크스페이스 안은 전부 승인-전 게이트)
-  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(added.workroot, "src", "n.js") }, ...own })))
-  assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(w, "somewhere.txt") }, ...own })))
-  // 오너 세션: run 상태 산출물(plan.md)은 allow
-  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(runRoot, ".harnie", "plan", slug, "plan.md") }, ...own }), null)
-  // 다른 세션: 같은 워크스페이스 아무 데나 써도 게이트 없음(W에 active.json이 없으므로 비활성)
-  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(w, "other-session.txt") }, cwd: w, session_id: "s-other" }), null)
-  assert.equal(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(repoA, "src", "x.js") }, cwd: repoA, session_id: "s-other" }), null)
-})
-
-// 실측 회귀(관측 ④): 세션 id 교체(재개·컴팩션)로 비-owner가 된 세션이 run root에서 신뢰 CLI를 부르면,
-// 저하 분기가 멤버 workroot 문맥을 안 넘겨 `loop.mjs delta <멤버 repo>`가 세션 중반부터 일제히 차단됐다.
-test("워크스페이스 run: 비-owner 세션도 멤버 repo 대상 신뢰 CLI(delta)는 차단하지 않음", () => {
-  const w = mkdtempSync(join(tmpdir(), "harnie-hooks-ws-nonowner-"))
-  const repoA = join(w, "repoA")
-  execFileSync("git", ["init", "-q", repoA])
-  execFileSync("git", ["-C", repoA, "config", "user.email", "t@t"])
-  execFileSync("git", ["-C", repoA, "config", "user.name", "t"])
-  writeFileSync(join(repoA, "x.js"), "x")
-  execFileSync("git", ["-C", repoA, "add", "."])
-  execFileSync("git", ["-C", repoA, "commit", "-q", "-m", "init"])
-  hook(BOOT, { hook_event_name: "UserPromptSubmit", prompt: "/harnie:dev ws nonowner task", cwd: w, session_id: "s-ws-owner" })
-  const runRoot = worktreeDirFor(w, `harnie/${slugify("ws nonowner task")}`)
-  const added = exec(["repo-add", "--root", runRoot, "--repo", repoA])
-  const mid = { cwd: runRoot, session_id: "s-ws-midswap" } // owner 아님, cwd는 run root
-  const cmd = `node ${REAL_LOOP} delta ${added.workroot} 0123456789abcdef0123456789abcdef01234567 --out ${join(added.workroot, ".harnie", "review", "u", "delta.patch")}`
-  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: cmd }, ...mid }), null)
-  // 신뢰 CLI가 아닌 .harnie 접근은 비-owner에게도 계속 차단 + 신뢰 CLI 형태의 인자 오류엔 진단이 실린다
-  assert.ok(deny(hook(PRE, { tool_name: "Bash", tool_input: { command: `cat ${join(runRoot, ".harnie", "active.json")}` }, ...mid })))
-  const bad = hook(PRE, { tool_name: "Bash", tool_input: { command: cmd.replace(added.workroot, join(w, "unregistered")) }, ...mid })
-  assert.ok(deny(bad))
-  assert.match(bad.hookSpecificOutput.permissionDecisionReason, /승인 실패/)
 })
 
 test("owner 미기록 sentinel(구버전·stale): 식별된 세션은 잠그지 않고, session_id 부재 payload만 fail-closed", () => {

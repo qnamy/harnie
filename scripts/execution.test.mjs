@@ -14,7 +14,7 @@ import {
   registerBuilderAuto,
   setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
   bootstrapRun, slugify, withStateLock,
-  detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
+  detectVacuous, loadContext, validateRepoBinding,
   rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
 } from "./execution.mjs"
@@ -523,20 +523,25 @@ test("register(함수): threadId 등록·재등록 금지(훅 전용, CLI 아님
   assert.ok(registerReadonlyThread(root, "plan", "feat-x", "th-r").readOnlyThreads.includes("th-r"))
 })
 
-test("registerBuilderAuto: workspace member task cwd 매핑·run-root repo 정합 검증", () => {
-  const runRoot = mkdtempSync(join(tmpdir(), "harnie-register-ws-"))
-  const memberA = gitRepo(), memberB = gitRepo(), slug = "ws"
-  const dir = join(runRoot, ".harnie", "plan", slug)
+test("registerBuilderAuto: run-root 부트스트랩 marker만 지정 task에 귀속, cwd 불일치는 거부", () => {
+  const root = gitRepo(), slug = "feat-x"
+  const dir = join(root, ".harnie", "plan", slug)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(join(runRoot, ".harnie", "active.json"), JSON.stringify({ track: "plan", slug, workspaceRoot: dirname(runRoot), repos: { a: { workroot: memberA }, b: { workroot: memberB } } }))
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ tasks: [{ id: "1", repo: "a" }, { id: "2", repo: "b" }] }))
-  writeFileSync(join(dir, "execution.json"), JSON.stringify({ track: "plan", slug, tasks: { "1": { runStatus: "building", builderThreadId: null }, "2": { runStatus: "building", builderThreadId: null } } }))
-  const wt2 = join(memberB, ".harnie-wt", "harnie-ws-t2"); mkdirSync(wt2, { recursive: true })
-  assert.equal(registerBuilderAuto(runRoot, slug, "thread-2", wt2).taskId, "2")
+  writeFileSync(join(root, ".harnie", "active.json"), JSON.stringify({ track: "plan", slug }))
+  writeFileSync(join(dir, "manifest.json"), JSON.stringify({ tasks: [{ id: "1" }, { id: "2" }] }))
   const exPath = join(dir, "execution.json")
+  writeFileSync(exPath, JSON.stringify({ track: "plan", slug, tasks: { "1": { runStatus: "building", builderThreadId: null }, "2": { runStatus: "building", builderThreadId: null } } }))
+  // marker 없음 + building-unbound 2개 → serial 예외 불가(모호)
+  assert.equal(registerBuilderAuto(root, slug, "thread-x", root).ok, false)
   const ex = JSON.parse(readFileSync(exPath, "utf8")); ex.pendingRunRootBootstrap = "1"; writeFileSync(exPath, JSON.stringify(ex))
-  assert.equal(registerBuilderAuto(runRoot, slug, "wrong-root", memberB).ok, false)
+  // run root 밖 cwd는 귀속 대상이 아니다
+  assert.equal(registerBuilderAuto(root, slug, "wrong-root", gitRepo()).ok, false)
   assert.equal(JSON.parse(readFileSync(exPath, "utf8")).tasks["1"].builderThreadId, null)
+  // run root cwd + marker → marker task에 귀속하고 marker를 소거
+  assert.equal(registerBuilderAuto(root, slug, "thread-1", root).taskId, "1")
+  const after = JSON.parse(readFileSync(exPath, "utf8"))
+  assert.equal(after.tasks["1"].builderThreadId, "thread-1")
+  assert.equal(after.pendingRunRootBootstrap, undefined)
 })
 
 test("registerBuilderAuto: plan execution 상태가 없으면 quick-track 호출을 no-op", () => {
@@ -547,17 +552,11 @@ test("registerBuilderAuto: plan execution 상태가 없으면 quick-track 호출
   })
 })
 
-test("registerBuilderAuto: marker 없는 root cwd는 단일 serial·task worktree 부재일 때만 귀속", () => {
+test("registerBuilderAuto: marker 없는 root cwd는 단일 building-unbound일 때만 귀속", () => {
   const serial = gitRepo()
   writePlan(serial, "feat-x"); run(["init", "--root", serial, "--slug", "feat-x"]); approveFlow(serial)
   setTaskRunStatus(serial, "feat-x", "T1", "building")
   assert.equal(registerBuilderAuto(serial, "feat-x", "serial-thread", serial).taskId, "T1")
-
-  const runner = gitRepo()
-  writePlan(runner, "feat-x"); run(["init", "--root", runner, "--slug", "feat-x"]); approveFlow(runner)
-  setTaskRunStatus(runner, "feat-x", "T1", "building")
-  mkdirSync(join(runner, ".harnie-wt", "harnie-feat-x-tT1"), { recursive: true })
-  assert.equal(registerBuilderAuto(runner, "feat-x", "root-thread", runner).ok, false)
 
   const parallel = gitRepo()
   writePlan(parallel, "feat-x"); run(["init", "--root", parallel, "--slug", "feat-x"]); approveFlow(parallel)
@@ -1012,26 +1011,6 @@ test("verify: 등록 후 테스트가 사라지면 런타임에 vacuous → 완�
   assert.ok(c.blockers.some((b) => /공허함/.test(b)), c.blockers.join("; "))
 })
 
-// ── 워크스페이스 run(멀티레포) ────────────────────────────────────────────
-function childRepo(w, name) {
-  const repo = join(w, name)
-  execFileSync("git", ["init", "-q", repo])
-  execFileSync("git", ["-C", repo, "config", "user.email", "t@t"])
-  execFileSync("git", ["-C", repo, "config", "user.name", "t"])
-  mkdirSync(join(repo, "src"), { recursive: true })
-  writeFileSync(join(repo, "src", "a.txt"), "a\n")
-  execFileSync("git", ["-C", repo, "add", "."])
-  execFileSync("git", ["-C", repo, "commit", "-q", "-m", "init"])
-  return repo
-}
-function workspaceRun(base = "ws-task") {
-  const w = mkdtempSync(join(tmpdir(), "harnie-ws-exec-"))
-  const repo = childRepo(w, "repoA")
-  const runRoot = join(w, ".harnie-wt", `harnie-${base}`)
-  mkdirSync(runRoot, { recursive: true })
-  const { slug } = bootstrapRun(runRoot, { base, track: "plan", sessionId: "s1", workspaceRoot: w })
-  return { w, repo, runRoot, slug }
-}
 function plainRun(base) {
   const plain = gitRepo()
   writeFileSync(join(plain, "f.txt"), "x\n")
@@ -1040,31 +1019,6 @@ function plainRun(base) {
   bootstrapRun(plain, { base, track: "plan", sessionId: "s1" })
   return plain
 }
-
-test("repoAdd: 검증(워크스페이스 하위·toplevel) 후 worktree 생성 + sentinel 등록(멱등)", () => {
-  const { w, repo, runRoot, slug } = workspaceRun()
-  const r1 = repoAdd(runRoot, repo)
-  assert.equal(r1.ok, true)
-  assert.equal(r1.key, "repoA")
-  assert.equal(r1.workroot, join(r1.repo, ".harnie-wt", `harnie-${slug}`))
-  assert.ok(existsSync(join(r1.workroot, ".git"))) // git worktree
-  const ws = workspaceInfo(runRoot)
-  assert.equal(ws.workspaceRoot, w)
-  assert.deepEqual(Object.keys(ws.repos), ["repoA"])
-  const r2 = repoAdd(runRoot, repo) // 재호출 = 멱등(attach)
-  assert.equal(r2.created, false)
-  assert.equal(r2.workroot, r1.workroot)
-})
-
-test("repoAdd: 비-workspace run·워크스페이스 밖·비-toplevel은 fail-closed", () => {
-  const plain = plainRun("t1")
-  assert.throws(() => repoAdd(plain, plain), /workspace run 전용/)
-
-  const { repo, runRoot } = workspaceRun("ws-neg")
-  const outside = gitRepo()
-  assert.throws(() => repoAdd(runRoot, outside), /하위가 아님/)
-  assert.throws(() => repoAdd(runRoot, join(repo, "src")), /toplevel이 아님/)
-})
 
 test("validateManifest: task.repo 형식·all-or-none", () => {
   const t = (over) => ({ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/"], verification: VER(), ...over })
@@ -1076,56 +1030,27 @@ test("validateManifest: task.repo 형식·all-or-none", () => {
   assert.ok(validateManifest({ tasks: [t({ repo: "repoA" }), t2({})], gates: GATES }).some((e) => /all-or-none/.test(e)))
 })
 
-test("validateRepoBinding: workspace run은 등록 repo와 정합해야, 비-workspace run은 repo 금지", () => {
-  const { repo, runRoot } = workspaceRun("ws-bind")
-  repoAdd(runRoot, repo)
-  const block = (repoKey) => ({ tasks: [{ id: "T1", repo: repoKey }], gates: [] })
-  assert.equal(validateRepoBinding(runRoot, block("repoA")), null)
-  assert.match(validateRepoBinding(runRoot, block("repoB")) || "", /미등록/)
-  assert.match(validateRepoBinding(runRoot, { tasks: [{ id: "T1" }], gates: [] }) || "", /repo 키 필수/)
+test("validateRepoBinding: task.repo는 단일 repo run에서 금지(0.13 workspace 삭제)", () => {
   const plain = plainRun("t2")
-  assert.match(validateRepoBinding(plain, block("repoA")) || "", /workspace run에서만/)
+  assert.match(validateRepoBinding(plain, { tasks: [{ id: "T1", repo: "repoA" }], gates: [] }) || "", /단일 repo 전용/)
+  assert.equal(validateRepoBinding(plain, { tasks: [{ id: "T1" }], gates: [] }), null)
 })
 
-test("completion: workspace run — 멤버 repo 바인딩으로 스냅샷 산출, 미등록 repo는 바인딩 실패 blocker", () => {
-  const { repo, runRoot, slug } = workspaceRun("ws-comp")
-  repoAdd(runRoot, repo)
-  const manifest = {
-    tasks: [
-      { id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a.txt"], verification: VER(), repo: "repoA" },
-      { id: "T2", deps: [], reviewUnit: "task-b", scope: ["src/a.txt"], verification: VER(), repo: "ghost" },
-    ],
-    gates: GATES,
-    planHash: "PH",
-  }
-  const dir = join(runRoot, ".harnie", "plan", slug)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n")
-  const c = run(["completion", "--root", runRoot, "--slug", slug])
-  assert.equal(c.complete, false)
-  assert.ok(c.blockers.some((b) => /task T1: ledger 없음/.test(b)), c.blockers.join("; "))
-  assert.ok(c.blockers.some((b) => /task T2: repo 바인딩 실패/.test(b)), c.blockers.join("; "))
-})
-
-// ── 0.11: mode(S/M/L)·통합 검증·rebind-arm·CLI 권위 ──────────────────────
+// ── 0.11: mode(S/M)·통합 검증·rebind-arm·CLI 권위 ──────────────────────
 const IV = [{ executable: "node", args: ["--version"], cwd: ".", timeout: 30000 }]
-const L_MANIFEST = { ...GOOD_MANIFEST, gates: [{ name: "final-review", reviewUnit: "final-review" }], integrationVerification: IV }
 const M_MANIFEST = { tasks: [{ id: "t1", deps: [], reviewUnit: "code", scope: ["src/"], verification: VER() }], gates: [], integrationVerification: IV }
 
-test("validateManifest(mode): L=final-review 1개·M=게이트 없음, integrationVerification 필수, integration 유닛 예약", () => {
-  assert.deepEqual(validateManifest(L_MANIFEST, { mode: "L" }), [])
+test("validateManifest(mode): M=게이트 없음, integrationVerification 필수, integration 유닛 예약", () => {
   assert.deepEqual(validateManifest(M_MANIFEST, { mode: "M" }), [])
-  assert.ok(validateManifest({ ...L_MANIFEST, gates: GATES }, { mode: "L" }).some((e) => /final-review/.test(e)))
   assert.ok(validateManifest({ ...M_MANIFEST, gates: [{ name: "final-review", reviewUnit: "final-review" }] }, { mode: "M" }).some((e) => /게이트 없음/.test(e)))
-  const noIv = { ...L_MANIFEST }; delete noIv.integrationVerification
-  assert.ok(validateManifest(noIv, { mode: "L" }).some((e) => /integrationVerification 필수/.test(e)))
+  const noIv = { ...M_MANIFEST }; delete noIv.integrationVerification
   assert.ok(validateManifest(noIv, { mode: "M" }).some((e) => /integrationVerification 필수/.test(e)))
-  const reserved = { ...L_MANIFEST, tasks: [{ id: "T1", deps: [], reviewUnit: "integration", scope: ["s/"], verification: VER() }] }
-  assert.ok(validateManifest(reserved, { mode: "L" }).some((e) => /예약어/.test(e)))
+  const reserved = { ...M_MANIFEST, tasks: [{ id: "T1", deps: [], reviewUnit: "integration", scope: ["s/"], verification: VER() }] }
+  assert.ok(validateManifest(reserved, { mode: "M" }).some((e) => /예약어/.test(e)))
   // mode 미지정 = 레거시 4게이트 규칙 그대로
   assert.deepEqual(validateManifest(GOOD_MANIFEST), [])
   // canonicalManifest는 integrationVerification 포함(있을 때만 — 레거시 planHash 불변)
-  assert.equal(canonicalManifest(L_MANIFEST).integrationVerification, IV)
+  assert.equal(canonicalManifest(M_MANIFEST).integrationVerification, IV)
   assert.deepEqual(Object.keys(canonicalManifest(GOOD_MANIFEST)), ["tasks", "gates"])
 })
 
@@ -1138,12 +1063,27 @@ test("set-mode: 상향 전이만, sentinel/execution 불일치 fail-closed, S는
   const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
   assert.equal(ex.tasks.t1.runStatus, "building")
   assert.throws(() => setMode(root, "feat-x", "S"), /상향 전이만/) // 동급 재설정 금지
-  assert.equal(setMode(root, "feat-x", "L").mode, "L")
-  assert.throws(() => setMode(root, "feat-x", "M"), /상향 전이만/) // 하향 금지
+  assert.throws(() => setMode(root, "feat-x", "L"), /--mode는 S\|M/) // 0.13: L 삭제
+  assert.equal(setMode(root, "feat-x", "M").mode, "M")
+  assert.throws(() => setMode(root, "feat-x", "S"), /상향 전이만/) // 하향 금지
   const sPath = join(root, ".harnie", "active.json")
   const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "S"; writeFileSync(sPath, JSON.stringify(s))
-  assert.throws(() => setMode(root, "feat-x", "L"), /불일치/)
+  assert.throws(() => setMode(root, "feat-x", "M"), /불일치/)
   assert.equal(loadContext(root).failClosed, true) // 훅 문맥도 fail-closed
+})
+
+// DR-002: set-mode 거부만으로는 부족하다 — 디스크에 mode:"L"이 남은 업그레이드 전 run이
+// 레거시 4게이트 경로로 흘러들어 부당한 완료 판정을 받는 경로를 readMode에서 막는다.
+test("readMode/completion: 디스크에 남은 mode L은 fail-closed(0.13 삭제 모드)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const dir = join(root, ".harnie", "plan", "feat-x")
+  for (const p of [join(root, ".harnie", "active.json"), join(dir, "execution.json")]) {
+    const j = JSON.parse(readFileSync(p, "utf8")); j.mode = "L"; writeFileSync(p, JSON.stringify(j))
+  }
+  assert.throws(() => readMode(root, "plan", "feat-x"), /알 수 없는 mode\(L\)/)
+  assert.throws(() => computeCompletion(root, "plan", "feat-x"), /알 수 없는 mode\(L\)/)
 })
 
 test("set-difficulty: CLI 경유 — 승인된 manifest.json 바이트·planHash 불변, execution.json.difficulty만 갱신", () => {
@@ -1296,12 +1236,12 @@ test("M e2e: 승인 → task receipt(verify) → 통합 receipt → completion c
   assert.equal(c.complete, true, c.blockers.join("; "))
 })
 
-test("validateRepoBinding: 비-workspace run에서 integrationVerification[].repo 지정은 승인 거부(CR-005)", () => {
+test("validateRepoBinding: integrationVerification[].repo 지정은 승인 거부(CR-005)", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
   const block = { ...M_MANIFEST, integrationVerification: [{ ...IV[0], repo: "repoA" }] }
-  assert.match(validateRepoBinding(root, block), /workspace run에서만 유효/)
+  assert.match(validateRepoBinding(root, block), /단일 repo 전용/)
   assert.equal(validateRepoBinding(root, M_MANIFEST), null)
 })
 
@@ -1320,53 +1260,9 @@ test("CLI 공통 가드(CR-001): 변이 서브커맨드는 활성 run 불일치�
   }
   // mode mirror 손상(sentinel만 변조) — 변이 서브커맨드 전부 fail-closed
   const sPath = join(root, ".harnie", "active.json")
-  const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "L"; writeFileSync(sPath, JSON.stringify(s))
+  const s = JSON.parse(readFileSync(sPath, "utf8")); s.mode = "M"; writeFileSync(sPath, JSON.stringify(s))
   const e2 = runFail(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
   assert.ok(e2 && /mode 불일치/.test(String(e2.stderr)))
-})
-
-test("L arm 거부: mode L에서 레거시 4게이트·integrationVerification 부재 manifest는 승인 arm 불가(CR-009)", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x") // GOOD_MANIFEST: 4게이트, iv 없음 — mode 미지정(레거시)에선 유효
-  run(["init", "--root", root, "--slug", "feat-x"])
-  setMode(root, "feat-x", "L")
-  const r = armApproval(root, "feat-x")
-  assert.equal(r.ok, false)
-  assert.match(r.reason, /final-review/)
-  assert.match(r.reason, /integrationVerification 필수/)
-  const cli = runFail(["arm-approval", "--root", root, "--slug", "feat-x", "--approve-option", "승인"])
-  assert.ok(cli) // 공개 CLI 진입점에서도 거부
-})
-
-test("workspace L e2e: iv repo 누락은 arm 거부, 등록 repo로 승인 → verify --integration이 member workroot에서 실행·ws: receipt(CR-009)", () => {
-  const { repo, runRoot, slug } = workspaceRun("ws-int")
-  const { key } = repoAdd(runRoot, repo)
-  // 통합 명령은 member workroot에만 존재하는 파일(src/a.txt)을 상대경로로 확인 — run root(비-git 상태 디렉터리)에서
-  // 실행되면 반드시 실패하므로, exec root 해석이 실제로 member workroot임을 검증한다(false-positive 방지).
-  const IV_WS = { executable: "node", args: ["-e", "require('fs').accessSync('src/a.txt');console.log('member-workroot-ok')"], cwd: ".", timeout: 30000 }
-  const L_WS = {
-    tasks: [{ id: "T1", deps: [], reviewUnit: "task-a", scope: ["src/a.txt"], verification: VER(), repo: key }],
-    gates: [{ name: "final-review", reviewUnit: "final-review" }],
-    integrationVerification: [IV_WS], // repo 누락
-  }
-  const dir = join(runRoot, ".harnie", "plan", slug)
-  mkdirSync(dir, { recursive: true })
-  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(L_WS, null, 2) + "\n```\n")
-  setMode(runRoot, slug, "L")
-  const rejected = armApproval(runRoot, slug)
-  assert.equal(rejected.ok, false)
-  assert.match(rejected.reason, /integrationVerification\[0\]: workspace run은 repo 키 필수/)
-  // repo 키를 채워 승인 → 통합 검증이 member workroot에서 돌고 ws: 합성 아티팩트에 바인딩된다
-  const fixed = { ...L_WS, integrationVerification: [{ ...IV_WS, repo: key }] }
-  writeFileSync(join(dir, "plan.md"), "# Plan\n\n```harnie-manifest\n" + JSON.stringify(fixed, null, 2) + "\n```\n")
-  armApproval(runRoot, slug, { approveOption: "승인" })
-  recordPendingApproval(runRoot, slug, "tu-ws")
-  assert.equal(bindApproval(runRoot, slug, "tu-ws", { answers: { q: "승인" } }).ok, true)
-  const r = run(["verify", "--root", runRoot, "--slug", slug, "--integration"])
-  assert.equal(r.ok, true)
-  assert.match(r.receipt.artifact, /^ws:[0-9a-f]{64}$/)
-  assert.equal(r.receipt.results[0].exitCode, 0)
-  assert.equal(run(["verify", "--root", runRoot, "--slug", slug, "--integration"]).skipped, "existing-receipt")
 })
 
 test("registerBuilderThread: 레거시(rebind 이력·builderBoundAt 부재) task는 startedAt을 anchor로 보존(CR-006)", () => {

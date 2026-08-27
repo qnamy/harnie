@@ -5,8 +5,8 @@ import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { captureTree, captureWorkspaceTree } from "./delta.mjs"
-import { createWorktree, worktreeDirFor } from "./worktree.mjs"
+import { captureTree } from "./delta.mjs"
+import { createWorktree } from "./worktree.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers } from "../hooks/lib.mjs"
 
@@ -71,6 +71,10 @@ export function extractManifestBlock(planMd) {
 }
 
 // argv 엔트리(verification·setup·integrationVerification) 공통 검증. kind에 따라 evidencePolicy 허용이 갈린다.
+// manifest 스키마의 repo 키 형식(워크스페이스 상대경로). 0.13에서 workspace 모드가 사라져 repo 키는
+// validateRepoBinding이 항상 거부하지만, 스키마 오류와 계약 위반을 구분해 보고하려면 형식 검사는 남는다.
+const REPO_KEY_RE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/
+
 function validateArgvEntry(v, where, errors, { allowEvidencePolicy = true, allowRepo = false } = {}) {
   if (!v || typeof v !== "object") { errors.push(`${where} 객체 아님`); return }
   if (typeof v.executable !== "string" || !v.executable) errors.push(`${where}.executable 필요`)
@@ -130,7 +134,7 @@ export function validateManifest(obj, { mode = null } = {}) {
     else for (const [j, v] of obj.integrationVerification.entries())
       validateArgvEntry(v, `integrationVerification[${j}]`, errors, { allowRepo: true })
   }
-  if ((mode === "M" || mode === "L") && !(Array.isArray(obj.integrationVerification) && obj.integrationVerification.length > 0))
+  if (mode === "M" && !(Array.isArray(obj.integrationVerification) && obj.integrationVerification.length > 0))
     errors.push(`mode ${mode}: integrationVerification 필수(통합 후 전체 스위트 — 최종 트리 성공 receipt의 원천)`)
   for (const [i, t] of (Array.isArray(obj.tasks) ? obj.tasks : []).entries())
     if (Array.isArray(t?.deps)) for (const d of t.deps) if (!taskIds.has(d)) errors.push(`tasks[${i}].deps: 미지 task ${JSON.stringify(d)}`)
@@ -163,11 +167,8 @@ export function validateManifest(obj, { mode = null } = {}) {
     claimUnit(g.reviewUnit, `gates[${i}]`)
   }
   if (gateNames.length !== new Set(gateNames).size) errors.push(`게이트 이름 중복`)
-  // 게이트 티어링(0.11): L = final-review 1개, M = 없음. mode 미지정 = 레거시(0.10) 4게이트 규칙 유지.
-  if (mode === "L") {
-    if (!(gateNames.length === 1 && gateNames[0] === "final-review"))
-      errors.push(`mode L: gates는 정확히 [{name:"final-review"}] 1개(got ${JSON.stringify(gateNames)})`)
-  } else if (mode === "M") {
+  // 게이트 티어링(0.11): M = 없음. mode 미지정 = 레거시(0.10) 4게이트 규칙 유지.
+  if (mode === "M") {
     if (gateNames.length !== 0) errors.push(`mode M: gates는 빈 배열(단일 태스크 — 게이트 없음, got ${JSON.stringify(gateNames)})`)
   } else {
     const REQUIRED_GATES = ["coverage", "quality", "runtime", "scope"]
@@ -191,8 +192,8 @@ export function canonicalManifest(obj) {
   }
 }
 
-// ── 0.11 mode(S/M/L) — 크기 판정의 권위 기록. 상향 전이만 허용된다. ─────────
-const MODE_ORDER = { sizing: 0, S: 1, M: 2, L: 3 }
+// ── 0.11 mode(S/M) — 크기 판정의 권위 기록. 상향 전이만 허용된다. L은 0.13에서 삭제됐다. ─────────
+const MODE_ORDER = { sizing: 0, S: 1, M: 2 }
 // sentinel·execution 양쪽 mode를 검증해 읽는다(권위 소비자용 — CR-001). 레거시(0.10)는 양쪽 모두 부재일 때만
 // null; 한쪽만 있으면 손상으로 fail-closed. 이 run이 활성 run인지(slug·track 일치)도 함께 검증한다.
 export function readMode(root, track, slug) {
@@ -204,10 +205,14 @@ export function readMode(root, track, slug) {
   const isActiveRun = s && s.track === track && s.slug === slug
   if (isActiveRun && sMode !== exMode)
     throw new FailClosed(`mode 불일치(sentinel=${sMode}, execution=${exMode}) — 상태 손상, fail-closed`)
+  // 0.13: L 삭제. 디스크에 남은 미지 mode(업그레이드 전 L run 등)는 레거시 4게이트 경로로 흘러들어
+  // 부당한 완료 판정을 받을 수 있으므로 여기서 fail-closed한다(설계 rev-1 §6 X2 / DR-002).
+  if (exMode != null && !(exMode in MODE_ORDER))
+    throw new FailClosed(`알 수 없는 mode(${exMode}) — 0.13에서 삭제된 모드일 수 있음(L). 이 run은 재개·완료할 수 없다`)
   return exMode
 }
 export function setMode(root, slug, mode) {
-  if (!["S", "M", "L"].includes(mode)) throw new FailClosed(`set-mode: --mode는 S|M|L (${mode})`)
+  if (!["S", "M"].includes(mode)) throw new FailClosed(`set-mode: --mode는 S|M (${mode})`)
   return withStateLock(root, () => {
     const s = readJSONStrict(sentinelPath(root))
     if (s.track !== "plan") throw new FailClosed("set-mode: plan track 전용")
@@ -371,29 +376,11 @@ function planDir(root, track, slug) {
 
 function sentinelPath(root) { return join(root, ".harnie", "active.json") }
 
-// ── 워크스페이스 run(멀티레포) ────────────────────────────────────────────
-// 비-git 워크스페이스(예: repo 여러 개를 담은 부모 디렉터리)에서 시작한 run은 run root가 git repo가 아니라
-// `<workspace>/.harnie-wt/harnie-<slug>/` 평범한 디렉터리다. sentinel에 `workspaceRoot`(워크스페이스 절대경로)와
-// `repos`({key: {repo, workroot}})를 기록하고, 멤버 repo마다 `<repo>/.harnie-wt/harnie-<slug>` git worktree를 둔다.
-// manifest task는 `repo: "<key>"`로 자기 repo에 바인딩되며, scope 해시·verify·delta는 그 workroot 기준이다.
-const REPO_KEY_RE = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)*$/
-export function workspaceInfo(root) {
-  const s = readJSONOrNull(sentinelPath(root))
-  if (!s || typeof s.workspaceRoot !== "string" || !s.workspaceRoot) return null
-  const repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
-  return { workspaceRoot: s.workspaceRoot, repos }
-}
 // task의 git root(scope 해시·verify·delta 기준) 해석. 실패 사유를 함께 반환해 완료 재도출 blocker에 쓴다.
-function resolveTaskGitRoot(root, task, ws) {
-  if (ws == null) {
-    if (task.repo != null) return { gitRoot: null, reason: `task.repo(${task.repo})는 workspace run에서만 유효` }
-    return { gitRoot: root, reason: null }
-  }
-  if (task.repo == null) return { gitRoot: null, reason: "workspace run의 task는 repo 키 필수" }
-  const entry = ws.repos[task.repo]
-  if (!entry || typeof entry.workroot !== "string") return { gitRoot: null, reason: `repo '${task.repo}' 미등록 — execution.mjs repo-add 필요` }
-  if (!existsSync(entry.workroot)) return { gitRoot: null, reason: `repo '${task.repo}' workroot 소실(${entry.workroot})` }
-  return { gitRoot: entry.workroot, reason: null }
+// 0.13: workspace(멀티레포) 모드 삭제 — run은 항상 단일 repo이고 task.repo 키는 금지된다.
+function resolveTaskGitRoot(root, task) {
+  if (task.repo != null) return { gitRoot: null, reason: `task.repo(${task.repo})는 유효하지 않음 — 단일 repo run 전용` }
+  return { gitRoot: root, reason: null }
 }
 
 function computeScopeHash(root, treeSHA, scopePaths) {
@@ -407,15 +394,7 @@ function buildSnapshot(root, track, slug, manifest, planHash) {
   const units = {}
   const unitNames = new Set([...manifest.tasks.map((t) => t.reviewUnit), ...manifest.gates.map((g) => g.reviewUnit)])
   const taskByUnit = new Map(manifest.tasks.map((t) => [t.reviewUnit, t]))
-  // workspace run: 전체-tree = 멤버 repo 합성(ws:sha256), task별 캡처는 자기 repo workroot에서(캐시).
-  const ws = workspaceInfo(root)
-  const currentWholeTree = ws ? captureWorkspaceTree(ws.repos) : captureTree(root)
-  const repoTreeCache = new Map()
-  const currentTreeOf = (gitRoot) => {
-    if (!ws) return currentWholeTree
-    if (!repoTreeCache.has(gitRoot)) repoTreeCache.set(gitRoot, captureTree(gitRoot))
-    return repoTreeCache.get(gitRoot)
-  }
+  const currentWholeTree = captureTree(root)
   for (const name of unitNames) {
     const uDir = join(reviewRoot, name)
     const ledger = readJSONOrNull(join(uDir, "ledger.json"))
@@ -431,13 +410,13 @@ function buildSnapshot(root, track, slug, manifest, planHash) {
     const task = taskByUnit.get(name)
     let expectedScopeHash = null, currentScopeHash = null, repoUnresolved = null
     if (task) {
-      const { gitRoot, reason } = resolveTaskGitRoot(root, task, ws)
+      const { gitRoot, reason } = resolveTaskGitRoot(root, task)
       repoUnresolved = reason
       if (gitRoot && reviewedPostSHA) {
         try { expectedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope) } catch { expectedScopeHash = null }
       }
       if (gitRoot) {
-        try { currentScopeHash = computeScopeHash(gitRoot, currentTreeOf(gitRoot), task.scope) } catch { currentScopeHash = null }
+        try { currentScopeHash = computeScopeHash(gitRoot, currentWholeTree, task.scope) } catch { currentScopeHash = null }
       }
     }
     units[name] = {
@@ -496,7 +475,7 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [], workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots: [] })
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -512,21 +491,13 @@ export function loadContext(root) {
   const approvalEvidence = existsSync(join(dir, "manifest.json")) || !!s.planHash
   const rawPhase = ex.phase
   const effectivePhase = approved ? rawPhase : (rawPhase === "executing" || rawPhase === "final-wave" ? "awaiting-approval" : rawPhase)
-  // workspace run(멀티레포): 게이트가 멤버 repo workroot를 허용 집합에 넣을 수 있게 노출.
-  const repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
-  const memberWorkroots = Object.values(repos).map((r) => r && r.workroot).filter((w) => typeof w === "string" && w)
   const buildingUnboundTaskIds = Object.entries(ex.tasks || {}).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
   const manifest = readJSONOrNull(join(dir, "manifest.json"))
   const taskRepoWorkroots = {}
-  const taskWorktreeExists = {}
-  for (const task of manifest?.tasks || []) {
-    const workroot = s.workspaceRoot ? repos[task.repo]?.workroot : root
-    taskRepoWorkroots[task.id] = workroot
-    taskWorktreeExists[task.id] = typeof workroot === "string" && existsSync(join(workroot, ".harnie-wt", `harnie-${s.slug}-t${task.id}`))
-  }
+  for (const task of manifest?.tasks || []) taskRepoWorkroots[task.id] = root
   // S mode: manifest 없이 암묵 t1이 유일 태스크 — 빌더 cwd·워치독 매핑을 run root로 합성한다(DR-114).
-  if (mode === "S" && ex.tasks && ex.tasks.t1) { taskRepoWorkroots.t1 = root; taskWorktreeExists.t1 = false }
-  return { active: true, root, track: s.track, slug: s.slug, mode, authority, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, workspaceRoot: typeof s.workspaceRoot === "string" ? s.workspaceRoot : null, memberWorkroots, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots, taskWorktreeExists }
+  if (mode === "S" && ex.tasks && ex.tasks.t1) taskRepoWorkroots.t1 = root
+  return { active: true, root, track: s.track, slug: s.slug, mode, authority, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
 }
 
 export function computeCompletion(root, track, slug) {
@@ -536,7 +507,6 @@ export function computeCompletion(root, track, slug) {
     // S(0.11): 승인 게이트·manifest 없음 — canonical 단일 리뷰 유닛(review/code/)의 APPROVED와
     // reviewedPostSHA=현재 tree 바인딩이 완료 권위다(검증 증거는 리뷰 前 수행되어 리뷰 APPROVE가 보증).
     const blockers = []
-    if (workspaceInfo(root)) blockers.push("S mode는 단일 repo 전용 — workspace run은 승격(M/L) 필요")
     const state = readJSONOrNull(join(dir, "review", "code", "state.json"))
     if (!state || state.machineState !== "APPROVED") blockers.push(`S: review/code 미승인(machineState=${state ? state.machineState : "없음"})`)
     else if (!state.reviewedPostSHA) blockers.push("S: reviewedPostSHA 없음 — 리뷰 tree 바인딩 불가")
@@ -625,12 +595,11 @@ export function normalizeOwnerSessions(s) {
   return one ? [one] : []
 }
 
-function createRun(root, track, base, sessionId, workspaceRoot = null, { authority = null } = {}) {
+function createRun(root, track, base, sessionId, { authority = null } = {}) {
   const slug = collisionFreeSlug(root, track, base)
   const owner = ownerSessionId(sessionId)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} })
   const sentinel = { track, slug, base, planHash: null, mode: "sizing", readOnlyThreads: [], sessionIds: owner ? [owner] : [] }
-  if (workspaceRoot) { sentinel.workspaceRoot = workspaceRoot; sentinel.repos = {} } // 워크스페이스 run(멀티레포)
   if (authority) sentinel.authority = authority // "cli" = dev-solo(훅 부재) — approve CLI는 이 run에서만 유효
   writeJSONAtomic(sentinelPath(root), sentinel)
   return { slug, reused: false }
@@ -653,18 +622,16 @@ function resumeRun(root, s, sessionId) {
   return { slug: s.slug, reused: true, resumed: true }
 }
 
-export function bootstrapRun(root, { base, track = "plan", sessionId = null, workspaceRoot = null, authority = null } = {}) {
+export function bootstrapRun(root, { base, track = "plan", sessionId = null, authority = null } = {}) {
   if (track !== "plan") throw new FailClosed(`bootstrapRun: 현재 track=plan만 (${track})`) // quick 이연(§3.8)
   if (typeof base !== "string" || base === "") throw new FailClosed("bootstrap: 빈 작업 인자 — 진행 불가")
   validateSlug(base)
-  if (workspaceRoot != null && (typeof workspaceRoot !== "string" || !isAbsolute(workspaceRoot)))
-    throw new FailClosed(`bootstrap: workspaceRoot는 절대경로 필요(${JSON.stringify(workspaceRoot)})`)
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base, sessionId, workspaceRoot, { authority })
+    if (!s) result = createRun(root, track, base, sessionId, { authority })
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, workspaceRoot, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
+    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
     else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 완료하거나, 별도 worktree checkout에서 이 스킬을 다시 실행해 새 run을 시작하세요.`)
     return result
@@ -730,21 +697,11 @@ export function derivePlanHash(root, slug) {
 // manifest의 task.repo·integrationVerification[].repo 바인딩이 이 run의 등록 repo와 정합한지 —
 // 승인 시점에 fail-closed로 확인한다(verify 시점 지연 실패 방지, CR-005).
 export function validateRepoBinding(root, block) {
-  const ws = workspaceInfo(root)
   const withRepo = block.tasks.filter((t) => t.repo != null)
   const iv = Array.isArray(block.integrationVerification) ? block.integrationVerification : []
-  if (!ws) {
-    if (withRepo.length) return `task.repo는 workspace run에서만 유효(비-workspace run에 ${withRepo.length}개 지정)`
-    const ivRepo = iv.filter((v) => v.repo != null).length
-    return ivRepo ? `integrationVerification[].repo는 workspace run에서만 유효(${ivRepo}개 지정)` : null
-  }
-  if (withRepo.length !== block.tasks.length) return "workspace run은 모든 task에 repo 키 필수"
-  for (const t of block.tasks) if (!ws.repos[t.repo]) return `task ${t.id}: repo '${t.repo}' 미등록 — 먼저 execution.mjs repo-add로 등록`
-  for (const [j, v] of iv.entries()) {
-    if (v.repo == null) return `integrationVerification[${j}]: workspace run은 repo 키 필수`
-    if (!ws.repos[v.repo]) return `integrationVerification[${j}]: repo '${v.repo}' 미등록`
-  }
-  return null
+  if (withRepo.length) return `task.repo는 유효하지 않음 — run은 단일 repo 전용(${withRepo.length}개 지정)`
+  const ivRepo = iv.filter((v) => v.repo != null).length
+  return ivRepo ? `integrationVerification[].repo는 유효하지 않음 — run은 단일 repo 전용(${ivRepo}개 지정)` : null
 }
 
 // 원샷 arm 상호배제(0.11 DR-108·CR-004): A5 승인·rebind의 arm/pending은 run 전체에서 **타입 무관하게
@@ -890,29 +847,14 @@ export function buildingUnboundTasks(root, slug) {
   return Object.entries(ex.tasks).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
 }
 
-function taskWorkroot(root, task, sentinel) {
-  if (sentinel.workspaceRoot) return sentinel.repos?.[task.repo]?.workroot || null
+function taskWorkroot(root, task) {
   return task.repo == null ? root : null
-}
-
-function taskIdFromWorktreeCwd(root, slug, cwd, manifest, sentinel) {
-  if (typeof cwd !== "string" || !existsSync(cwd)) return null
-  const realCwd = realpathOf(cwd)
-  for (const task of manifest.tasks || []) {
-    const workroot = taskWorkroot(root, task, sentinel)
-    if (!workroot || !existsSync(workroot)) continue
-    const expected = join(realpathOf(workroot), ".harnie-wt", `harnie-${slug}-t${task.id}`)
-    if (realCwd === realOrResolve(expected)) return task.id
-  }
-  return null
 }
 
 function gitRootOf(cwd) {
   try { return realpathOf(execFileSync("git", ["-C", cwd, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim()) }
   catch { return null }
 }
-
-function realOrResolve(p) { try { return realpathSync(p) } catch { return resolve(p) } }
 
 export function registerBuilderAuto(root, slug, threadId, cwd = null) {
   return withStateLock(root, () => {
@@ -922,8 +864,7 @@ export function registerBuilderAuto(root, slug, threadId, cwd = null) {
     if (!ex || ex.track !== "plan") return { ok: false, reason: "plan 실행 상태 없음 — 자동 귀속 대상 아님" }
     const cands = Object.entries(ex.tasks || {}).filter(([, t]) => t && t.runStatus === "building" && !t.builderThreadId).map(([id]) => id)
     const manifest = readJSONOrNull(join(dir, "manifest.json")) || { tasks: [] }
-    const sentinel = readJSONOrNull(sentinelPath(root))
-    if (!sentinel) return { ok: false, reason: "활성 run sentinel 없음 — 자동 귀속 대상 아님" }
+    if (!existsSync(sentinelPath(root))) return { ok: false, reason: "활성 run sentinel 없음 — 자동 귀속 대상 아님" }
     // S mode(0.11, DR-114): manifest 없음 — run root cwd의 workspace-write 호출만 암묵 t1에 귀속(fail-closed cwd 검증).
     if (ex.mode === "S") {
       if (!cands.includes("t1")) return { ok: false, reason: "S mode: t1이 building-unbound 아님", candidates: cands }
@@ -931,18 +872,12 @@ export function registerBuilderAuto(root, slug, threadId, cwd = null) {
         return { ok: false, reason: `S mode: 빌더 cwd의 git root가 run root와 불일치(got ${JSON.stringify(cwd)}, expect ${root})` }
       return registerBuilderThreadLocked(root, slug, "t1", threadId)
     }
-    const mapped = taskIdFromWorktreeCwd(root, slug, cwd, manifest, sentinel)
-    if (mapped != null) {
-      if (!cands.includes(mapped)) return { ok: false, reason: `cwd task ${mapped}가 building-unbound 아님`, candidates: cands }
-      return registerBuilderThreadLocked(root, slug, mapped, threadId)
-    }
-    const roots = [root, ...Object.values(sentinel.repos || {}).map((r) => r && r.workroot).filter(Boolean)]
-    const directRoot = typeof cwd === "string" && existsSync(cwd) && roots.some((r) => existsSync(r) && realpathOf(r) === realpathOf(cwd))
+    const directRoot = typeof cwd === "string" && existsSync(cwd) && existsSync(root) && realpathOf(root) === realpathOf(cwd)
     if (directRoot) {
       const taskId = ex.pendingRunRootBootstrap
       if (taskId) {
         const task = manifest.tasks.find((t) => t.id === taskId)
-        const expectedRoot = task && taskWorkroot(root, task, sentinel)
+        const expectedRoot = task && taskWorkroot(root, task)
         if (!task || !expectedRoot || gitRootOf(cwd) !== realpathOf(expectedRoot))
           return { ok: false, reason: `pendingRunRootBootstrap task ${taskId}의 repo workroot와 cwd git root 불일치` }
         if (!cands.includes(taskId)) return { ok: false, reason: `marker task ${taskId}가 building-unbound 아님`, candidates: cands }
@@ -950,13 +885,12 @@ export function registerBuilderAuto(root, slug, threadId, cwd = null) {
       }
       const serialTaskId = cands.length === 1 ? cands[0] : null
       const serialTask = manifest.tasks.find((t) => t.id === serialTaskId)
-      const serialRoot = serialTask && taskWorkroot(root, serialTask, sentinel)
-      const serialWorktree = serialRoot && join(serialRoot, ".harnie-wt", `harnie-${slug}-t${serialTaskId}`)
-      if (!serialTask || !serialRoot || gitRootOf(cwd) !== realpathOf(serialRoot) || existsSync(serialWorktree))
-        return { ok: false, reason: "run-root 부트스트랩 marker 필요 — marker 없는 serial 예외는 단일 building-unbound·task worktree 부재일 때만", candidates: cands }
+      const serialRoot = serialTask && taskWorkroot(root, serialTask)
+      if (!serialTask || !serialRoot || gitRootOf(cwd) !== realpathOf(serialRoot))
+        return { ok: false, reason: "run-root 부트스트랩 marker 필요 — marker 없는 serial 예외는 단일 building-unbound일 때만", candidates: cands }
       return registerBuilderThreadLocked(root, slug, serialTaskId, threadId)
     }
-    if (cwd != null) return { ok: false, reason: `codex cwd가 활성 task worktree·run/member root 패턴과 불일치: ${cwd}`, candidates: cands }
+    if (cwd != null) return { ok: false, reason: `codex cwd가 활성 run root와 불일치: ${cwd}`, candidates: cands }
     if (cands.length !== 1) return { ok: false, reason: `building-unbound task ${cands.length}개 — 자동 귀속 모호`, candidates: cands }
     return registerBuilderThreadLocked(root, slug, cands[0], threadId)
   })
@@ -1123,24 +1057,13 @@ export function bindRebind(root, slug, toolUseId, toolInput, response) {
 }
 
 // ── dev-solo(훅 부재 환경) CLI 권위 경로(0.11 §9) ─────────────────────────────
-// init --authority cli: 훅 부트스트랩이 하던 실행 환경 준비(run worktree/branch 또는 workspace run-state 디렉터리)
-// 를 CLI로 수행한다. authority:"cli" run에서만 approve 서브커맨드가 유효하다(훅 run의 자가승인 차단 불변).
+// init --authority cli: 훅 부트스트랩이 하던 실행 환경 준비(run worktree/branch)를 CLI로 수행한다.
+// authority:"cli" run에서만 approve 서브커맨드가 유효하다(훅 run의 자가승인 차단 불변).
 export function initCliAuthority(root, slug) {
   validateSlug(slug)
-  const branch = `harnie/${slug}`
-  const gitMode = existsSync(join(root, ".git"))
-  let workroot, workspaceRoot = null
-  if (gitMode) {
-    workroot = createWorktree({ repo: root, branch }).worktreePath
-  } else {
-    const isWorkspace = readdirSync(root, { withFileTypes: true })
-      .some((e) => e.isDirectory() && !e.name.startsWith(".") && existsSync(join(root, e.name, ".git")))
-    if (!isWorkspace) throw new FailClosed(`init --authority cli: root가 git repo도 워크스페이스도 아님(${root})`)
-    workroot = worktreeDirFor(root, branch)
-    mkdirSync(workroot, { recursive: true })
-    workspaceRoot = root
-  }
-  const result = bootstrapRun(workroot, { base: slug, track: "plan", sessionId: null, workspaceRoot, authority: "cli" })
+  if (!existsSync(join(root, ".git"))) throw new FailClosed(`init --authority cli: root가 git repo가 아님(${root})`)
+  const workroot = createWorktree({ repo: root, branch: `harnie/${slug}` }).worktreePath
+  const result = bootstrapRun(workroot, { base: slug, track: "plan", sessionId: null, authority: "cli" })
   return { ok: true, workroot, slug: result.slug, reused: result.reused === true, authority: "cli" }
 }
 
@@ -1183,40 +1106,6 @@ export function approveCli(root, slug, planHashArg) {
   })
 }
 
-// 워크스페이스 run에 멤버 repo를 등록: 검증(워크스페이스 하위 + git toplevel) → `<repo>/.harnie-wt/harnie-<slug>`
-// worktree 생성(멱등) → sentinel repos에 기록. key = 워크스페이스 상대경로(manifest task.repo가 참조).
-export function repoAdd(root, repoPathArg) {
-  if (typeof repoPathArg !== "string" || !repoPathArg) throw new FailClosed("repo-add: --repo <절대경로> 필요")
-  if (!isAbsolute(repoPathArg)) throw new FailClosed(`repo-add: --repo는 절대경로여야 함(${repoPathArg})`)
-  const ws = workspaceInfo(root)
-  if (!ws) throw new FailClosed("repo-add는 workspace run 전용 — 이 run의 active.json에 workspaceRoot 없음")
-  if (!existsSync(repoPathArg)) throw new FailClosed(`repo-add: 경로 없음(${repoPathArg})`)
-  const realRepo = realpathOf(repoPathArg)
-  const realWs = realpathOf(ws.workspaceRoot)
-  const rel = realRepo.startsWith(realWs + sep) ? realRepo.slice(realWs.length + 1) : null
-  if (rel == null) throw new FailClosed(`repo-add: repo가 워크스페이스(${ws.workspaceRoot}) 하위가 아님(${repoPathArg})`)
-  const key = rel.split(sep).join("/")
-  if (!REPO_KEY_RE.test(key)) throw new FailClosed(`repo-add: repo 키 형식 오류(${key})`)
-  let toplevel
-  try { toplevel = execFileSync("git", ["-C", realRepo, "rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim() } catch { toplevel = null }
-  if (!toplevel || realpathOf(toplevel) !== realRepo)
-    throw new FailClosed(`repo-add: git repo toplevel이 아님(${repoPathArg}) — repo 루트 디렉터리를 지정하세요`)
-  const s0 = readJSONStrict(sentinelPath(root))
-  readMode(root, s0.track, s0.slug) // mode mirror 손상 시 fail-closed(CR-001 — repo-add도 권위 변이 명령)
-  const branch = `harnie/${s0.slug}`
-  const { worktreePath, created } = createWorktree({ repo: realRepo, branch })
-  return withStateLock(root, () => {
-    const s = readJSONStrict(sentinelPath(root))
-    if (s.slug !== s0.slug || s.track !== s0.track) throw new FailClosed("repo-add 중 active run 변경됨(rollover) — fail-closed")
-    s.repos = s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
-    const prev = s.repos[key]
-    if (prev && (prev.repo !== realRepo || prev.workroot !== worktreePath))
-      throw new FailClosed(`repo-add: key '${key}'가 이미 다른 경로로 등록됨(${JSON.stringify(prev)})`)
-    s.repos[key] = { repo: realRepo, workroot: worktreePath }
-    writeJSONAtomic(sentinelPath(root), s)
-    return { ok: true, key, repo: realRepo, workroot: worktreePath, created }
-  })
-}
 // realpath: macOS tmpdir symlink(/var→/private/var) 등으로 경로 문자열 비교가 어긋나는 것 방지
 function realpathOf(p) { return realpathSync(p) }
 
@@ -1325,10 +1214,9 @@ function cmdVerifyIntegration({ flags }) {
   const dir = planDir(root, "plan", slug)
   const manifest = readJSONStrict(join(dir, "manifest.json"))
   const iv = manifest.integrationVerification
-  if (!Array.isArray(iv) || iv.length === 0) die("manifest에 integrationVerification 없음 — M/L 승인 계약에 포함돼야 함")
-  const ws = workspaceInfo(root)
+  if (!Array.isArray(iv) || iv.length === 0) die("manifest에 integrationVerification 없음 — M 승인 계약에 포함돼야 함")
   const expectedHash = sha256(stableStringify(iv))
-  const currentTree = ws ? captureWorkspaceTree(ws.repos) : captureTree(root)
+  const currentTree = captureTree(root)
   const receiptPath = join(dir, "review", "integration", "receipt.json")
   const prev = readJSONOrNull(receiptPath)
   if (prev && prev.exitCode === 0 && !prev.vacuous && prev.planHash === manifest.planHash && prev.verificationHash === expectedHash && prev.artifact === currentTree) {
@@ -1336,19 +1224,13 @@ function cmdVerifyIntegration({ flags }) {
     return
   }
   const execRootOf = (v) => {
-    if (ws) {
-      if (v.repo == null) die("workspace run의 integrationVerification entry는 repo 키 필수")
-      const entry = ws.repos[v.repo]
-      if (!entry || !existsSync(entry.workroot)) die(`integrationVerification repo '${v.repo}' 미등록/소실`)
-      return entry.workroot
-    }
-    if (v.repo != null) die("단일-repo run의 integrationVerification entry에 repo 키 불가")
+    if (v.repo != null) die("integrationVerification entry에 repo 키 불가 — run은 단일 repo 전용")
     return root
   }
   const results = iv.map((v) => runVerification(execRootOf(v), v))
   const allPass = results.every((r) => r.exitCode === 0)
   const vacuousReasons = results.flatMap((r, i) => r.vacuousReasons.map((x) => `integrationVerification[${i}] ${r.executable} ${r.args.join(" ")}: ${x}`))
-  const artifact = ws ? captureWorkspaceTree(ws.repos) : captureTree(root) // 실행 후 트리에 바인딩
+  const artifact = captureTree(root) // 실행 후 트리에 바인딩
   const receipt = { integration: true, results, exitCode: allPass ? 0 : (results.find((r) => r.exitCode !== 0)?.exitCode ?? 1), vacuous: vacuousReasons.length > 0, vacuousReasons, planHash: manifest.planHash, verificationHash: expectedHash, artifact, at: new Date().toISOString() }
   writeJSONAtomic(receiptPath, receipt)
   if (receipt.vacuous) process.stderr.write(`harnie-exec: VACUOUS VERIFICATION — ${vacuousReasons.join(" | ")}\n`)
@@ -1368,8 +1250,7 @@ function cmdVerify({ flags }) {
   const state = readJSONOrNull(join(dir, "review", task.reviewUnit, "state.json"))
   const reviewedPostSHA = state && state.reviewedPostSHA
   if (!reviewedPostSHA) die(`task ${taskId}: reviewedPostSHA 없음(리뷰 APPROVE 후 검증) — fail-closed`)
-  // workspace run이면 이 task의 repo workroot가 git root(검증 cwd·scope 해시 기준)다.
-  const { gitRoot, reason } = resolveTaskGitRoot(root, task, workspaceInfo(root))
+  const { gitRoot, reason } = resolveTaskGitRoot(root, task)
   if (!gitRoot) die(`task ${taskId}: repo 바인딩 실패 — ${reason}`)
   const reviewedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope)
   const preScope = computeScopeHash(gitRoot, captureTree(gitRoot), task.scope)
@@ -1395,10 +1276,6 @@ function cmdCompletion({ flags }) {
   const track = flags.track || "plan"
   const slug = flags.slug || die("--slug 필요")
   out(computeCompletion(root, track, slug))
-}
-
-function cmdRepoAdd({ flags }) {
-  out(repoAdd(flags.root || die("--root 필요"), flags.repo || die("--repo <레포 절대경로> 필요")))
 }
 
 function cmdSetTask({ flags }) {
@@ -1479,7 +1356,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "seal-verify": cmdSealVerify(args); break
       case "verify": cmdVerify(args); break
       case "completion": cmdCompletion(args); break
-      case "repo-add": cmdRepoAdd(args); break
       case "set-task": cmdSetTask(args); break
       case "watchdog-extend": cmdWatchdogExtend(args); break
       case "rebind-task": cmdRebindTask(args); break

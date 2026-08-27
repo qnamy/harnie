@@ -157,10 +157,9 @@ test("같은 작업 재호출 → resume(exit 0·같은 worktree·같은 slug)",
   assert.equal(active(wt).slug, before)
 })
 
-// ── 워크스페이스(멀티레포) 진입 ──────────────────────────────────────────
-// 비-git 워크스페이스(하위에 git repo 보유)에서 /harnie:dev → run root는 <W>/.harnie-wt/harnie-<slug>
-// 평범한 디렉터리이고, sentinel에 workspaceRoot·repos가 기록된다. W 자체에는 active.json이 절대 생기지 않는다.
-function workspaceDir() {
+// ── 비-git root 거부 ─────────────────────────────────────────────────────
+// 0.13: 워크스페이스(멀티레포) 모드 삭제 — 하위에 git repo가 있어도 root 자체가 git repo가 아니면 run을 만들지 않는다.
+function dirWithChildRepo() {
   const w = mkdtempSync(join(tmpdir(), "harnie-ws-"))
   const repo = join(w, "repoA")
   execFileSync("git", ["init", "-q", repo])
@@ -172,35 +171,18 @@ function workspaceDir() {
   return { w, repo }
 }
 
-test("워크스페이스 /harnie:dev → workspace run 생성(exit 0, run root=평범한 디렉터리, sentinel에 workspaceRoot)", () => {
-  const { w } = workspaceDir()
-  assert.equal(run(ups("/harnie:dev cross repo task", w)).code, 0)
-  const runRoot = wtFor(w, "cross repo task")
-  const s = active(runRoot)
-  assert.ok(s)
-  assert.equal(s.track, "plan")
-  assert.equal(s.workspaceRoot, w)
-  assert.deepEqual(s.repos, {})
-  assert.ok(!existsSync(join(runRoot, ".git"))) // git worktree가 아니라 평범한 디렉터리
-  assert.equal(active(w), null)                 // W에는 active.json 없음(다른 세션·작업 게이트 없음)
-  assert.ok(existsSync(join(w, ".harnie", "sessions", `${SID}.json`))) // 세션 바인딩 포인터만 W에
-})
-
-test("git repo도 하위 repo도 없는 디렉터리 → exit 2(run 미생성)", () => {
+test("비-git 디렉터리는 하위 repo 유무와 무관하게 exit 2(run 미생성)", () => {
   const empty = mkdtempSync(join(tmpdir(), "harnie-empty-"))
   const r = run(ups("/harnie:dev some task", empty))
   assert.equal(r.code, 2)
   assert.match(r.stderr, /git repo/)
   assert.equal(active(wtFor(empty, "some task")), null)
-})
-
-test("워크스페이스 같은 작업 재호출 → resume(같은 run root·같은 slug)", () => {
-  const { w } = workspaceDir()
-  run(ups("/harnie:dev ws same task", w))
-  const runRoot = wtFor(w, "ws same task")
-  const before = active(runRoot).slug
-  assert.equal(run(ups("/harnie:dev ws same task", w)).code, 0)
-  assert.equal(active(runRoot).slug, before)
+  // 0.13: 하위에 git repo가 있는 워크스페이스도 더 이상 진입점이 아니다
+  const { w } = dirWithChildRepo()
+  const r2 = run(ups("/harnie:dev cross repo task", w))
+  assert.equal(r2.code, 2)
+  assert.equal(active(wtFor(w, "cross repo task")), null)
+  assert.equal(active(w), null)
 })
 
 test("malformed stdin(비-JSON) → exit 2(fail-closed, P2-4)", () => {

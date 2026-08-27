@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, readdirSync, renameSync } from "node:fs"
 import { dirname, resolve, basename, join, sep, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
-import { captureTree, captureWorkspaceTree, computeDelta } from "./delta.mjs"
+import { captureTree, computeDelta } from "./delta.mjs"
 import { parseReview, mergeLedger } from "./ledger.mjs"
 
 function die(msg) {
@@ -78,31 +78,14 @@ function readState(path) {
   return s
 }
 
-// root의 "현재 tree" 아티팩트 — git repo면 40-hex tree SHA, workspace run root(비-git, active.json에
-// workspaceRoot·repos)면 멤버 repo 합성 `ws:<sha256>`. 그 외(비-git·비-workspace)는 fail-closed.
-function workspaceRepos(root) {
-  const s = readJSON(join(root, ".harnie", "active.json"), null)
-  if (!s || typeof s.workspaceRoot !== "string" || !s.workspaceRoot) return null
-  return s.repos && typeof s.repos === "object" && !Array.isArray(s.repos) ? s.repos : {}
-}
+// root의 "현재 tree" 아티팩트 — 단일 repo의 40-hex tree SHA. 비-git root는 fail-closed.
 function currentArtifact(root) {
-  if (existsSync(join(root, ".git"))) return captureTree(root)
-  const repos = workspaceRepos(root)
-  if (repos == null) die(`root가 git repo도 workspace run root도 아님: ${root}`)
-  const ws = captureWorkspaceTree(repos)
-  if (ws == null) die("workspace run에 등록된 repo 없음 — 먼저 execution.mjs repo-add로 등록하세요")
-  return ws
+  if (!existsSync(join(root, ".git"))) die(`root가 git repo가 아님: ${root}`)
+  return captureTree(root)
 }
-// apply의 artifact 신선도 검증에 쓰는 허용 집합. workspace run root에선 합성값 외에 **각 멤버 repo의 현재
-// tree(40-hex)** 도 허용한다 — task 단위 CR은 자기 멤버 repo tree를 아티팩트로 쓰고(레저는 run root에 있어
-// --root는 run root), 그 task의 권위 바인딩은 execution.mjs가 manifest의 repo 키 + scope 해시로 재검증한다.
+// apply의 artifact 신선도 검증에 쓰는 허용 집합.
 function acceptableArtifacts(root) {
-  if (existsSync(join(root, ".git"))) return [captureTree(root)]
-  const repos = workspaceRepos(root)
-  if (repos == null) die(`root가 git repo도 workspace run root도 아님: ${root}`)
-  const ws = captureWorkspaceTree(repos)
-  if (ws == null) die("workspace run에 등록된 repo 없음 — 먼저 execution.mjs repo-add로 등록하세요")
-  return [ws, ...Object.values(repos).map((r) => captureTree(r.workroot))]
+  return [currentArtifact(root)]
 }
 
 function isUnderHarnie(p, root) {
@@ -128,12 +111,8 @@ function assertCaptureRecord(recordDir, repo) {
   const sentinel = readJSON(join(runRoot, ".harnie", "active.json"), null)
   if (!sentinel || !sentinel.slug || !sentinel.track) die(`--record 대상 run root sentinel 없음/손상: ${runRoot}`)
   const realRepo = existsSync(repo) ? realpathSync(repo) : resolve(repo)
-  if (sentinel.workspaceRoot) {
-    const member = Object.values(sentinel.repos || {}).some((r) => r && typeof r.workroot === "string" && existsSync(r.workroot) && realpathSync(r.workroot) === realRepo)
-    if (!member) die(`--record positional repo가 대상 workspace run의 등록 멤버 workroot가 아님: ${repo}`)
-  } else if (realpathSync(runRoot) !== realRepo) {
-    die(`--record positional repo가 대상 single-repo run workroot와 불일치: ${repo}`)
-  }
+  if (realpathSync(runRoot) !== realRepo)
+    die(`--record positional repo가 대상 run workroot와 불일치: ${repo}`)
 }
 
 function cmdCapture({ pos, flags }) {
@@ -156,7 +135,7 @@ function cmdCapture({ pos, flags }) {
 
 function cmdDelta({ pos, flags }) {
   const repo = pos[0] || die("delta <repo> <baselineSHA> 필요")
-  if (!existsSync(join(repo, ".git"))) die(`delta는 git repo(단일 repo 또는 멤버 repo workroot)에서만 — workspace run root는 불가: ${repo}`)
+  if (!existsSync(join(repo, ".git"))) die(`delta는 git repo에서만: ${repo}`)
   const baseline = pos[1] || die("baselineSHA 필요")
   const expectScope = flags.scope ? flags.scope.split(",").map((s) => s.trim()).filter(Boolean) : null
   const d = computeDelta(repo, baseline, { expectScope })
@@ -288,8 +267,8 @@ function cmdApply({ flags }) {
   if (namespace === "CR" && artifact == null) die(`CR(코드 리뷰) apply는 --artifact <postSHA> 필수(리뷰된 tree 바인딩)`)
   if (artifact != null) {
     if (namespace === "CR") {
-      if (!/^(?:[0-9a-f]{40}|ws:[0-9a-f]{64})$/.test(artifact))
-        die(`--artifact는 40-hex tree SHA 또는 workspace 합성 ws:<sha256>여야 함 (got ${JSON.stringify(artifact)})`)
+      if (!/^[0-9a-f]{40}$/.test(artifact))
+        die(`--artifact는 40-hex tree SHA여야 함 (got ${JSON.stringify(artifact)})`)
       const acceptable = acceptableArtifacts(root)
       if (!acceptable.includes(artifact))
         die(`--artifact(${artifact})가 현재 working tree(${acceptable.join(", ")})와 불일치 — stale/임의 SHA 또는 리뷰 후 변경. 재캡처 후 재리뷰 필요`)

@@ -105,26 +105,6 @@ test("decideBash: loop CLI는 활성 task worktree를 repo로 허용", () => {
   assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${other} --ledger ${other}/.harnie/review/code/ledger.json --review ${other}/.harnie/review/code/round-1.txt --ns CR --state ${other}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, true)
 })
 
-test("decideBash: workspace run — 멤버 workroot는 loop/worktree 대상 허용, execution --root는 run root만", () => {
-  const member = "/ws/repoA/.harnie-wt/harnie-x"
-  const wctx = { trustedClis: T, activeRoot: "/ws/.harnie-wt/harnie-x", activeSlug: "x", activeTrack: "plan", memberRoots: [member] }
-  // loop: 멤버 workroot capture/delta/apply 허용(.harnie 경로 포함 → sanctioned 아니면 deny였을 것)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${member}`, ...wctx }).autoAllow, true)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${member} a --out ${member}/.harnie/review/code/delta.patch`, ...wctx }).deny, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${member} --ledger ${member}/.harnie/x/review/u/ledger.json --review ${member}/.harnie/x/review/u/round-1.txt --ns CR --state ${member}/.harnie/x/review/u/state.json --artifact a`, ...wctx }).deny, false)
-  // 멤버 workroot 하위 task worktree도 허용
-  const taskWt = `${member}/.harnie-wt/harnie-x-t1`
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${taskWt} a --out ${taskWt}/.harnie/review/code/delta.patch`, ...wctx }).deny, false)
-  // 미등록 repo는 deny(.harnie 참조라 관찰 가능)
-  const rogue = "/ws/repoB/.harnie-wt/harnie-x"
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${rogue} a --out ${rogue}/.harnie/review/code/delta.patch`, ...wctx }).deny, true)
-  // worktree.mjs: 멤버 workroot --repo 허용, execution.mjs --root는 여전히 run root만(.harnie 프로브로 관찰)
-  assert.equal(decideBash({ command: `node /plugin/scripts/worktree.mjs create --repo ${member} --branch .harnie/probe`, ...wctx }).deny, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/execution.mjs seal --root /ws/.harnie-wt/harnie-x --slug x --probe .harnie/x`, ...wctx }).deny, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/execution.mjs seal --root ${member} --slug x --probe .harnie/x`, ...wctx }).deny, true)
-  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs completion --root /ws/.harnie-wt/harnie-x --slug x", ...wctx }).autoAllow, true)
-})
-
 test("decideBash: sanctioned auto-allow는 4종만", () => {
   assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs capture /repo", ...ctx }).autoAllow, true)
   assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs delta /repo a --out .harnie/x", ...ctx }).autoAllow, true)
@@ -172,7 +152,8 @@ test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building
   assert.equal(decideCodex({ ...base, sandbox: "danger-full-access" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/other" }).deny, true)
   assert.equal(decideCodex({ ...base, buildingUnboundTasks: [] }).deny, true)
-  assert.equal(decideCodex({ ...base, pendingRunRootBootstrap: null }).deny, true)
+  // marker 없는 run-root 호출은 별도 테스트(단일 building-unbound serial 예외)가 다룬다
+  assert.equal(decideCodex({ ...base, pendingRunRootBootstrap: null, buildingUnboundTasks: ["1", "2"], taskRepoWorkroots: { "1": "/repo", "2": "/repo" } }).deny, true)
 })
 
 test("decideCodex: 복수 building 중 cwd가 가리키는 task의 첫 호출을 허용", () => {
@@ -183,20 +164,11 @@ test("decideCodex: 복수 building 중 cwd가 가리키는 task의 첫 호출을
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
 })
 
-test("decideCodex: marker 없는 root cwd는 단일 serial·task worktree 부재일 때만 허용", () => {
+test("decideCodex: marker 없는 root cwd는 단일 building-unbound일 때만 허용", () => {
   const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", buildingUnboundTasks: ["1"], taskRepoWorkroots: { "1": "/repo" } }
-  assert.equal(decideCodex({ ...base, taskWorktreeExists: { "1": false } }).deny, false)
-  assert.equal(decideCodex({ ...base, taskWorktreeExists: { "1": true } }).deny, true)
-  assert.equal(decideCodex({ ...base, buildingUnboundTasks: ["1", "2"], taskWorktreeExists: { "1": false, "2": false } }).deny, true)
-})
-
-test("decideCodex: workspace run — 멤버 workroot·그 하위 task worktree cwd 허용, 미등록 deny", () => {
-  const member = "/ws/repoA/.harnie-wt/harnie-x"
-  const base = { isReply: false, sandbox: "workspace-write", root: "/ws/.harnie-wt/harnie-x", slug: "x", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": member }, memberRoots: [member] }
-  assert.equal(decideCodex({ ...base, cwd: member }).deny, false)
-  assert.equal(decideCodex({ ...base, cwd: `${member}/.harnie-wt/harnie-x-t1` }).deny, false)
-  assert.equal(decideCodex({ ...base, cwd: "/ws/repoB/.harnie-wt/harnie-x" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/ws/repoA" }).deny, true) // 멤버 main 트리 직접 쓰기는 불허(worktree만)
+  assert.equal(decideCodex(base).deny, false)
+  assert.equal(decideCodex({ ...base, buildingUnboundTasks: ["1", "2"], taskRepoWorkroots: { "1": "/repo", "2": "/repo" } }).deny, true)
+  assert.equal(decideCodex({ ...base, taskRepoWorkroots: { "1": "/other" } }).deny, true)
 })
 
 test("decideStop: 완료 통과, 미완료 block, 정직 INCOMPLETE 재호출 통과", () => {

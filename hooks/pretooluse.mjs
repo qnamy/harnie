@@ -33,9 +33,9 @@ try {
   if (!ctx.active || !isOwnerSession(root, ctx, p.session_id)) {
     if (toolName === "Bash") {
       // 비-owner 세션(세션 id 교체·재개 등)도 run의 slug·멤버 workroot는 넘긴다 — 권위 부여가 아니라 신뢰
-      // CLI **분류 입력**이다. 이게 빠지면 workspace run의 `loop.mjs delta <멤버 repo>`·`apply --root <멤버>`가
+      // CLI **분류 입력**이다. 이게 빠지면 run root 인자를 쓰는 sanctioned CLI 호출이
       // 미등록으로 보여 세션 중반부터 일제히 차단되는 실측 회귀가 있었다(autoAllow는 track 미전달로 계속 꺼짐).
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null, memberRoots: ctx.memberWorkroots || [] })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null })
       if (d.deny) denyPreTool(d.reason)
     }
     allow()
@@ -58,7 +58,7 @@ try {
       const d = decideWriteEdit({ relPath: rel, phase, track, slug, outside })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, memberRoots: ctx.memberWorkroots || [] })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track })
       if (d.deny) denyPreTool(d.reason)
       else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal-verify) — active repo 바인딩·경로 containment 검증됨")
       else allow()
@@ -74,16 +74,13 @@ try {
           buildingUnboundTasks: ctx.failClosed ? [] : ctx.buildingUnboundTaskIds || [],
           pendingRunRootBootstrap: ctx.pendingRunRootBootstrap || null,
           taskRepoWorkroots: ctx.taskRepoWorkroots || {},
-          taskWorktreeExists: ctx.taskWorktreeExists || {},
-          memberRoots: ctx.memberWorkroots || [],
         })
         if (d.deny) denyPreTool(d.reason)
         // 워치독은 advisory다. 자체 읽기·판정 오류가 권위 가드의 fail-closed 경로로 새지 않게 독립적으로 무시한다.
         try {
           let usage = null
           if (!isReply && input.sandbox === "workspace-write") {
-            const roots = [root, ...(ctx.memberWorkroots || [])]
-            const mapped = roots.map((r) => taskIdFromActiveTaskWorktree(r, slug, input.cwd)).find((id) => id != null)
+            const mapped = taskIdFromActiveTaskWorktree(root, slug, input.cwd)
             const taskId = mapped || ctx.pendingRunRootBootstrap || (input.cwd == null && ctx.buildingUnboundTaskIds?.length === 1 ? ctx.buildingUnboundTaskIds[0] : null)
             if (taskId) usage = taskWatchdogUsage(root, slug, { taskId })
           } else if (isReply && (ctx.builderThreads || []).includes(input.threadId)) {
