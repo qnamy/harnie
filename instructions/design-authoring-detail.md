@@ -1,6 +1,6 @@
 # Design Authoring Profile — TASK-DETAIL Altitude (Canonical, for Injection)
 
-Output contract for a **detailed design inside settled boundaries**: one task of an L run (written by its runner), the single unit of an M run, or any standalone detailed design. The caller passes this file's absolute path; the author Reads it before writing.
+Output contract for a **detailed design inside settled boundaries**: the single unit of an M run, or any standalone detailed design. The caller passes this file's absolute path; the author Reads it before writing.
 
 **Altitude:** translate the settled contract into implementable code-level decisions — specific enough that an implementer begins **without additional core decisions**, without unnecessary classes or patterns.
 
@@ -8,7 +8,7 @@ Output contract for a **detailed design inside settled boundaries**: one task of
 
 ## Environment facts first
 
-Open with the facts your decisions rest on, **each verified in the actual repo and cited with its source path** — wrong premises are the top source of wasted review rounds. Reuse and verify the fact sheet the caller provides (CONTRACT per-task sheet / grounding output) instead of re-deriving; your own pass is **incremental** — verify the given facts, fill only gaps. Cover, when relevant: schema-migration head; test infrastructure and baseline failures; runtime configuration limits; framework/build behavior; **driver·session semantics** (batch-scoped SET options, datetime precision truncation, rowcount reliability under batches, and similar gotchas of the concrete driver in scope). A decision resting on an unverifiable fact is `[UNRESOLVED]`, not a guess.
+Open with the facts your decisions rest on, **each verified in the actual repo and cited with its source path** — wrong premises are the top source of wasted review rounds. Reuse and verify the fact sheet the caller provides (the run's grounding output) instead of re-deriving; your own pass is **incremental** — verify the given facts, fill only gaps. Cover, when relevant: schema-migration head; test infrastructure and baseline failures; runtime configuration limits; framework/build behavior; **driver·session semantics** (batch-scoped SET options, datetime precision truncation, rowcount reliability under batches, and similar gotchas of the concrete driver in scope). A decision resting on an unverifiable fact is `[UNRESOLVED]`, not a guess.
 
 ## Sections (lightweight — compress to a few lines for small work)
 

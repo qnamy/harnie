@@ -8,21 +8,21 @@ General Agent Teams rules — routing (5-question test), hard rules, member axes
 
 Two places only:
 
-- **`harnie:dev` design stages** — the L stage's ARCH step (`design/arch-rev-N.md`) and CONTRACT step (`design/contract-rev-N.md`).
+- **Standalone architecture design** — an ARCH document authored through the `design-authoring` skill (`design/arch-rev-N.md`), outside any run.
 - **Incident analysis** — the T-B competing-hypothesis template, artifact path named by the orchestrator.
 
-At those points, when the general file's ≥3-of-5 test passes **and the user consents in the same turn**, upgrade the single `harnie-designer` subagent to a team. Everything else in the pipeline (grounding, build, code review, verification, S/M sizes) never forms a team.
+At those points, when the general file's ≥3-of-5 test passes **and the user consents in the same turn**, upgrade the single `harnie-designer` subagent to a team. Everything inside a `harnie:dev` run (grounding, design, build, code review, verification) never forms a team.
 
 ## 2. Composition
 
 - Teammates **reference existing functional agent definitions** — `harnie-scout` (explorer roles), `harnie-designer` (designer / artifact owner). Domain specialization is injected through the spawn prompt; never add new agent definitions for a team. The general file's thinking lenses (`skeptic-challenger` · `simplicity-advocate` · `ops-risk`) also ride on `harnie-scout` as spawn-prompt injections — at most 1–2 per team.
 - `harnie-reviewer` is **never** a teammate. A challenger role inside a team is an explorer, not a reviewer.
-- ≤4 teammates. State each teammate's model **explicitly at spawn**, from `instructions/model-matrix.md` (e.g. ARCH designer = fable only at very-hard difficulty, otherwise per the matrix; CONTRACT designer = sonnet/opus by difficulty; `harnie-scout` = haiku; a T3 challenger = opus).
+- ≤4 teammates. State each teammate's model **explicitly at spawn**, from `instructions/model-matrix.md` (e.g. ARCH designer = fable only at very-hard difficulty, otherwise per the matrix; `harnie-scout` = haiku; a T3 challenger = opus).
 - A teammate referencing a subagent definition inherits its `tools:`/`model:` but not `skills:`/`mcpServers:` — restate any needed instruction path in the spawn prompt.
 
 ## 3. Write scope
 
-- Exactly **one artifact owner** per team phase, writing **one file** at the path the orchestrator names (e.g. `design/contract-rev-N.md`). All other teammates are read-only contributors that report through messages.
+- Exactly **one artifact owner** per team phase, writing **one file** at the path the orchestrator names (e.g. `design/arch-rev-N.md`). All other teammates are read-only contributors that report through messages.
 - **No source-code writes** in a team phase — team phases are design/analysis only.
 - Teammates **never call `.harnie/` CLIs** (`execution.mjs`, ledgers, approval gates). Authority state stays with the orchestrator; a teammate that believes state must change reports it, and the orchestrator makes the call.
 

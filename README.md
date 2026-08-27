@@ -23,26 +23,24 @@
 
 리뷰어는 diff만 보지 않고 공유 컨텍스트(계획·의도·제약) 위에서 판단한다. 승인(open blocking 0)까지 반복하되, 재리뷰는 전체 재탐색이 아닌 증분 fix-델타와 필요한 문맥에 한정한다. 계획·상태·리뷰 receipt는 `.harnie/`에 남아 다음 단계와 resume이 읽는다.
 
-## 한 번 돌리면 이렇게 흐른다 (0.11 단일 파이프라인)
+## 한 번 돌리면 이렇게 흐른다 (단일 파이프라인)
 
-`/harnie:dev "결제 실패 재시도 큐 도입"` 한 줄로 시작한다. 크기(S/M/L)가 스테이지 스킵의 유일한 축이다 — S는 국소 수정(설계·승인 게이트 없음), M은 설계 판단이 필요한 단일 리뷰 유닛, L은 태스크 분할이 필요한 큰 작업. 판정은 잠정→그라운딩 후 확정이고 **상향 승격만** 존재한다.
+`/harnie:dev "결제 실패 재시도 큐 도입"` 한 줄로 시작한다. 크기(S/M)가 스테이지 스킵의 유일한 축이다 — S는 국소 수정(설계·승인 게이트 없음), M은 설계 판단이 필요한 단일 리뷰 유닛. 판정은 잠정→그라운딩 후 확정이고 **상향 승격만** 존재한다. **M보다 큰 작업은 harnie의 몫이 아니다**: ARCH 트리거가 있거나 독립 리뷰 가치가 있는 태스크가 2개 이상이면 파이프라인은 크기 판정에서 멈추고 사람+orca 프로세스로 인계한다(0.13에서 L 파이프라인 삭제 — 분해·디스패치·통합은 사람과 orca가 소유한다).
 
-| 시점 | 일어나는 일 (L 기준; S/M은 해당 스테이지 스킵) | 남는 것 |
+| 시점 | 일어나는 일 (M 기준; S는 해당 스테이지 스킵) | 남는 것 |
 |---|---|---|
 | **진입** | bootstrap 훅이 **전용 git worktree**를 만들고 sentinel과 `execution.json`을 심는다(`mode: sizing`). 잠정 크기·난이도를 판정한다; 그라운딩 후 크기는 `set-mode`로 확정(상향 전용)하고, 난이도는 그라운딩 직후·승인 게이트 직전 두 체크포인트에서 재판정해 `set-difficulty`로 갱신한다(상향은 자동, 하향은 `AskUserQuestion` 필요) | 격리된 워크루트 |
-| **ARCH 설계** | (ARCH 트리거가 있을 때만) `harnie-designer`(난이도별 opus — hard는 effort high, very-hard만 `fable`·폴백 opus+effort-high, `model-matrix.md` §3)가 아키텍처 설계를 쓰고 **Codex 아키 리뷰 루프**를 돈다 — 아키 고도를 벗어난 finding은 contest로 기각된다 | `design/arch-rev-N.md` |
-| **태스크 분할 + CONTRACT** | 분할 초안 → 태스크별 read-only 그라운딩(코드 경로·테스트·드라이버 시맨틱스) → 그 근거 위에서 **CONTRACT 문서**(태스크 간 계약 + 분할표 — 태스크마다 독립 리뷰 가치 근거 필수, 미달은 병합) 작성·Codex 리뷰 | `design/contract-rev-N.md` |
-| **승인 게이트(1회)** | `plan.md`의 `harnie-manifest` 블록(검증 argv 증거 포함) → `arm-approval` → 실제 `AskUserQuestion` one-shot 바인딩. **여기까지 소스 쓰기는 훅이 막는다** | planHash 고정 `manifest.json` |
-| **러너 병렬 실행** | 태스크마다 `harnie-task-runner`가 전용 worktree에서 끝까지 소유 — 증분 그라운딩 → **태스크별 상세설계 + Codex 설계리뷰** → Codex 빌드(**스코프 테스트만**) → 인라인 Claude 코드리뷰 → 커밋. main엔 exit 리포트만 돌아온다 | 태스크별 커밋 + 리뷰 ledger |
-| **순차 통합** | 태스크를 하나씩 merge + 확인 리뷰 + `verify --task`. 리뷰 전이는 `scripts/loop.mjs`가 fail-closed로 고정한다 | merge + receipt + review-archive |
-| **통합 검증** | `verify --integration` — **전체 테스트 스위트는 여기서 1회**, 최종 트리에 바인딩된 성공 receipt 하나만 남긴다(무변화 재실행은 엔진이 거부) | integration receipt |
-| **Final Review(1유닛)** | opus 리뷰어가 coverage·quality·runtime·scope 4렌즈 체크리스트를 한 번에 본다(테스트 재실행 없음 — receipt 참조) → `completion`이 완료를 **재도출**하고 Stop 훅이 독립 검증한다. 사람이 확인할 항목은 체크리스트로 인계된다 | `HARNIE_STATUS` 정직 보고 |
+| **승인 게이트(1회)** | `plan.md`의 `harnie-manifest` 블록(단일 태스크 + 검증 argv 증거 포함) → `arm-approval` → 실제 `AskUserQuestion` one-shot 바인딩. **여기까지 소스 쓰기는 훅이 막는다** | planHash 고정 `manifest.json` |
+| **상세설계 + 설계리뷰** | `harnie-designer`가 TASK-DETAIL 설계를 쓰고 **Codex 설계 리뷰 루프**를 돈다 — 고도를 벗어난 finding은 contest로 기각된다 | `review/design/design.md` |
+| **빌드 + 코드리뷰** | `set-task`로 빌더 스레드 바인딩·워치독을 켜고 baseline/seal 후 Codex 빌드(**스코프 테스트만**) → 인라인 Claude 코드리뷰 루프. 리뷰 전이는 `scripts/loop.mjs`가 fail-closed로 고정한다 | 리뷰 ledger + delta 사이드카 |
+| **검증** | `verify --task` 후 `verify --integration` — **전체 테스트 스위트는 여기서 1회**, 최종 트리에 바인딩된 성공 receipt 하나만 남긴다(무변화 재실행은 엔진이 거부) | task/integration receipt |
+| **완료** | `completion`이 완료를 **재도출**하고 Stop 훅이 독립 검증한다. 사람이 확인할 항목은 체크리스트로 인계된다 | `HARNIE_STATUS` 정직 보고 |
 
 빌드 위임 직전 `seal`로 권위 스냅샷을 뜨고 `seal-verify`가 빌더의 권위 파일 훼손을 fail-closed로 잡는 것은 모든 경로 공통이다.
 
 **리뷰 기각(contest) 게이트.** 리뷰 finding이 고도를 벗어나거나(예: 아키 리뷰가 태스크 내부 구현을 요구) 구체적 실수 시나리오 없는 메커니즘 추가를 요구하면, 수정하는 대신 이의를 제기한다 — 리뷰어의 다음 응답 1회로 판정이 끝나고, 고수하면 즉시 사용자에게 올라간다. 정확성·안전 finding은 기각 대상이 아니며, 종결 권한은 언제나 리뷰어와 사용자에게 있다.
 
-실행 중 **승인된 설계 자체의 결함**이 드러나면 append-only `design/errata.md`에 기록한다(errata v2). 이 파일은 엔진 소유 control file이라 훅이 직접 쓰기를 막고 모든 변경이 `execution.mjs`를 거치며, blocker/degrade 처분은 승인 게이트와 같은 one-shot 바인딩으로 사용자 승인을 받아야 한다. 미처분 blocker는 `completion`이 남은 블로커로 세어 완료를 막는다.
+실행 중 **승인된 설계 자체의 결함**이 드러나면 A5.2 재승인 경로로 돌아간다 — manifest 블록을 고치고 다시 arm·질문한다. planHash가 바뀌면서 낡은 설계 승인이 기계적으로 무효화된다.
 
 진행 중 재사용할 지식(발견된 제약·승인된 결정·검증 evidence 경로)은 `notepad.md`에 append-only로 쌓인다. 오래된 항목을 고치지 않고 `supersedes` 정정 항목을 새로 붙여 불변성과 최신성을 함께 지킨다.
 
@@ -67,17 +65,15 @@
 
 이 강제 계층도 크로스-모델 리뷰로 다듬었다. 실행 상태 엔진은 Codex 코드리뷰 12라운드에서 승인 우회, symlink 탈출, 중복 플래그 같은 실제 우회 경로를 발견·수정한 뒤 승인됐고, 위협모델 밖의 과잉 방어는 가드 슬림화로 걷어냈다.
 
-## 병렬·멀티레포 실행
+## 병렬 실행
 
-각 run은 별도 git worktree에서 실행되어 세션 간 충돌 없이 병렬로 진행할 수 있다. L 파이프라인에서는 스코프가 겹치지 않는 태스크마다 `harnie-task-runner`가 **태스크별 worktree**에서 상세설계·빌드·유닛 리뷰를 끝내고, main이 순차 merge한다. 각 태스크는 머지 전에 유닛 리뷰를, 머지 후에 확인 라운드를 통과해야 하며, 유닛 리뷰 기록은 worktree 제거 시 `review-archive/`로 이관돼 `harness-digest`의 입력이 된다.
-
-**워크스페이스 run(멀티레포).** 루트가 git 저장소가 아니어도 직속 하위에 repo가 있으면 진입할 수 있다. 계획이 건드릴 repo를 `repo-add`로 등록하면 repo마다 전용 worktree가 생기고, manifest의 각 task가 `repo` 키에 바인딩된다(all-or-none — 미등록 키는 승인 시 fail-closed). Final Wave 게이트는 등록된 모든 repo의 tree에서 만든 합성 아티팩트(`ws:<sha256>`)에 묶여, 어느 repo가 바뀌든 게이트가 무효화된다. 워크스페이스 루트에는 sentinel을 만들지 않아 다른 세션·작업이 게이트되지 않는다.
+각 run은 별도 git worktree에서 실행되어 세션 간 충돌 없이 병렬로 진행할 수 있다. run 하나는 **단일 git 트리**를 전제한다 — 여러 유닛으로 쪼개 병렬로 돌리는 일(worktree 수명주기·디스패치·통합)은 0.13부터 harnie가 아니라 orca와 사람이 소유한다.
 
 ## 빌드/리뷰 루프
 
 | 진입점 | 동작 |
 |---|---|
-| `/harnie:dev "<작업>"` | **단일 파이프라인** — 크기(S/M/L)를 판정해 스테이지를 스킵하며 완주. 유일한 개발 진입점 |
+| `/harnie:dev "<작업>"` | **단일 파이프라인** — 크기(S/M)를 판정해 스테이지를 스킵하며 완주. 유일한 개발 진입점(M보다 크면 사람+orca로 인계) |
 | `dev-solo` (Codex 스킬) | Codex 단독 완주 — 생산도 리뷰도 Codex: 리뷰는 fresh `codex exec --sandbox read-only` 셀프리뷰 서브프로세스(cross-model 아님 — Claude 구독 소진 시에도 완주하기 위한 설계상 트레이드오프) |
 
 ## 스킬 허브
@@ -86,13 +82,12 @@
 
 | 스킬 | 하는 일 |
 |---|---|
-| `dev` | 단일 파이프라인 오케스트레이터 — 그라운딩 → (아키·CONTRACT 설계+리뷰) → 승인 → 실행 → 코드 리뷰 → 통합 검증 → Final Review, 크기별 스테이지 스킵 |
+| `dev` | 단일 파이프라인 오케스트레이터 — 그라운딩 → 승인 → 상세설계+리뷰 → 실행 → 코드 리뷰 → 통합 검증, 크기별 스테이지 스킵 |
 | `dev-solo` | Codex 단독 파이프라인 — 같은 게이트, 리뷰는 fresh Codex 셀프리뷰 서브프로세스(cross-model 리뷰어 없음 — Codex 단독 완주를 위한 설계) |
 | `pr-review` | PR을 시니어 기준으로 리뷰해 `issue:`/`discuss:`/`nit:`로 분류하고 승인 권고를 낸다 |
 | `comment-resolve` | 내가 남긴 리뷰 지적에 대한 응답이 실제로 해소인지 검증해 resolve·재투표를 권고한다 |
 | `deploy-approval` | 배포 승인 요청의 대상 변경을 검토해 승인/보류를 판정하고 정족수 도달 시 전진을 권고한다 |
 | `quality-digest` | 누적된 리뷰 지적을 클러스터링해 lint·CI·리뷰 기준으로 승격할 후보를 제안한다 (제안만, 자동 변경 없음) |
-| `harness-digest` | 끝난 `harnie:dev` run의 실행 상태·리뷰 ledger·아카이브된 유닛 리뷰를 분석해 하네스 개선(지침 프루닝·granularity·티어 조정)을 실측 근거와 함께 제안한다 (제안만) |
 | `pr-delivery` | 주입된 Delivery Profile에 따라 PR 제목·본문과 리뷰요청 내용을 작성한다 |
 | `confluence-doc` | 개발 문서를 Confluence 페이지로 구조화하고 Mermaid를 네이티브 렌더링해 발행한다 |
 | `design-authoring` | 루프 밖 독립 설계 요청을 정본 계약(`agents/harnie-designer.md` + `instructions/design-authoring-{arch,detail}.md`)으로 라우팅하는 얇은 래퍼 |
@@ -117,11 +112,10 @@ harnie의 상당 부분은 harnie 자신의 루프로 만들어졌다. 현재 �
 - **적대적 세션은 막지 못한다.** 위협모델은 절차를 생략하는 실수이지 우회를 의도하는 공격자가 아니다. 작정하면 뚫리는 지점이 있고, 그건 설계상 감수한 범위다.
 - **워치독은 advisory이며 fail-open이다.** 예산 읽기·계산·기록이 실패하면 통과시킨다. 권위 가드(승인·완료 재도출)의 fail-closed 동작과 다르다.
 - **구독 두 개가 필요하다(`harnie:dev`).** Claude Code와 `codex` CLI 로그인이 모두 있어야 크로스-모델 루프가 성립한다. 하나만으로는 producer/리뷰어 분리가 무너진다. **예외 = dev-solo**: Codex 로그인만으로 완주한다(리뷰도 fresh Codex 셀프리뷰) — Claude 사용량/토큰이 소진됐을 때를 위한 경로다.
-- **태스크 하나의 상한은 티어 기본 30분/15회(hard·very hard 60분/25회), 자동 연장을 합쳐 최대 2×다.** 이보다 큰 태스크는 분해 대상이지 예산 연장 대상이 아니다. 캡 밖의 연장은 사람이 상황을 확인한 뒤에만 열린다.
+- **태스크 하나의 상한은 티어 기본 30분/15회(hard·very hard 60분/25회), 자동 연장을 합쳐 최대 2×다.** 이보다 큰 태스크는 사람+orca 인계 대상이지 예산 연장 대상이 아니다. 캡 밖의 연장은 사람이 상황을 확인한 뒤에만 열린다.
 - **작은 수정에 설계·승인 게이트는 과하다.** 크기 판정이 S로 확정되면 두 게이트를 스킵한다 — 대신 리뷰와 정직 보고는 S에서도 생략되지 않는다.
-- **Codex 빌더는 `.harnie/`를 읽지 않는다.** 승인된 계약은 태스크 브리프로 발췌해 빌더 프롬프트에 인라인 주입하고, 표준 빌더 규칙은 플러그인 경로의 `builder-contract.md`를 Read하게 한다(경로 참조 — 실측 검증됨).
-- **워크스페이스 run은 직속 하위 repo만 본다.** 임의 깊이의 중첩 구조는 대상이 아니다.
-- **resume은 디스크 상태 재도출 기준이다.** 살아 있는 세션의 연속성은 최적화일 뿐 보장 대상이 아니다. 러너·main 어느 쪽이 중단돼도 디스크 상태만으로 재진입하며, 러너 respawn은 임의 중단 지점에서 안전하도록 설계돼 있다.
+- **Codex 빌더는 `.harnie/`를 읽지 않는다.** 승인된 설계는 빌더 프롬프트에 인라인 주입하고, 표준 빌더 규칙은 플러그인 경로의 `builder-contract.md`를 Read하게 한다(경로 참조 — 실측 검증됨).
+- **resume은 디스크 상태 재도출 기준이다.** 살아 있는 세션의 연속성은 최적화일 뿐 보장 대상이 아니다. 세션이 중단돼도 디스크 상태만으로 재진입한다.
 
 ## 설치
 
@@ -168,7 +162,7 @@ harnie/
 ├── .mcp.json                    # codex MCP 서버 선언
 ├── commands/                    # /harnie:dev 단일 진입점 (영문 정본 + *-ko.md 미러)
 ├── skills/                      # dev(단일 파이프라인)·dev-solo + 방법론 스킬
-├── agents/                      # harnie-scout · designer · builder · reviewer · task-runner (영문 정본 + *-ko.md 미러)
+├── agents/                      # harnie-scout · designer · builder · reviewer (영문 정본 + *-ko.md 미러)
 ├── instructions/                # canonical 런타임 계약(영문 실행 정본), 한국어 미러 포함
 ├── scripts/                     # loop / ledger / delta / execution / worktree / guards
 ├── hooks/                       # 실행 상태 강제 훅(PreToolUse · Stop · PostToolUse)

@@ -17,7 +17,7 @@ Choose the tier based on the change's **actual risk**, not its file count or lin
 ## Manual QA
 - Required when the change has **user-visible behavior** that automated verification cannot confirm.
 - If the necessary real execution cannot be performed, **do not treat the behavior as verified**. State the unverified scope and the reason.
-- **Human-verification items are separated upfront** (in the plan/CONTRACT's verification strategy) and handed over as a checklist — item, how to check, risk — in the completion report; they never count as "verified" without a human's confirmation (`needs-human-verification: N`).
+- **Human-verification items are separated upfront** (in the plan's verification strategy) and handed over as a checklist — item, how to check, risk — in the completion report; they never count as "verified" without a human's confirmation (`needs-human-verification: N`).
 
 ## Unable to Verify ≠ Verification Not Required
 - If a risk required for approval remains unverified, it is grounds for **REJECT from a merge-readiness perspective**, even when disclosed honestly.

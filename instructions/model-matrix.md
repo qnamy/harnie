@@ -2,26 +2,25 @@
 
 Owns three decisions for the `harnie:dev` pipeline: ① the design-altitude boundary, ② the run-difficulty rubric (judged at entry, re-judged at two later checkpoints — §2), ③ the model each stage derives from them. Call sites restate concrete names for convenience; on conflict this file wins.
 
-## 1. Design Altitude (three layers, never mixed in one document or loop)
+## 1. Design Altitude (two layers, never mixed in one document or loop)
 
-- **ARCH** — boundaries, new components, data ownership, technology selection, cross-module/repo contracts, SPOF/scaling decisions. Produced only in the L stage's architecture step (formal profile `design-authoring-arch.md`); its trigger checklist also drives S/M/L escalation to L.
-- **CONTRACT** — task decomposition + inter-task contracts (`design-authoring-contract.md`), L only; the approval-gate artifact.
-- **TASK-DETAIL** — implementation design inside settled boundaries (`design-authoring-detail.md`): each L task's design (by its runner) and M's single design.
+- **ARCH** — boundaries, new components, data ownership, technology selection, cross-module/repo contracts, SPOF/scaling decisions (formal profile `design-authoring-arch.md`). Produced by the standalone `design-authoring` skill, outside any run; its trigger checklist is also what tells `harnie:dev` a job is **larger than M** and belongs to the human + orca process.
+- **TASK-DETAIL** — implementation design inside settled boundaries (`design-authoring-detail.md`): M's single design, and any standalone detailed design.
 
 ## 2. Run Difficulty — judged at entry, re-judged at two checkpoints
 
-Judge **easy / medium / hard / very hard** at entry, alongside the provisional size. Re-judge at two later checkpoints: ① right after grounding — new evidence may reveal a different blast radius than the entry guess; ② for M/L, right before the approval gate; for S (no approval gate), right before the build call — the last "cheap to change" boundary before that size starts writing source. Size (S/M/L) and difficulty are independent axes.
+Judge **easy / medium / hard / very hard** at entry, alongside the provisional size. Re-judge at two later checkpoints: ① right after grounding — new evidence may reveal a different blast radius than the entry guess; ② for M, right before the approval gate; for S (no approval gate), right before the build call — the last "cheap to change" boundary before that size starts writing source. Size (S/M) and difficulty are independent axes.
 
 - **easy** — localized change, known pattern, no new logic design. *Mechanical subtype:* rename/mirror/repetitive edits needing no judgment.
 - **medium** — multi-file, new logic within existing patterns, moderate blast radius.
 - **hard** — new module or complex logic; concurrency/security/data-integrity concerns; high blast radius or costly rollback.
-- **very hard** — hard's concerns at a scale where hard's own model tier and watchdog budget are judged insufficient (e.g. a cross-cutting engine change with unusually wide blast radius, or a defect class this run has already shown is expensive to catch late). Escalate here only with a stated reason — for M/L, in the plan; for S (no plan document), the required one-line user notice below is the reason record. Not a default for "large-looking" work.
+- **very hard** — hard's concerns at a scale where hard's own model tier and watchdog budget are judged insufficient (e.g. a cross-cutting engine change with unusually wide blast radius, or a defect class this run has already shown is expensive to catch late). Escalate here only with a stated reason — for M, in the plan; for S (no plan document), the required one-line user notice below is the reason record. Not a default for "large-looking" work.
 
 **Escalation** (to a harder tier) at either checkpoint is automatic: state it to the user in one line, and record it with `execution.mjs set-difficulty --root <repo> --slug <slug> --difficulty <easy|medium|hard|very-hard>` (wire value uses a hyphen — `very-hard`, not the prose `very hard` above; `validateManifest`/`set-difficulty` reject anything else). It applies only to subsequent stages — including the watchdog budget tier: `resolveTaskDifficulty()` re-reads `execution.json`/`manifest.json` from disk on every call (not a cached value), and `decideWatchdog()` looks up `guards.mjs`'s `WATCHDOG_TIERS` (a static table) by whatever difficulty string it's handed — so no separate wiring is needed once the recorded value changes. This means a post-approval re-judgment (the "After approval, `set-difficulty` is the sole record" case above) takes effect on a task's watchdog budget immediately, including one already `building` — a downward change can shrink `maxCodexCalls`/wall-clock below a count the task has already used, causing its next builder call to `deny` right away (advisory; recoverable via `watchdog-extend`, but not a silent no-op). Escalation itself is never retroactive on the model tier: a review unit already APPROVED before the checkpoint keeps the model tier it was reviewed under — only the watchdog budget (not the model) can shift under a running task.
 
 **De-escalation** (to an easier tier) is never automatic — it requires an explicit `AskUserQuestion` confirmation before the recorded difficulty changes, because a wrong downgrade silently lowers the model/watchdog tier of every subsequent stage.
 
-`set-difficulty` writes only `execution.json`'s `difficulty` field — never `manifest.json` (whose `difficulty`, once approved, is frozen into the `planHash`). `taskWatchdogUsage` reads `execution.json.difficulty` first and falls back to the approved `manifest.json.difficulty` for runs that never re-judged. **For M/L, both checkpoints fall before A5 approval — before arming, sync any re-judged value into `plan.md` itself** (the difficulty line and the `harnie-manifest` block's `"difficulty"` field) so the manifest that gets sealed matches what the user actually approves; `set-difficulty` alone is not enough pre-approval, since arm-approval reads `plan.md`, not `execution.json`. After approval, `set-difficulty` is the sole record for any further re-judgment (`plan.md` is never re-edited post-approval — that would desync `planHash`). Difficulty tiers producer models and, conservatively, the Claude code reviewer. Review gates never drop below sonnet; the top tier is kept where a miss is most expensive.
+`set-difficulty` writes only `execution.json`'s `difficulty` field — never `manifest.json` (whose `difficulty`, once approved, is frozen into the `planHash`). `taskWatchdogUsage` reads `execution.json.difficulty` first and falls back to the approved `manifest.json.difficulty` for runs that never re-judged. **For M, both checkpoints fall before A5 approval — before arming, sync any re-judged value into `plan.md` itself** (the difficulty line and the `harnie-manifest` block's `"difficulty"` field) so the manifest that gets sealed matches what the user actually approves; `set-difficulty` alone is not enough pre-approval, since arm-approval reads `plan.md`, not `execution.json`. After approval, `set-difficulty` is the sole record for any further re-judgment (`plan.md` is never re-edited post-approval — that would desync `planHash`). Difficulty tiers producer models and, conservatively, the Claude code reviewer. Review gates never drop below sonnet; the top tier is kept where a miss is most expensive.
 
 ## 3. Model Assignment
 
@@ -41,17 +40,15 @@ The role tables below stay in concrete names — they are this file's own mappin
 | Producer role | easy | medium | hard | very hard |
 |---|---|---|---|---|
 | Codex builder (all sizes) | `gpt-5.6-luna` — `gpt-5.3-codex-spark` when purely mechanical | `gpt-5.6-terra` | `gpt-5.6-sol` | `gpt-5.6-sol` (effort high) |
-| Claude designer, TASK-DETAIL (M inline/designer; L runner-authored) | sonnet | sonnet | opus | opus (effort high) |
-| Claude designer, CONTRACT (L) | sonnet | sonnet | opus | opus (effort high) |
-| Claude designer, ARCH (L, when triggered) | opus | opus | opus (effort high) | **fable** (fallback opus, effort high — noted in the plan) |
+| Claude designer, TASK-DETAIL (M inline/designer; standalone detailed design) | sonnet | sonnet | opus | opus (effort high) |
+| Claude designer, ARCH (standalone `design-authoring`) | opus | opus | opus (effort high) | **fable** (fallback opus, effort high — noted in the plan) |
 
 **Reviewers (never below sonnet):**
 
 | Reviewer role | easy | medium | hard | very hard |
 |---|---|---|---|---|
-| Code unit reviews (S/M inline loop; L runner inline) | sonnet | opus | opus | opus (effort high) |
+| Code unit reviews (S/M inline loop) | sonnet | opus | opus | opus (effort high) |
 | Confirmation reviews (post-merge re-check of already-gated code) | sonnet | sonnet | opus | opus |
-| Final Review (L, single unit — last line of defense) | **opus** | **opus** | **opus** | **opus** (effort high) |
 | Design reviewer (Codex, all `DR` loops) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` (effort high) |
 
 **Exploration (`harnie-scout`):** default **T1**; **T2** when the exploration needs semantic or structural judgment (what a boundary means, which of several patterns a file follows). The axis is judgment density, not how much there is to search. The frontmatter model pin is removed, so the caller picks the tier per call.

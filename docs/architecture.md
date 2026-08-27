@@ -2,7 +2,9 @@
 
 > 한 세션 안에서 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, 각 단계를 **반대 모델이 리뷰**해 맹점을 없앤다(`harnie:dev` 기준 — dev-solo는 fresh Codex 셀프리뷰로 대체하는 예외다). 구독 auth만으로, 두 프로바이더(Claude·Codex)를 한 세션에서 조합한다.
 >
-> **0.11 현행 구조는 [design-0.11-process.md](design-0.11-process.md)(아키텍처)와 [design-0.11-detail.md](design-0.11-detail.md)(상세)가 정본이다** — 단일 파이프라인(S/M/L), 3층 설계 고도(ARCH/CONTRACT/TASK-DETAIL), contest 게이트, dev-solo. 이 문서의 트랙(quick/plan)·단계(A/B) 서술은 0.10까지의 구조 근거·이력으로 남긴다.
+> **0.13(2026-08-27)에서 L 파이프라인이 삭제됐다** — 러너 경로(`harnie-task-runner`·태스크별 worktree), CONTRACT 설계 고도, workspace(멀티레포) 모드, `worktree.mjs merge/archive`, errata v2, `harness-digest`가 모두 제거됐고, harnie가 자동화하는 범위는 **S/M 한 run**과 크로스모델 리뷰·강제 계층·스킬 허브다. L 이상의 분해·디스패치·통합은 사람 + orca가 소유한다. 근거 = [design-0.13-L-dismantle.md](design-0.13-L-dismantle.md).
+>
+> **0.11 구조는 [design-0.11-process.md](design-0.11-process.md)(아키텍처)와 [design-0.11-detail.md](design-0.11-detail.md)(상세)가 정본이었다** — 단일 파이프라인(S/M/L), 3층 설계 고도(ARCH/CONTRACT/TASK-DETAIL), contest 게이트, dev-solo. 이 문서의 트랙(quick/plan)·단계(A/B) 서술과 아래 러너·워크스페이스 절은 **0.12까지의 구조 근거·이력**으로 남긴다(0.13 현행 아님).
 >
 > 이 문서는 **설계 근거·구조**를 담는다. 실행 규칙(상태 전이·검증 tier·리뷰 기준)의 정본은 [`instructions/`](../instructions/)이며(§7), 재서술하지 않는다.
 
@@ -28,7 +30,6 @@
 | 설계 리뷰어 | **Codex** | codex MCP `read-only` | ✕ | `design-review.md`, REJECT 편향 |
 | 코드 빌더 (개발 producer) | **Codex** | codex MCP `workspace-write` | ✍️ | 6-section 계약 + 주입된 설계 |
 | `harnie-reviewer` (코드 리뷰어) | **Claude** | read-only 서브에이전트 | ✕ | `code-review.md` + `verification-tiers.md`, REJECT 편향 |
-| `harnie-task-runner` (태스크 러너, v0.10.0) | **Claude** (유닛 리뷰 티어) | 서브에이전트(태스크당 1개, 병렬) | 리뷰 라운드 파일만(소스 ✕ — 소스는 Codex 빌더) | 자기완결 브리프 + 인라인 유닛 리뷰(빌더=Codex이므로 크로스모델 유지) |
 
 - **불변식**(`harnie:dev` 기준, dev-solo 예외): 리뷰어 = producer의 반대 프로바이더. read-only는 `tools` allowlist로 기계 강제.
 - **루프 코어는 프로바이더 무관**: `scripts/loop.mjs`·`ledger.mjs`·`delta.mjs`는 상태머신·ledger 정합·델타 캡처만 결정적으로 처리하므로, producer/reviewer 프로바이더를 바꿔도 코드 변경이 없다.
@@ -103,7 +104,7 @@ A4. 상세 설계(정식) + 리뷰 루프 — A3와 독립 루프. 설계 오류
 A5. 승인 게이트(1회) — plan.md를 제시하고 AskUserQuestion으로 명시적 승인. 승인이 실행을 연다.
 ```
 
-### PHASE B — EXECUTE (v0.10.0: 러너 경로가 기본)
+### PHASE B — EXECUTE (v0.10.0: 러너 경로가 기본 — **0.13에서 삭제된 구조, 이력**)
 ```
 A6. 태스크 브리프 발급 — 승인 rev-N의 인용 섹션 원문 발췌를 태스크별 자기완결 파일로.
 B1. 플랜 파싱 → 경로 선택: 배타 scope 태스크 2개↑ = 러너 경로(기본), 직렬은 근거 기록 필수.
@@ -122,7 +123,7 @@ blocker/degrade disposition은 AskUserQuestion 훅 바인딩으로만 전이, �
 - **Final Wave 게이트**: **Coverage**(요구를 전부 충족했나 — under-build 차단) ↔ **Scope**(요청 범위만 — over-build 차단)가 대칭, **Quality**(정확성·안전성·과설계), **Runtime**(실제 실행 검증).
 - **승인 게이트 前에 코드를 쓰지 않는다** — 이 불변식은 plan 트랙의 강제 훅이 기계화한다([execution-state.md](execution-state.md)).
 
-### 워크스페이스 run (멀티레포, v0.4.0)
+### 워크스페이스 run (멀티레포, v0.4.0 — **0.13에서 삭제된 구조, 이력**)
 
 plan 트랙은 **비-git 워크스페이스 디렉터리**(repo 여러 개를 담은 부모, 예: `~/Tradlinx`)에서도 시작할 수 있다. 이때 run root는 git worktree가 아니라 `<workspace>/.harnie-wt/harnie-<slug>/` **평범한 디렉터리**이고, sentinel에 `workspaceRoot`와 `repos`(키→`{repo, workroot}`) 레지스트리가 실린다. 핵심 결정:
 
@@ -155,7 +156,7 @@ plan 트랙은 **비-git 워크스페이스 디렉터리**(repo 여러 개를 �
 
 plan 트랙은 **durable 실행 상태 + 최소 강제 훅 + read-only 코드 리뷰어**로 두 불변식을 기계화한다: **① 승인 前 소스 쓰기 금지 ② 미승인·미완료를 done으로 확정 금지.** 권위 = planHash 고정 immutable manifest + 각 리뷰 단위 ledger·state + verification receipt(`execution.json`은 advisory 캐시). 상세 = [execution-state.md](execution-state.md).
 
-v0.10.0 확장: 빌더 threadId는 codex 호출 **cwd→task 매핑**으로 훅이 자동 귀속(복수 building 동시 허용, run-root 부트스트랩은 `rebind-task`의 `pendingRunRootBootstrap` 마커로만); `execution.json` 갱신은 전부 상태 락으로 직렬화; watchdog은 태스크당 1회 auto-cap(총 2×) 자동 연장 후 블록; `design/errata.md`는 control 파일(errata-add/arm/list, blocker·degrade 전이는 훅 바인딩, completion이 pending을 기계 산입); `worktree.mjs remove --archive-to`가 태스크 유닛 리뷰 상태를 run의 `review-archive/`로 보존(harness-digest 입력).
+v0.10.0 확장(0.13 현행 반영): 빌더 threadId는 codex 호출 cwd가 **run root**일 때 `pendingRunRootBootstrap` 마커 또는 단일 building-unbound serial 예외로만 훅이 자동 귀속한다(태스크별 worktree 매핑은 0.13에서 삭제); `execution.json` 갱신은 전부 상태 락으로 직렬화; watchdog은 태스크당 1회 auto-cap(총 2×) 자동 연장 후 블록. errata v2와 `remove --archive-to`(review-archive 보존)는 0.13에서 삭제됐다.
 
 codex MCP·플러그인 메커니즘의 확정 사실(재현 가능) = [codex-mechanisms.md](codex-mechanisms.md).
 

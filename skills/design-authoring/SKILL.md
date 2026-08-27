@@ -14,7 +14,7 @@ If this file ever appears to disagree with those documents, they win. Do not cop
 
 ## Procedure
 
-1. **Pick the altitude.** Use the altitude definitions in `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1. A standalone request is ARCH or TASK-DETAIL (the detailed-design profile); the CONTRACT altitude is internal to the L pipeline and never a standalone request. When the request is ambiguous, confirm the altitude with the requester once.
+1. **Pick the altitude.** Use the altitude definitions in `${CLAUDE_PLUGIN_ROOT}/instructions/model-matrix.md` §1. A request is ARCH or TASK-DETAIL (the detailed-design profile). When the request is ambiguous, confirm the altitude with the requester once.
 2. **Load the canon.** Read the designer agent body and the matching altitude profile. When authoring inline, apply the agent body's entry gates and working principles yourself. When delegating to the `harnie-designer` subagent instead, pass the profile's **absolute path**, the altitude and mode signal, and the output path in the delegation prompt — the agent body requires Reading the profile, so never paste its contents.
 3. **Author.** Follow the profile's section contract. Lightweight is the default; use the Formal section set only when the requester explicitly signals "formal". Write the document in the language the requester is working in.
 

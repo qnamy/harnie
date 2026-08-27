@@ -34,9 +34,9 @@ STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 
 ## Contest gate (0.11) — rejecting a finding without implementing it
 
-For an open **blocking** finding the producer side believes is wrong, the orchestrator/runner may **contest instead of fix**, on exactly two grounds:
+For an open **blocking** finding the producer side believes is wrong, the orchestrator may **contest instead of fix**, on exactly two grounds:
 
-- `altitude` — the demand is outside the current review altitude (ARCH / CONTRACT / TASK-DETAIL / code).
+- `altitude` — the demand is outside the current review altitude (ARCH / TASK-DETAIL / code).
 - `overengineering` — it can only be satisfied by adding a mechanism, and the reviewer named no concrete mistake scenario it prevents.
 
 Contract:
@@ -45,7 +45,7 @@ Contract:
 2. **The reviewer's next response settles it**: concede → report the ID `resolved` (optionally opening a new non-blocking ID); insist → keep it `open` and state the concrete mistake scenario.
 3. On insistence: no re-arguing, no stagnation burning — **escalate to the user immediately** (ID, the reviewer's scenario, your grounds, cost of each path). User accepts the risk → the existing `user-decision` release path; user sides with the reviewer → normal REVISING.
 4. **Not contestable**: correctness, safety, and unverified-risk findings. A reviewer receiving a CONTEST on those insists.
-5. **Closure authority never moves**: only the reviewer's response or a user decision closes an ID. Record each contest round in a `<dir>/contest-N.txt` sidecar (verbatim CONTEST, the verdict, the `--progress yes` rationale `contest-adjudication`, any escalation) — harness-digest audits these.
+5. **Closure authority never moves**: only the reviewer's response or a user decision closes an ID. Record each contest round in a `<dir>/contest-N.txt` sidecar (verbatim CONTEST, the verdict, the `--progress yes` rationale `contest-adjudication`, any escalation) — the run's own record of how the contest was settled.
 6. An adjudication round legitimately leaves the blocking count unchanged — pass `--progress yes` with the sidecar rationale so it doesn't burn stagnation.
 
 ## Finding acceptance — necessity, not severity

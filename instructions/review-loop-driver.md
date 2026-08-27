@@ -2,9 +2,9 @@
 
 `loop.md` owns the contract (ledger, transitions, progress, contest); this file owns how to run it deterministically. Never merge ledgers or judge state transitions by hand — `scripts/loop.mjs` prevents false approval.
 
-**Reviewer = producer's opposite provider, in `harnie:dev`.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent — or the task's `harnie-task-runner` inline on the L runner path, legitimate because it writes no source). **dev-solo is the exception**: both producer and reviewer are Codex — the reviewer is a fresh, context-isolated `codex exec --sandbox read-only` self-review subprocess, not a subagent (see `skills/dev-solo/SKILL.md`).
+**Reviewer = producer's opposite provider, in `harnie:dev`.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent). **dev-solo is the exception**: both producer and reviewer are Codex — the reviewer is a fresh, context-isolated `codex exec --sandbox read-only` self-review subprocess, not a subagent (see `skills/dev-solo/SKILL.md`).
 
-`<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = the review-unit directory (`.harnie/plan/<slug>/review/<unit>/`, or `.harnie/review/<design|code>/` inside a task worktree). `<repo>` = the root this loop concerns — the run workroot, or the task's isolated worktree / member repo workroot on the L path.
+`<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = the review-unit directory (`.harnie/plan/<slug>/review/<unit>/`). `<repo>` = the run workroot.
 
 ## Builder delegation (code loops)
 
@@ -23,7 +23,7 @@ Baseline is captured immediately before each producer window (`loop.mjs capture 
 
 Criteria are files the reviewer Reads itself — never inlined by you.
 
-- **Codex reviewer (design)**: first review = `codex` with `sandbox:"read-only"`, `model:"gpt-5.6-sol"`, `developer-instructions` = the applicable criteria (`design-review.md` + `review-schema.md`, injected once per thread), prompt = intent + constraints + the design file's absolute path with an instruction to read it, **stating the altitude (ARCH / CONTRACT / TASK-DETAIL)**. Re-review = `codex-reply` with the revised path + changed section names only. Record the threadId.
+- **Codex reviewer (design)**: first review = `codex` with `sandbox:"read-only"`, `model:"gpt-5.6-sol"`, `developer-instructions` = the applicable criteria (`design-review.md` + `review-schema.md`, injected once per thread), prompt = intent + constraints + the design file's absolute path with an instruction to read it, **stating the altitude (ARCH / TASK-DETAIL)**. Re-review = `codex-reply` with the revised path + changed section names only. Record the threadId.
 - **Claude reviewer (code)**: delegate to `harnie-reviewer` (model = the tier for this review kind, `model-matrix.md`) with paths only: `<dir>/delta.patch`, the prior ledger, a short scope/intent summary, the design reference **with section names**. A fresh unit (no prior ledger) must emit every issue `(open)`. Re-review rounds name the still-open IDs and judge them from the delta — later rounds must cost less than round 1.
 - **Contests** (loop.md contest gate): pass the `CONTEST` block(s) in this call; write the sidecar `<dir>/contest-N.txt` after the response.
 
@@ -38,10 +38,9 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> --ledger <dir>/ledger.json \
   --review <dir>/round-N.txt --ns <CR|DR> --state <dir>/state.json --artifact <artifact> \
   [--limit 3] [--progress auto|yes|no] [--reentry <reason>]
 ```
-- `--artifact`: **CR** = this round's `postSHA` (or the `ws:` composite for whole-run gates) — mandatory, binds verification to the reviewed tree. **DR** = `dr:<sha256(…)>` with altitude-specific inputs: **pre-approval central loops (ARCH, CONTRACT)** hash the design file content alone — no authority exists yet, each revision is a new file, so content identity suffices; **post-approval TASK-DETAIL loops (M's single design — M has no pre-approval design review)** hash `design content ‖ planHash ‖ edition token`, where the edition token is the literal `m-plan` — recompute from current authority on every resume and compare with the stored value (mismatch = stale approval → redesign). Since `planHash` is an input, an A5.2 re-approval invalidates a stale design approval mechanically.
+- `--artifact`: **CR** = this round's `postSHA` — mandatory, binds verification to the reviewed tree. **DR** = `dr:<sha256(…)>` with altitude-specific inputs: **pre-approval loops (ARCH)** hash the design file content alone — no authority exists yet, each revision is a new file, so content identity suffices; **post-approval TASK-DETAIL loops (M's single design — M has no pre-approval design review)** hash `design content ‖ planHash ‖ edition token`, where the edition token is the literal `m-plan` — recompute from current authority on every resume and compare with the stored value (mismatch = stale approval → redesign). Since `planHash` is an input, an A5.2 re-approval invalidates a stale design approval mechanically.
 - Outputs: `needsReRequest` → re-prompt the reviewer naming the schema error (not a producer call). `needsReentry` → STALLED latch; surface to the user first. `machineState` REVISING → producer fixes (code: recapture baseline first); APPROVED → done (`sessionSplitRecommended` fires the session-split proposal); STALLED → stop and report.
 - **Ordering hard rule**: `apply` round N with `committed: true` **before any next producer call** — a skipped apply is unrecoverable (stale artifact, unknown IDs); re-run that review as a new round instead of reconstructing.
-- **Seal interleaving (shared run root)**: `seal` is whole-run-scoped — finish one unit's round completely (build → seal-verify → apply → verify) before starting another unit's builder call; another unit's legitimate `apply`/`verify` invalidates a pending seal.
 
 ## R5. Optional final sign-off
 
