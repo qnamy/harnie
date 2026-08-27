@@ -2,6 +2,8 @@
 
 **AI 서브에이전트 개발 하네스 + 스킬 허브** — Claude Code 플러그인. 한 세션에서 Claude와 Codex(GPT)를 조합해 **설계 → 설계 리뷰 → 개발 → 코드 리뷰**를 돌린다. 구독 로그인만으로 동작하며 API 키는 필요 없다.
 
+> **v0.13.0** · 테스트 282 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · GitHub 공개, 마켓플레이스 설치 · L 실행·설계 계층(task-runner, CONTRACT 고도, workspace 모드, errata v2, harness-digest) 완전 삭제 · 크로스모델 리뷰 계약을 `cross-review` 독립 스킬로 분리 · seal M/S 경로 멱등화 · M run worktree/브랜치 삭제 방어
+
 > **v0.12.2** · 테스트 304 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · GitHub 공개, 마켓플레이스 설치 · dev-full/dev-quick 진입 라우트를 안내 no-op으로 정리하고 pending-route 고아 기계 제거
 
 > **v0.12.1** · team-collab 프로파일 배선(ARCH/CONTRACT 설계 스텝에 포인터 추가, DRAFT 해제) — 문서 전용
@@ -84,6 +86,7 @@
 |---|---|
 | `dev` | 단일 파이프라인 오케스트레이터 — 그라운딩 → 승인 → 상세설계+리뷰 → 실행 → 코드 리뷰 → 통합 검증, 크기별 스테이지 스킵 |
 | `dev-solo` | Codex 단독 파이프라인 — 같은 게이트, 리뷰는 fresh Codex 셀프리뷰 서브프로세스(cross-model 리뷰어 없음 — Codex 단독 완주를 위한 설계) |
+| `cross-review` | 크로스모델 리뷰 계약(루프·출력 스키마·발견 수용 정책·티어 배정)을 독립 스킬로 제공 — 사람 주도 세션과 `dev`의 M 파이프라인이 같은 계약을 공유한다 |
 | `pr-review` | PR을 시니어 기준으로 리뷰해 `issue:`/`discuss:`/`nit:`로 분류하고 승인 권고를 낸다 |
 | `comment-resolve` | 내가 남긴 리뷰 지적에 대한 응답이 실제로 해소인지 검증해 resolve·재투표를 권고한다 |
 | `deploy-approval` | 배포 승인 요청의 대상 변경을 검토해 승인/보류를 판정하고 정족수 도달 시 전진을 권고한다 |
