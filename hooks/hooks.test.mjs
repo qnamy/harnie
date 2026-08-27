@@ -531,6 +531,41 @@ test("worktree 안 Bash는 자유롭고(CR-001), main root 소스 쓰기는 여�
   assert.equal(hook(PRE, { ...own, tool_name: "Write", tool_input: { file_path: join(outside, "notes.md") } }), null)
 })
 
+// 0.13 T8: 2026-08-26 사고 재현 — 실행 중이던 run의 worktree/브랜치를 **비-owner**("정리" 세션, cwd=main root)가
+// 원문 git/rm으로 삭제하려 하면 이제 deny된다(과거엔 referencesHarnie의 "정확히 한 worktree 지목" 허용 분기에
+// 떨어져 통과했다 — 위 CR-001/CR-002 테스트의 `.harnie-wt/harnie-foo` allow 케이스와 대칭). 정상 정리 경로인
+// worktree.mjs remove(신뢰 CLI)는 그대로 열려 있고, 등록되지 않은(비활성) worktree/브랜치는 과잉 차단하지 않는다.
+test("활성 run worktree/브랜치 삭제 방어(2026-08-26 사고 재현) — 비-owner 세션의 원문 git/rm은 deny, sanctioned CLI·무관 대상은 allow", () => {
+  const root = gitRepo("harnie-t8-")
+  const task = "위험한 정리 대상"
+  assert.equal(bootstrap({ hook_event_name: "UserPromptSubmit", prompt: `/harnie:dev ${task}`, cwd: root, session_id: "owner-s" }).status, 0)
+  const wt = wtFor(root, task)
+  const slug = slugify(task)
+  const branch = `harnie/${slug}`
+  const cleaner = { cwd: root, session_id: "cleanup-s", tool_name: "Bash" } // 비-owner, cwd는 main root
+
+  // 사고 재현 형태 — 상대경로·절대경로 둘 다, worktree 삭제 4형태.
+  for (const command of [
+    `rm -rf .harnie-wt/harnie-${slug}`,
+    `rm -rf ${wt}`,
+    `git worktree remove ${wt}`,
+    `git -C ${root} worktree remove .harnie-wt/harnie-${slug}`,
+  ]) assert.ok(deny(hook(PRE, { ...cleaner, tool_input: { command } })), command)
+
+  // 브랜치 삭제도 동일하게.
+  for (const command of [`git branch -D ${branch}`, `git branch -d ${branch}`, `git push origin --delete ${branch}`])
+    assert.ok(deny(hook(PRE, { ...cleaner, tool_input: { command } })), command)
+
+  // 정상 정리 경로(worktree.mjs remove, 신뢰 CLI)는 여전히 허용 — deny-only이지 새 승인 게이트가 아니다.
+  const sanctionedRemove = `node ${resolve(HERE, "..", "scripts", "worktree.mjs")} remove --repo ${root} --branch ${branch} --delete-branch`
+  assert.equal(hook(PRE, { ...cleaner, tool_input: { command: sanctionedRemove } }), null)
+
+  // 등록되지 않은(이 run과 무관한) worktree·브랜치는 과잉 차단하지 않는다 — "정리 지시는 대상을 명시 열거"가
+  // 여전히 필요한 이유(docs/bootstrap-adherence.md §3.10 잔여 한계)와 대칭인 정상 케이스.
+  assert.equal(hook(PRE, { ...cleaner, tool_input: { command: "rm -rf .harnie-wt/harnie-never-created" } }), null)
+  assert.equal(hook(PRE, { ...cleaner, tool_input: { command: "git branch -D harnie/never-created" } }), null)
+})
+
 test("Stop: complete 후에도 세션 바인딩이 살아 후속 변경을 같은 workroot에서 재검증(CR-002)", () => {
   const root = gitRepo("harnie-binding-complete-")
   const task = "binding survives completion"

@@ -1,4 +1,4 @@
-import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync } from "node:fs"
+import { existsSync, realpathSync, readFileSync, writeFileSync, mkdirSync, renameSync, unlinkSync, readdirSync } from "node:fs"
 import { join, dirname, resolve, basename, relative, sep, isAbsolute } from "node:path"
 
 const isOutsideRel = (rel) => rel === ".." || rel.startsWith(".." + sep) || isAbsolute(rel)
@@ -102,6 +102,28 @@ export function sentinelSessionIds(root) {
     if (Array.isArray(s && s.sessionIds)) return s.sessionIds.filter((x) => typeof x === "string" && x !== "")
     return s && typeof s.sessionId === "string" && s.sessionId ? [s.sessionId] : []
   } catch { return [] }
+}
+
+// 활성 run 워크트리 레지스트리(0.13 T8, 2026-08-26 워크트리 삭제 사고 대응). worktree-per-run(T2)에서 각 run은
+// `<mainRoot>/.harnie-wt/<dir>`에 자기 `.harnie/active.json`을 갖는다. 이 스캔은 새 상태 파일 없이 그 디렉터리를
+// 훑어 등록된(= active.json이 있는) run만 모은다 — 완료 여부는 보지 않는다: 정리는 항상 worktree.mjs remove(신뢰
+// CLI)로 하게 하는 편이, 완료 판정을 여기 복제하는 것보다 간단하고 안전하다. 브랜치명은 새 필드를 추가하지 않고
+// bootstrap이 항상 `harnie/<slug>`로 만드는 결정적 관례에서 파생한다(hooks/bootstrap.mjs, execution.mjs
+// initCliAuthority — 두 프로덕션 생성 경로가 모두 이 규칙을 따른다).
+export function listActiveRunWorktrees(mainRoot) {
+  const container = join(mainRoot, ".harnie-wt")
+  if (!existsSync(container)) return []
+  const out = []
+  for (const name of readdirSync(container)) {
+    const activePath = join(container, name, ".harnie", "active.json")
+    if (!existsSync(activePath)) continue
+    try {
+      const s = JSON.parse(readFileSync(activePath, "utf8"))
+      if (s && typeof s.slug === "string" && s.slug)
+        out.push({ worktreePath: join(container, name), slug: s.slug, branch: `harnie/${s.slug}` })
+    } catch { /* 손상된 active.json은 등록 대상에서 제외 — 이 스캔은 advisory deny 입력일 뿐 권위 판정이 아니다 */ }
+  }
+  return out
 }
 
 // Every session that entered or resumed the run remains an owner until completion.

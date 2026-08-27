@@ -104,6 +104,17 @@ bootstrap 실패(파싱 오류·빈 args·lock 경합·init 예외·rollover blo
 - **손상 route fail-closed**(P1): `getRouteState`는 파일 부재만 `null`, 존재하면 반드시 plain object + `state ∈ {pending,failed}`(그 외는 `readJSONStrict`가 손상 JSON을, 여기서 유효 JSON+알 수 없는 state를 `FailClosed`로 throw). 예전엔 `{state:"unexpected"}`가 pretooluse는 막고 Stop은 pending/failed 분기 미매치로 **통과**(fail-open)했음 — 이제 Stop 훅 catch가 fail-closed block, pretooluse catch가 gated deny.
 - pending-route는 hook이 결정적으로 쓰고 지우므로 지침 의존이 아님. **시간 만료 없음**(P1-2). **per-session이라 죽은 세션 잔여는 다른 세션을 방해하지 않음**(전역 latch 없음).
 
+### 3.10 활성 run worktree/브랜치 삭제 방어 (0.13 T8, 2026-08-26 사고 대응)
+
+**사고**: 정리 세션(비-owner, cwd=main root)이 "워크트리·브랜치 정리" 지시를 과잉 해석해 실행 중이던 M run의 worktree와 미푸시 브랜치를 원문 `git`/`rm`으로 삭제했다. `scripts/guards.mjs`의 `referencesWorktreeContainer`는 "이 worktree **안**에서 build·test·git을 자유롭게 쓰게" 하려고 `.harnie-wt/<dir>` 형태의 **구체 경로**를 의도적으로 허용하는데, `git worktree remove <그 worktree>`·`rm -rf <그 worktree>` 같은 **삭제 자체**도 같은 허용 분기에 떨어져 어떤 술어도 막지 못했다(전수 분석: `~/Tradlinx/task2-recovery/bureaucracy-audit.md` §2.1). 상세는 그 문서 §2.3(도입 조건 3개)을 따른다 — 여기서는 구현·잔여 한계만 기록한다.
+
+**구현**: 새 상태 파일 없음(감사 §2.3 조건 2). `hooks/lib.mjs`의 `listActiveRunWorktrees(mainRoot)`가 `<mainRoot>/.harnie-wt/*`를 훑어 자기 `.harnie/active.json`을 가진 run만 모으고(각 run의 `slug`는 이미 그 파일에 있다), 브랜치명은 bootstrap이 항상 `harnie/<slug>`로 만드는 결정적 관례에서 파생한다(`hooks/bootstrap.mjs`·`execution.mjs` `initCliAuthority` 두 프로덕션 경로 모두 이 관례를 따르므로 새 필드도 필요 없다). `hooks/pretooluse.mjs`가 세션의 owner 여부와 무관하게(사고의 가해 세션은 대상 run의 owner가 아니었다) 이 목록을 계산해 `scripts/guards.mjs`의 `decideActiveRunDeletion`(새 predicate 2개: 워크트리 삭제·브랜치 삭제)에 넘긴다. `worktree.mjs remove`(신뢰 CLI)는 `decideBash`에서 이미 sanctioned로 분류돼 이 predicate까지 오지 않으므로 정상 정리 경로는 그대로 열려 있다.
+
+**잔여 한계(해결됐다고 쓰지 않는다)**: 이 deny는 **정리 세션의 `findRoot`가 그 run의 `.harnie-wt` 컨테이너를 찾을 수 있는 root에서만** 발화한다 — §0.1 잔여(위 §3.9)와 같은 계보다. 구체적으로:
+- 다른 repo 루트에서, 또는 절대경로로 다른 워크스페이스의 워크트리·브랜치를 지우는 경우는 커버되지 않는다.
+- 판정은 명령 문자열의 리터럴 부분일치다(§0.1 적대적 방어가 비목표인 것과 같은 수준) — 셸 변수·글롭 확장으로 같은 경로를 우회 지목하면 놓칠 수 있다.
+- **따라서 이 장치는 재발을 100% 막지 못하며**, 병행해야 할 저비용 대응은 엔진이 아니라 운영 규칙이다: 정리 지시는 **대상을 명시 열거**한다(메모리 `harnie-scope-framing-0.13-backlog` 항목 4). 엔진 장치를 도입했다고 이 규칙이 불필요해졌다고 오해하지 말 것.
+
 ## 4. 기각안
 
 - **임베디드 `!`bash 강제**: `disableSkillShellExecution`로 무력화 가능 → hard guarantee 아님. 필요 시 bootstrap 결과를 문맥에 보여주는 **보조 표시용**만.

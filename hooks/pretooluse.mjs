@@ -2,7 +2,7 @@
 // Fail closed for state-changing tools while leaving unrelated read-only tools usable.
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
+import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, listActiveRunWorktrees, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, recordPendingApproval, recordPendingRebind, taskWatchdogUsage } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath } from "../scripts/guards.mjs"
 
@@ -18,6 +18,10 @@ try {
   // 보정(아래)에 쓴다 — 세션 바인딩 파일은 항상 main 작업트리에 있다.
   const root = resolveRoot(p.cwd, p.session_id)
   const mainRoot = findRoot(p.cwd)
+  // 2026-08-26 워크트리 삭제 사고 대응(0.13 T8): 이 세션의 own/비-own 여부와 무관하게, mainRoot 밑의 모든 활성
+  // run(각자 자기 `.harnie/active.json`을 가진 `.harnie-wt/<dir>`)을 삭제 대상으로부터 보호한다 — 사고의 가해
+  // 세션은 대상 run의 owner가 아니었다.
+  const activeRuns = listActiveRunWorktrees(mainRoot)
   if (toolName === "Write" || toolName === "Edit" || toolName === "MultiEdit" || toolName === "NotebookEdit") {
     const { rel, abs, escapes } = canonicalRelPath(root, input.file_path || input.notebook_path)
     if (escapes) denyPreTool(`쓰기 대상이 repo 밖(symlink/traversal): ${input.file_path || input.notebook_path}`)
@@ -35,7 +39,7 @@ try {
       // 비-owner 세션(세션 id 교체·재개 등)도 run의 slug·멤버 workroot는 넘긴다 — 권위 부여가 아니라 신뢰
       // CLI **분류 입력**이다. 이게 빠지면 run root 인자를 쓰는 sanctioned CLI 호출이
       // 미등록으로 보여 세션 중반부터 일제히 차단되는 실측 회귀가 있었다(autoAllow는 track 미전달로 계속 꺼짐).
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null, activeRuns })
       if (d.deny) denyPreTool(d.reason)
     }
     allow()
@@ -58,7 +62,7 @@ try {
       const d = decideWriteEdit({ relPath: rel, phase, track, slug, outside })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, activeRuns })
       if (d.deny) denyPreTool(d.reason)
       else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal-verify) — active repo 바인딩·경로 containment 검증됨")
       else allow()

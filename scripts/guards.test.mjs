@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isActiveTaskWorktree, taskIdFromActiveTaskWorktree } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, decideActiveRunDeletion, isActiveTaskWorktree, taskIdFromActiveTaskWorktree } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
@@ -92,6 +92,48 @@ test("decideBash: worktree CLI는 --repo가 활성 repo일 때만 sanctioned, au
   assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /other"), ...ctx }).deny, true)
   assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /repo/.harnie-wt/harnie-x-t1"), ...ctx }).deny, true)
   assert.equal(decideBash({ command: `${probe} && rm -rf /`, ...ctx }).deny, true)
+})
+
+// 0.13 T8(2026-08-26 사고 대응): referencesHarnie는 "정확히 한 worktree를 지목"하면 일부러 허용한다
+// (guards.test.mjs 위 "referencesHarnie" 테스트 참조) — 그 안에서 build/test/git을 자유롭게 쓰게 하려는 의도인데,
+// `git worktree remove`/`rm -rf`가 그 허용 분기에 함께 떨어져 사고의 직접 원인이었다. decideActiveRunDeletion은
+// activeRuns(새 상태 파일 없이 각 run의 `.harnie/active.json`에서 파생)로 그 삭제 시도만 별도로 잡는다.
+test("decideActiveRunDeletion: 활성 run의 워크트리 삭제(git worktree remove·rm -rf)만 deny, 하위 경로·무관 run은 allow", () => {
+  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-foo", slug: "foo", branch: "harnie/foo" }]
+  for (const cmd of [
+    "git worktree remove /repo/.harnie-wt/harnie-foo",
+    "git -C /repo worktree remove .harnie-wt/harnie-foo",
+    "rm -rf .harnie-wt/harnie-foo",
+    "rm -rf .harnie-wt/harnie-foo/",
+    "rm -fr /repo/.harnie-wt/harnie-foo",
+    "rm -r -f .harnie-wt/harnie-foo",
+  ]) assert.equal(decideActiveRunDeletion(cmd, runs).deny, true, cmd)
+  for (const cmd of [
+    "git -C .harnie-wt/harnie-foo status",                  // 삭제 의도 아님 — referencesHarnie가 이미 허용
+    "rm -rf .harnie-wt/harnie-foo/tmp",                      // worktree "안"의 하위 경로 삭제는 정상 작업
+    "rm -r .harnie-wt/harnie-foo",                           // force 없음 — rm -rf만 대상
+    "rm -rf .harnie-wt/harnie-foo2",                         // 접두만 겹치는 다른 이름
+    "git worktree remove .harnie-wt/harnie-bar",             // 등록되지 않은(비활성) run — 명시 열거 정리 대상
+    "rm -rf /tmp/unrelated",
+  ]) assert.equal(decideActiveRunDeletion(cmd, runs).deny, false, cmd)
+})
+
+test("decideActiveRunDeletion: 활성 run 브랜치 삭제(git branch -d/-D·git push --delete)만 deny", () => {
+  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-foo", slug: "foo", branch: "harnie/foo" }]
+  for (const cmd of ["git branch -D harnie/foo", "git branch -d harnie/foo", "git push origin --delete harnie/foo"])
+    assert.equal(decideActiveRunDeletion(cmd, runs).deny, true, cmd)
+  for (const cmd of ["git branch -D harnie/foo2", "git branch -D other-branch", "git branch --list harnie/foo", "git push origin harnie/foo"])
+    assert.equal(decideActiveRunDeletion(cmd, runs).deny, false, cmd)
+})
+
+test("decideBash: 활성 run 삭제는 sanctioned CLI(worktree.mjs remove)로는 여전히 허용, 원문 git/rm은 deny", () => {
+  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-x", slug: "x", branch: "harnie/x" }]
+  const sanctioned = "node /plugin/scripts/worktree.mjs remove --repo /repo --branch harnie/x --delete-branch"
+  assert.equal(decideBash({ command: sanctioned, ...ctx, activeRuns: runs }).deny, false)
+  assert.equal(decideBash({ command: "git worktree remove /repo/.harnie-wt/harnie-x", ...ctx, activeRuns: runs }).deny, true)
+  assert.equal(decideBash({ command: "git branch -D harnie/x", ...ctx, activeRuns: runs }).deny, true)
+  // activeRuns를 안 넘기면(기본값 []) 새 predicate가 무해하게 no-op — 기존 호출부 하위호환.
+  assert.equal(decideBash({ command: "git worktree remove /repo/.harnie-wt/harnie-x", ...ctx }).deny, false)
 })
 
 test("decideBash: loop CLI는 활성 task worktree를 repo로 허용", () => {
