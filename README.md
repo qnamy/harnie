@@ -62,24 +62,25 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 
 위협모델은 일을 빨리 끝내려다 절차를 생략하는 over-eager 오케스트레이터다(작정한 우회는 §한계).
 
-- 승인 게이트 전 소스 쓰기 — `PreToolUse` 훅이 거부한다.
-- 미완료 run을 done으로 확정 — `Stop` 훅이 디스크의 권위 상태에서 완료를 다시 계산해 막는다.
-- 권위 집합은 `planHash`로 고정된 immutable manifest, 리뷰 ledger, verification receipt다. `execution.json`은 advisory 캐시이고 판정 근거로 쓰지 않는다.
-- 자기승인 — 실제 `AskUserQuestion` 호출을 관찰해서만 승인을 바인딩한다. 승인 등록은 CLI에 노출되지 않아 허용된 Bash로도 우회할 수 없다.
-- 테스트 0건인데 성공으로 끝나는 vacuous 성공 — receipt가 검증 출력 증거를 캡처하므로 완료 재도출에서 거부된다.
-- 빌더가 권위 파일을 건드리는 것 — 빌드 위임 직전 `seal`이 스냅샷을 뜨고 `seal-verify`가 mismatch를 fail-closed로 잡는다.
+| 막는 것 | 강제 주체 |
+|---|---|
+| 승인 게이트 전 소스 쓰기 | `PreToolUse` 훅 |
+| 미완료 run을 done으로 확정 | `Stop` 훅이 디스크의 권위 상태에서 완료를 다시 계산 |
+| 자기승인 | `AskUserQuestion` 호출 관찰로만 바인딩. 승인 등록은 CLI에 없어 허용된 Bash로도 우회 불가 |
+| 테스트 0건인데 성공으로 끝나는 vacuous 성공 | receipt의 검증 출력 증거 + 완료 재도출 |
+| 빌더의 권위 파일 훼손 | 빌드 위임 직전 `seal` 스냅샷, `seal-verify`가 mismatch를 fail-closed |
 
-어느 규범 문장이 어느 훅·CLI에 대응하는지는 [docs/enforcement-map.md](docs/enforcement-map.md)에 표로 있다. 표에 "문서만"으로 남은 항목은 강제되지 않는다.
+권위 집합은 `planHash`로 고정된 immutable manifest, 리뷰 ledger, verification receipt다. `execution.json`은 advisory 캐시이고 판정 근거로 쓰지 않는다. 어느 규범 문장이 어느 훅·CLI에 대응하는지는 [docs/enforcement-map.md](docs/enforcement-map.md)에 표로 있고, 그 표에 "문서만"으로 남은 항목은 강제되지 않는다.
 
 ### 예산
 
 태스크별 예산은 난이도 티어를 따른다(30분/빌더 호출 15회 → 60분/25회). 100%에서 다음 빌더 호출을 deny하고, 태스크당 1회에 한해 자동 연장(총 ≤ 2×)한 뒤 사용자에게 알린다. 그 캡을 넘는 진행은 사람이 상황을 확인한 뒤에만 열린다. 워치독은 advisory이며 fail-open이다. 예산 읽기·계산·기록이 실패하면 통과시킨다.
 
-사람 손이 필요한 blocking 이슈는 정체 카운터를 태우지 않고 즉시 escalate하며, 결정을 받지 못하면 우회하는 대신 `INCOMPLETE`로 끝낸다.
-
 ### 리뷰 발견 처리
 
 발견마다 고칠 필요가 있는지로 수용을 판단한다. 심각도 라벨은 근거로 쓰지 않는다. 구체적 실수 시나리오 없이 메커니즘 추가를 요구하거나 현재 고도를 벗어난 finding은 수정하는 대신 이의를 제기하고(contest), 리뷰어의 다음 응답 하나로 판정이 끝난다. 리뷰어가 고수하면 사용자에게 올라간다. 정확성·안전 finding은 기각 대상에서 빠지고, 종결 권한은 리뷰어와 사용자에게 있다. 기각한 발견은 사유와 함께 다음 라운드에 전달해 재리뷰 범위에서 뺀다.
+
+사람 손이 필요한 blocking 이슈는 정체 카운터를 태우지 않고 즉시 escalate한다. 결정을 받지 못하면 우회하는 대신 `INCOMPLETE`로 끝낸다.
 
 ---
 
@@ -99,7 +100,7 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 
 - **적대적 세션은 막지 못한다.** 위협모델이 절차 생략이라서, 작정하고 우회하는 세션은 설계상 범위 밖이다.
 - **워치독은 fail-open이다.** 승인·완료 재도출 가드만 fail-closed다.
-- **구독 두 개가 필요하다.** Claude Code와 `codex` CLI 로그인이 모두 있어야 크로스모델 루프가 성립한다. `dev-solo`가 예외지만 그 경로에는 크로스모델 리뷰어가 없다.
+- **구독 두 개가 필요하다.** Claude Code와 `codex` CLI 로그인이 모두 있어야 크로스모델 루프가 성립한다. 하나만 있으면 `dev-solo` 경로로 내려간다.
 - **M 파이프라인 자체가 존폐 판정 대상이다.** plain 세션 대비 우위가 없으면 파이프라인을 해체하고 `cross-review` 스킬만 남긴다. 측정 항목·판정 기준·마감은 [docs/m-pipeline-kill-criteria.md](docs/m-pipeline-kill-criteria.md)에 있다.
 
 ## 설치
