@@ -9,7 +9,6 @@
     "./agents/harnie-scout.md",
     "./agents/harnie-designer.md",
     "./agents/harnie-builder.md",
-    "./agents/harnie-reviewer.md",
-    "./agents/harnie-task-runner.md"
+    "./agents/harnie-reviewer.md"
   ]
 }
