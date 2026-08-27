@@ -4,7 +4,7 @@
 
 `v0.13.0` · 테스트 282 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · MIT
 
-산출물의 producer와 리뷰어는 서로 다른 프로바이더에 배정한다. 같은 모델이 자기 산출물을 리뷰하면 같은 맹점을 통과시킨다. 배정 자체는 스킬 본문과 [instructions/model-matrix.md](instructions/model-matrix.md)가 정하는 규약이고, 리뷰어가 파일을 쓰지 못하는 것은 `agents/*.md` frontmatter의 `tools` allowlist가 기계로 막는다.
+산출물의 producer와 리뷰어는 서로 다른 프로바이더에 배정한다. 자기 산출물을 리뷰하는 모델은 자기 맹점을 그대로 통과시킨다. 배정 자체는 스킬 본문과 [instructions/model-matrix.md](instructions/model-matrix.md)가 정하는 규약이고, 리뷰어가 파일을 쓰지 못하는 것은 `agents/*.md` frontmatter의 `tools` allowlist가 기계로 막는다.
 
 > 이 도구들을 일상 업무에서 어떻게 운영하는가(지침 정본 단일화 · Claude/Codex 동기화 · 자동화 루틴 · 토큰 경제)는 자매 레포 [agent-ops](https://github.com/qnamy/agent-ops)에 있다.
 
@@ -18,12 +18,12 @@
 |---|---|---|---|
 | `harnie-scout` | 코드 탐색 — 관련 파일·심볼·패턴을 병렬로 찾아 실행 가능한 형태로 반환 | Claude (T1 기본) | ✕ |
 | `harnie-designer` | 설계 producer — 경계·데이터 소유권·고비용 결정에 집중, 구현하지 않음 | Claude (T3) | 설계 문서만 |
-| `harnie-builder` | 구현 — 요구를 만족하는 가장 단순하고 견고한 코드. 역스왑(Claude 개발) 구성용 | Claude | ✍️ |
+| `harnie-builder` | 구현 — 요구를 만족하는 가장 단순하고 견고한 코드 | Claude | ✍️ |
 | `harnie-reviewer` | 코드 리뷰어 — 크리티컬만 blocking, 스키마 형식으로 verdict 반환 | Claude | ✕ |
 
-파이프라인이 실제로 쓰는 조합은 설계 = Claude 산출 → Codex 리뷰, 개발 = Codex 산출(codex MCP, `workspace-write`) → Claude 리뷰다. `harnie-builder`는 역방향 구성용으로 남아 있고 기본 흐름에서 호출되지 않는다.
+파이프라인의 기본 조합은 설계 = Claude 산출 → Codex 리뷰, 개발 = Codex 산출(codex MCP, `workspace-write`) → Claude 리뷰다. `harnie-builder`는 역방향 구성용으로 남아 있고 기본 흐름에서 호출되지 않는다.
 
-에이전트·스킬 본문에는 구체 모델명을 쓰지 않고 티어 심볼 T1~T4만 쓴다. 티어 → (Claude 모델, Codex 모델) 매핑은 `model-matrix.md` §3이 단독으로 소유하므로, 모델 세대 교체는 그 파일 한 곳을 고치는 일이 된다. 난이도가 올라가면 producer와 리뷰어가 함께 올라가고, 리뷰어를 난이도에 따라 낮추는 방향은 그 표가 막는다 — 문서 규약이며 훅 강제는 아니다.
+에이전트·스킬 본문에는 구체 모델명을 쓰지 않고 티어 심볼 T1~T4만 쓴다. 티어 → (Claude 모델, Codex 모델) 매핑은 `model-matrix.md` §3이 단독으로 소유하므로, 모델 세대 교체는 그 파일 한 곳을 고치는 일이 된다. 난이도가 올라가면 producer와 리뷰어가 함께 올라가고, 리뷰어를 난이도에 따라 낮추는 방향은 그 표가 막는다. 문서 규약이며 훅 강제는 아니다.
 
 ## 2. 스킬
 
@@ -43,7 +43,7 @@
 
 ## 3. dev 파이프라인
 
-`/harnie:dev "결제 실패 재시도 큐 도입"` 한 줄로 시작한다. 크기(S/M)가 스테이지 스킵의 유일한 축이다 — S는 국소 수정(설계·승인 게이트 없음), M은 설계 판단이 필요한 단일 리뷰 유닛. 판정은 잠정으로 시작해 그라운딩 후 확정하고, 상향 승격만 있다.
+`/harnie:dev "결제 실패 재시도 큐 도입"` 한 줄로 시작한다. 크기(S/M)가 스테이지 스킵의 유일한 축이다. S는 국소 수정(설계·승인 게이트 없음), M은 설계 판단이 필요한 단일 리뷰 유닛이다. 판정은 잠정으로 시작해 그라운딩 후 확정하고, 상향 승격만 있다.
 
 M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가 있거나 독립 리뷰 가치가 있는 태스크가 2개 이상이면 크기 판정에서 멈추고 사람 + [orca](https://github.com/stablyai/orca)로 인계한다. 이 경계는 `execution.mjs`의 `set-mode`가 `S|M` 외의 값을 fail-closed로 거부해 닫는다. 분해·디스패치·워크트리 수명주기·통합은 orca가 소유하고, 품질·증거·강제화는 harnie가 소유한다.
 
@@ -53,14 +53,14 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 | **승인 게이트(1회)** | `plan.md`의 manifest 블록 → `arm-approval` → 실제 `AskUserQuestion` one-shot 바인딩. 여기까지 소스 쓰기는 훅이 막는다 | planHash 고정 manifest |
 | **상세설계 + 설계리뷰** | `harnie-designer`가 설계를 쓰고 Codex 설계 리뷰 루프를 돈다 | `review/design/design.md` |
 | **빌드 + 코드리뷰** | 빌더 스레드 바인딩·워치독을 켜고 baseline/seal 후 Codex 빌드(스코프 테스트만) → 인라인 Claude 코드리뷰 루프 | 리뷰 ledger + delta |
-| **검증** | `verify --task` 후 `verify --integration` — 전체 스위트는 여기서 1회, 최종 트리에 바인딩된 성공 receipt 하나만 남는다 | task/integration receipt |
+| **검증** | `verify --task` 후 `verify --integration`. 전체 스위트는 여기서 1회, 최종 트리에 바인딩된 성공 receipt 하나만 남는다 | task/integration receipt |
 | **완료** | `completion`이 완료를 재도출하고 Stop 훅이 독립 검증한다 | `HARNIE_STATUS` 보고 |
 
 `dev-solo`는 Codex 단독 완주 경로다. 생산도 리뷰도 Codex이고, 리뷰는 fresh `codex exec --sandbox read-only` 셀프리뷰 서브프로세스가 맡는다. 크로스모델 리뷰어가 없다는 것을 감수한 설계이며, Claude 사용량이 소진된 상황을 위해 존재한다.
 
 ### 권위와 강제
 
-위협모델은 일을 빨리 끝내려다 절차를 생략하는 over-eager 오케스트레이터다. 작정한 우회는 범위 밖이다(§한계).
+위협모델은 일을 빨리 끝내려다 절차를 생략하는 over-eager 오케스트레이터다(작정한 우회는 §한계).
 
 - 승인 게이트 전 소스 쓰기 — `PreToolUse` 훅이 거부한다.
 - 미완료 run을 done으로 확정 — `Stop` 훅이 디스크의 권위 상태에서 완료를 다시 계산해 막는다.
@@ -73,9 +73,9 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 
 ### 예산
 
-태스크별 예산은 난이도 티어를 따른다(30분/빌더 호출 15회 → 60분/25회). 100%에서 다음 빌더 호출을 deny하고, 태스크당 1회에 한해 자동 연장(총 ≤ 2×)한 뒤 사용자에게 알린다. 그 캡을 넘는 진행은 사람이 상황을 확인한 뒤에만 열린다. 워치독은 advisory이며 fail-open이다 — 예산 읽기·계산·기록이 실패하면 통과시킨다.
+태스크별 예산은 난이도 티어를 따른다(30분/빌더 호출 15회 → 60분/25회). 100%에서 다음 빌더 호출을 deny하고, 태스크당 1회에 한해 자동 연장(총 ≤ 2×)한 뒤 사용자에게 알린다. 그 캡을 넘는 진행은 사람이 상황을 확인한 뒤에만 열린다. 워치독은 advisory이며 fail-open이다. 예산 읽기·계산·기록이 실패하면 통과시킨다.
 
-막히면 우회하지 않는다. 사람 손이 필요한 blocking 이슈는 정체 카운터를 태우지 않고 즉시 escalate하고, 결정을 받지 못하면 `INCOMPLETE`로 끝낸다.
+사람 손이 필요한 blocking 이슈는 정체 카운터를 태우지 않고 즉시 escalate하며, 결정을 받지 못하면 우회하는 대신 `INCOMPLETE`로 끝낸다.
 
 ### 리뷰 발견 처리
 
@@ -87,24 +87,24 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 
 커밋 128개 중 91개가 AI co-authored이고, 리뷰를 거친 머지 39건이 main에 들어갔다.
 
-리뷰가 실제로 잡아낸 것:
+리뷰가 잡아낸 것:
 
 - 실행 상태 엔진이 Codex 리뷰 12라운드에서 승인 우회·symlink 탈출·중복 플래그 경로를 지적받고 수정됐다.
 - 0.13에서 L 파이프라인을 삭제하자 Codex 리뷰가 그 삭제로 열린 fail-closed 구멍 3개를 잡았다 — 프로토타입 키를 유효 mode로 인정하던 검사, 허용집합을 검증하지 않던 컨텍스트 로더, 삭제된 경로를 계속 허용하던 빌더 cwd 가드.
 - codex MCP의 on-request 승인정책이 무한대기를 유발하는 것을 찾아 서버 기동 시 `never`로 고정했다.
 
-걷어낸 것도 같은 무게로 기록해 둔다. 초기 가드 계층은 위협모델 밖의 방어까지 쌓았다가 리뷰를 거쳐 슬림화했고, 0.13에서는 어느 버전에서도 실행 이력이 0이던 L 파이프라인을 문서·엔진·테스트까지 삭제했다. 강제 장치는 위협모델에 맞을 때만 값을 한다.
+걷어낸 것도 있다. 초기 가드 계층은 위협모델 밖의 방어까지 쌓았다가 리뷰를 거쳐 슬림화했고, 0.13에서는 어느 버전에서도 실행 이력이 0이던 L 파이프라인을 문서·엔진·테스트까지 삭제했다.
 
 ## 한계
 
 - **적대적 세션은 막지 못한다.** 위협모델이 절차 생략이라서, 작정하고 우회하는 세션은 설계상 범위 밖이다.
-- **워치독은 fail-open이다.** 권위 가드(승인·완료 재도출)의 fail-closed 동작과 다르게, 실패하면 통과시킨다.
+- **워치독은 fail-open이다.** 승인·완료 재도출 가드만 fail-closed다.
 - **구독 두 개가 필요하다.** Claude Code와 `codex` CLI 로그인이 모두 있어야 크로스모델 루프가 성립한다. `dev-solo`가 예외지만 그 경로에는 크로스모델 리뷰어가 없다.
 - **M 파이프라인 자체가 존폐 판정 대상이다.** plain 세션 대비 우위가 없으면 파이프라인을 해체하고 `cross-review` 스킬만 남긴다. 측정 항목·판정 기준·마감은 [docs/m-pipeline-kill-criteria.md](docs/m-pipeline-kill-criteria.md)에 있다.
 
 ## 설치
 
-Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plugin.json`)이고 `codex` MCP 서버(`.mcp.json`)를 함께 선언한다. **Claude Code**(최신 stable)와 **`codex` CLI**(구독 로그인, API 키 불필요)가 필요하다.
+Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plugin.json`)이고 `codex` MCP 서버(`.mcp.json`)를 함께 선언한다. **Claude Code**(최신 stable)와 **`codex` CLI**(구독 로그인)가 필요하다.
 
 ```bash
 /plugin marketplace add qnamy/harnie
@@ -125,7 +125,7 @@ harnie/
 ├── commands/         # /harnie:dev 단일 진입점
 ├── agents/           # scout · designer · builder · reviewer
 ├── skills/           # dev · dev-solo · cross-review + 방법론 스킬
-├── instructions/     # canonical 런타임 계약 (영문이 실행 정본)
+├── instructions/     # canonical 런타임 계약
 ├── scripts/          # loop / ledger / delta / execution / worktree / guards
 ├── hooks/            # 실행 상태 강제 훅 (PreToolUse · Stop · PostToolUse)
 └── docs/             # 현행 계약의 설계 근거
