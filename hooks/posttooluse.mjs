@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Observe successful tool results to bind threads and approval without trusting main narration.
 import { readStdin, resolveRoot, classifyCodex, extractThreadId, isOwnerSession, allow, allowPostTool } from "./lib.mjs"
-import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval, bindErrata, bindRebind } from "../scripts/execution.mjs"
+import { loadContext, registerReadonlyThread, registerBuilderAuto, recordBuilderCall, bindApproval, bindRebind } from "../scripts/execution.mjs"
 import { decideWatchdog } from "../scripts/guards.mjs"
 
 try {
@@ -30,7 +30,6 @@ try {
       if (recorded.ok) watchdogWarning = { ...recorded, ...decideWatchdog(recorded) }
     } else if (toolName === "AskUserQuestion" && ctx.track === "plan") {
       bindApproval(root, ctx.slug, p.tool_use_id, response)
-      bindErrata(root, ctx.slug, p.tool_use_id, response)
       bindRebind(root, ctx.slug, p.tool_use_id, input, response)
     }
     if (watchdogWarning && watchdogWarning.warn && !watchdogWarning.deny) {

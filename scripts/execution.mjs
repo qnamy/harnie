@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Durable run state; completion is always re-derived from manifest, reviews, and receipts.
-import { readFileSync, writeFileSync, appendFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync, realpathSync } from "node:fs"
+import { readFileSync, writeFileSync, existsSync, mkdirSync, renameSync, readdirSync, rmSync, openSync, closeSync, unlinkSync, realpathSync } from "node:fs"
 import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
@@ -566,12 +566,6 @@ export function computeCompletion(root, track, slug) {
       if (r.artifact !== snap.currentWholeTree) result.blockers.push("코드가 통합 검증 후 변경됨(현재 tree ≠ receipt tree) — verify --integration 재실행 필요")
     }
   }
-  for (const entry of listErrata(root, slug)) {
-    if ((entry.severity === "blocker" || entry.severity === "degrade") && entry.disposition === "pending")
-      result.blockers.push(`errata ${entry.id}: ${entry.severity} pending`)
-    if (entry.disposition === "approved-workaround" && !entry.correction)
-      result.blockers.push(`errata ${entry.id}: approved-workaround correction 없음`)
-  }
   result.complete = result.blockers.length === 0
   return result
 }
@@ -753,12 +747,11 @@ export function validateRepoBinding(root, block) {
   return null
 }
 
-// 원샷 arm 상호배제(0.11 DR-108·CR-004): A5 승인·errata·rebind의 arm/pending은 run 전체에서 **타입 무관하게
+// 원샷 arm 상호배제(0.11 DR-108·CR-004): A5 승인·rebind의 arm/pending은 run 전체에서 **타입 무관하게
 // 동시에 하나만** 존재한다 — 하나의 AskUserQuestion 응답이 복수 권위 전이를 소비하거나 payload가 덮이는 것을
 // 막는다. 재-arm이 필요하면 먼저 기존 arm을 소비시켜라(다음 질문이 stale arm을 소비·정리한다).
 const ONE_SHOT_ARM_FILES = [
   ".arm-approval.json", ".pending-approval.json",
-  ".arm-errata.json", ".pending-errata.json",
   ".arm-rebind.json", ".pending-rebind.json",
 ]
 function otherArmPending(dir) {
@@ -1026,136 +1019,14 @@ export function watchdogExtend(root, slug, taskId, reason) {
   })
 }
 
-const ERRATA_SEVERITIES = new Set(["blocker", "degrade", "note"])
-const ERRATA_DISPOSITIONS = new Set(["approved-workaround", "deferred-next-run", "superseded-by-A5.2"])
-function errataPath(root, slug) { return join(planDir(root, "plan", slug), "design", "errata.md") }
-
-function fieldText(lines, start) {
-  const values = [lines[start].replace(/^-[ \t]+[^:]+:[ \t]*/, "")]
-  for (let i = start + 1; i < lines.length && !/^-[ \t]+[^:]+:/.test(lines[i]) && !/^##[ \t]+E-\d+/.test(lines[i]); i++)
-    if (lines[i].startsWith("  ")) values.push(lines[i].slice(2))
-  return values.join("\n").trim()
-}
-
-export function listErrata(root, slug, { pending = false } = {}) {
-  const path = errataPath(root, slug)
-  if (!existsSync(path)) return []
-  const lines = readFileSync(path, "utf8").split(/\r?\n/)
-  const entries = []
-  let current = null
-  for (let i = 0; i < lines.length; i++) {
-    const heading = lines[i].match(/^##[ \t]+(E-\d{3})\b/)
-    if (heading) {
-      current = entries.find((e) => e.id === heading[1]) || { id: heading[1] }
-      if (!entries.includes(current)) entries.push(current)
-      continue
-    }
-    if (!current) continue
-    const field = lines[i].match(/^-[ \t]+(found|severity|design-ref|defect|disposition|correction):/)
-    if (!field) continue
-    const value = fieldText(lines, i)
-    if (field[1] === "disposition") current.disposition = value.split(/[ \t]+\(/, 1)[0]
-    else current[field[1] === "design-ref" ? "designRef" : field[1]] = value
-  }
-  return pending ? entries.filter((e) => e.disposition === "pending") : entries
-}
-
-function appendErrata(path, text) {
-  mkdirSync(dirname(path), { recursive: true })
-  appendFileSync(path, text)
-}
-
-function markdownField(text) { return String(text).replace(/\r?\n/g, "\n  ") }
-
-export function errataAdd(root, slug, { severity, designRef, defect }) {
-  if (!ERRATA_SEVERITIES.has(severity)) throw new FailClosed(`errata-add: --severity는 ${[...ERRATA_SEVERITIES].join("|")}`)
-  if (typeof designRef !== "string" || !designRef.trim()) throw new FailClosed("errata-add: --design-ref 필요")
-  if (typeof defect !== "string" || !defect.trim()) throw new FailClosed("errata-add: --defect 필요")
-  return withStateLock(root, () => {
-    const entries = listErrata(root, slug)
-    const n = entries.reduce((max, e) => Math.max(max, Number(e.id.slice(2))), 0) + 1
-    const id = `E-${String(n).padStart(3, "0")}`
-    const at = new Date().toISOString()
-    appendErrata(errataPath(root, slug), `${entries.length ? "\n" : ""}## ${id}\n- found: ${at}\n- severity: ${severity}\n- design-ref: ${markdownField(designRef.trim())}\n- defect: ${markdownField(defect.trim())}\n- disposition: pending\n`)
-    return { ok: true, id, severity, designRef: designRef.trim(), defect: defect.trim(), disposition: "pending" }
-  })
-}
-
-function correctionText(arg) {
-  if (typeof arg !== "string" || !arg) throw new FailClosed("--correction <text|@file> 필요")
-  const text = arg.startsWith("@") ? readFileSync(arg.slice(1), "utf8") : arg
-  if (!text.trim()) throw new FailClosed("--correction은 비어있을 수 없음")
-  return text.trim()
-}
-
-export function errataArm(root, slug, { id, disposition, correction, approveOption = "승인" }) {
-  if (!ERRATA_DISPOSITIONS.has(disposition)) throw new FailClosed(`errata-arm: --disposition은 ${[...ERRATA_DISPOSITIONS].join("|")}`)
-  const text = correctionText(correction)
-  return withStateLock(root, () => {
-    const dir = planDir(root, "plan", slug)
-    const other = otherArmPending(dir)
-    if (other) throw new FailClosed(`errata-arm: 원샷 승인 대기 중(${other}) — run 전체 단일 arm/pending(타입 무관 상호배제)`)
-    const entry = listErrata(root, slug).find((e) => e.id === id)
-    if (!entry) throw new FailClosed(`errata-arm: ${id} 없음`)
-    if (entry.severity === "note") throw new FailClosed(`errata-arm: note는 errata-set-disposition 사용`)
-    if (entry.disposition !== "pending") throw new FailClosed(`errata-arm: ${id} disposition이 pending 아님`)
-    const path = join(dir, ".arm-errata.json")
-    writeJSONAtomic(path, { id, disposition, correction: text, approveOption, at: new Date().toISOString() })
-    return { ok: true, id, disposition }
-  })
-}
-
-export function recordPendingErrata(root, slug, toolUseId) {
-  const dir = planDir(root, "plan", slug)
-  const armPath = join(dir, ".arm-errata.json")
-  if (!existsSync(armPath)) return { ok: false, reason: "errata 승인 미-arm" }
-  return withStateLock(root, () => {
-    const arm = readJSONStrict(armPath)
-    writeJSONAtomic(join(dir, ".pending-errata.json"), { ...arm, toolUseId })
-    rmSync(armPath, { force: true })
-    return { ok: true, id: arm.id }
-  })
-}
-
-export function bindErrata(root, slug, toolUseId, response) {
-  const dir = planDir(root, "plan", slug)
-  const pendingPath = join(dir, ".pending-errata.json")
-  if (!existsSync(pendingPath)) return { ok: false, reason: "pending-errata 없음" }
-  return withStateLock(root, () => {
-    const pending = readJSONStrict(pendingPath)
-    if (pending.toolUseId !== toolUseId) return { ok: false, reason: "tool_use_id 불일치" }
-    rmSync(pendingPath, { force: true })
-    const selected = extractSelectedAnswers(response)
-    if (!selected.length || !selected.every((v) => v === pending.approveOption)) return { ok: false, reason: "승인 옵션 정확 일치 아님" }
-    const entry = listErrata(root, slug).find((e) => e.id === pending.id)
-    if (!entry || entry.disposition !== "pending" || entry.severity === "note") throw new FailClosed(`errata ${pending.id} 승인 대상 상태 불일치`)
-    const at = new Date().toISOString()
-    appendErrata(errataPath(root, slug), `\n## ${pending.id} disposition\n- disposition: ${pending.disposition} (user approved ${at})\n- correction: ${markdownField(pending.correction)}\n`)
-    return { ok: true, id: pending.id, disposition: pending.disposition, correction: pending.correction }
-  })
-}
-
-export function errataSetDisposition(root, slug, { id, disposition, correction }) {
-  if (!ERRATA_DISPOSITIONS.has(disposition)) throw new FailClosed(`errata-set-disposition: --disposition은 ${[...ERRATA_DISPOSITIONS].join("|")}`)
-  const text = correctionText(correction)
-  return withStateLock(root, () => {
-    const entry = listErrata(root, slug).find((e) => e.id === id)
-    if (!entry) throw new FailClosed(`errata-set-disposition: ${id} 없음`)
-    if (entry.severity !== "note") throw new FailClosed("errata-set-disposition은 note 항목 전용 — blocker/degrade는 errata-arm + AskUserQuestion 필요")
-    if (entry.disposition !== "pending") throw new FailClosed(`errata-set-disposition: ${id} disposition이 pending 아님`)
-    appendErrata(errataPath(root, slug), `\n## ${id} disposition\n- disposition: ${disposition}\n- correction: ${markdownField(text)}\n`)
-    return { ok: true, id, disposition, correction: text }
-  })
-}
-
 export function rebindTask(root, slug, { taskId, reason, cancel = false }) {
-  // correction:E-NNN = 승인된 errata 정정 / finding:<reviewUnit>:CR-NNN = 통합 후 순수 코드 결함(그 finding을 낸
-  // 유닛 ledger에 귀속 — 유닛 식별자가 있어야 CR ID 중복이 모호하지 않다) / verification:integration = ledger 없는
-  // 통합 검증 실패(0.11 CR-209·219). 모두 run-root 부트스트랩 마커 경로는 동일하다.
-  const correction = /^(correction:E-\d{3}|finding:[A-Za-z0-9._-]+:CR-\d{3}|verification:integration)$/.test(String(reason || ""))
+  // finding:<reviewUnit>:CR-NNN = 통합 후 순수 코드 결함(그 finding을 낸 유닛 ledger에 귀속 — 유닛 식별자가
+  // 있어야 CR ID 중복이 모호하지 않다) / verification:integration = ledger 없는 통합 검증 실패(0.11 CR-209·219).
+  // 둘 다 run-root 부트스트랩 마커 경로는 동일하다.
+  const correction = /^(finding:[A-Za-z0-9._-]+:CR-\d{3}|verification:integration)$/.test(String(reason || ""))
   const approvedArtifact = /^approved-artifact:[0-9a-f]{40}$/.test(String(reason || ""))
   if ((!cancel && !correction) || (cancel && !approvedArtifact))
-    throw new FailClosed(`rebind-task: reason 형식 오류(${cancel ? "approved-artifact:<postSHA>" : "correction:<E-NNN> | finding:<reviewUnit>:<CR-NNN> | verification:integration"})`)
+    throw new FailClosed(`rebind-task: reason 형식 오류(${cancel ? "approved-artifact:<postSHA>" : "finding:<reviewUnit>:<CR-NNN> | verification:integration"})`)
   return withStateLock(root, () => {
     const execPath = join(planDir(root, "plan", slug), "execution.json")
     const ex = readJSONStrict(execPath)
@@ -1540,25 +1411,6 @@ function cmdWatchdogExtend({ flags }) {
   out(watchdogExtend(flags.root, flags.slug, flags.task || die("--task 필요"), flags.reason || die("--reason 필요")))
 }
 
-function cmdErrataAdd({ flags }) {
-  guardActive(flags, "plan")
-  out(errataAdd(flags.root, flags.slug, { severity: flags.severity || die("--severity 필요"), designRef: flags["design-ref"] || die("--design-ref 필요"), defect: flags.defect || die("--defect 필요") }))
-}
-
-function cmdErrataArm({ flags }) {
-  guardActive(flags, "plan")
-  out(errataArm(flags.root, flags.slug, { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요"), approveOption: flags["approve-option"] || "승인" }))
-}
-
-function cmdErrataSetDisposition({ flags }) {
-  guardActive(flags, "plan")
-  out(errataSetDisposition(flags.root, flags.slug, { id: flags.id || die("--id 필요"), disposition: flags.disposition || die("--disposition 필요"), correction: flags.correction || die("--correction 필요") }))
-}
-
-function cmdErrataList({ flags }) {
-  out(listErrata(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), { pending: flags.pending === true }))
-}
-
 function cmdRebindTask({ flags }) {
   guardActive(flags, "plan")
   out(rebindTask(flags.root, flags.slug, { taskId: flags.task || die("--task 필요"), reason: flags.reason || die("--reason 필요"), cancel: flags.cancel === true }))
@@ -1630,10 +1482,6 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "repo-add": cmdRepoAdd(args); break
       case "set-task": cmdSetTask(args); break
       case "watchdog-extend": cmdWatchdogExtend(args); break
-      case "errata-add": cmdErrataAdd(args); break
-      case "errata-arm": cmdErrataArm(args); break
-      case "errata-set-disposition": cmdErrataSetDisposition(args); break
-      case "errata-list": cmdErrataList(args); break
       case "rebind-task": cmdRebindTask(args); break
       case "rebind-arm": cmdRebindArm(args); break
       case "set-mode": cmdSetMode(args); break

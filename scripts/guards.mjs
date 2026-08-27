@@ -3,8 +3,8 @@ import { basename, dirname, isAbsolute, resolve } from "node:path"
 
 const CONTROL_BASENAMES = new Set([
   "manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json",
-  ".seal.json", ".pending-approval.json", ".arm-approval.json", ".pending-errata.json", ".arm-errata.json",
-  ".arm-rebind.json", ".pending-rebind.json", "errata.md",
+  ".seal.json", ".pending-approval.json", ".arm-approval.json",
+  ".arm-rebind.json", ".pending-rebind.json",
 ])
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")

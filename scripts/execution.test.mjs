@@ -15,7 +15,7 @@ import {
   setTaskRunStatus, recordBuilderCall, taskWatchdogUsage, watchdogExtend,
   bootstrapRun, slugify, withStateLock,
   detectVacuous, loadContext, repoAdd, validateRepoBinding, workspaceInfo,
-  errataAdd, errataArm, errataSetDisposition, listErrata, recordPendingErrata, bindErrata, rebindTask,
+  rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
 } from "./execution.mjs"
 import { captureTree } from "./delta.mjs"
@@ -644,71 +644,21 @@ test("execution.json 경합: 동시 set-task가 두 task 상태를 모두 보존
   assert.ok(ex.tasks.T1.startedAt && ex.tasks.T2.startedAt)
 })
 
-test("errata v2: blocker CLI 전이는 차단하고 note만 직접 disposition 가능", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x")
-  run(["init", "--root", root, "--slug", "feat-x"])
-  const blocker = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D2", defect: "cwd 귀속 오류" })
-  assert.equal(blocker.id, "E-001")
-  assert.throws(() => errataSetDisposition(root, "feat-x", { id: blocker.id, disposition: "deferred-next-run", correction: "다음 run" }), /note 항목 전용/)
-  const note = errataAdd(root, "feat-x", { severity: "note", designRef: "rev-1.md §D7", defect: "문구 보완" })
-  assert.equal(errataSetDisposition(root, "feat-x", { id: note.id, disposition: "deferred-next-run", correction: "문서만 보완" }).ok, true)
-  assert.deepEqual(listErrata(root, "feat-x", { pending: true }).map((e) => e.id), ["E-001"])
-  assert.deepEqual(run(["errata-list", "--root", root, "--slug", "feat-x", "--pending"]).map((e) => e.id), ["E-001"])
-  assert.ok(runFail(["errata-set-disposition", "--root", root, "--slug", "feat-x", "--id", "E-001", "--disposition", "deferred-next-run", "--correction", "우회"]))
-})
-
-test("errata v2: one-shot 승인 훅 경로가 disposition+correction을 함께 append", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x")
-  run(["init", "--root", root, "--slug", "feat-x"])
-  const { id } = errataAdd(root, "feat-x", { severity: "degrade", designRef: "rev-1.md §D3", defect: "정정 필요" })
-  const correction = join(mkdtempSync(join(tmpdir(), "harnie-correction-")), "correction.txt")
-  writeFileSync(correction, "새 기준\n")
-  errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: `@${correction}` })
-  recordPendingErrata(root, "feat-x", "ask-1")
-  assert.equal(bindErrata(root, "feat-x", "ask-1", { answers: { q: "승인" } }).ok, true)
-  const entry = listErrata(root, "feat-x").find((e) => e.id === id)
-  assert.equal(entry.disposition, "approved-workaround")
-  assert.equal(entry.correction, "새 기준")
-})
-
-test("errata-arm: custom approve option은 exact match로만 바인딩", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x")
-  run(["init", "--root", root, "--slug", "feat-x"])
-  const { id } = errataAdd(root, "feat-x", { severity: "degrade", designRef: "rev-1.md §D3", defect: "정정 필요" })
-  const arm = () => run(["errata-arm", "--root", root, "--slug", "feat-x", "--id", id, "--disposition", "approved-workaround", "--correction", "새 기준", "--approve-option", "확인"])
-  arm(); recordPendingErrata(root, "feat-x", "ask-1")
-  assert.equal(bindErrata(root, "feat-x", "ask-1", { answers: { q: "승인" } }).ok, false)
-  arm(); recordPendingErrata(root, "feat-x", "ask-2")
-  assert.equal(bindErrata(root, "feat-x", "ask-2", { answers: { q: "확인" } }).ok, true)
-})
-
-test("계획 승인 arm은 arm·pending errata 승인과 상호 배타", () => {
+test("계획 승인 arm은 rebind arm과 상호 배타(타입 무관 원샷)", () => {
   const root = gitRepo()
   const dir = writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
-  const { id } = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D3", defect: "정정 필요" })
-  errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" })
-  assert.equal(armApproval(root, "feat-x").ok, false)
-  recordPendingErrata(root, "feat-x", "ask-1")
-  assert.equal(armApproval(root, "feat-x").ok, false)
-  assert.equal(existsSync(join(dir, ".arm-approval.json")), false)
-})
-
-test("errata 승인 arm은 arm·pending 계획 승인과 상호 배타", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x")
-  run(["init", "--root", root, "--slug", "feat-x"])
-  const { id } = errataAdd(root, "feat-x", { severity: "blocker", designRef: "rev-1.md §D3", defect: "정정 필요" })
-  armApproval(root, "feat-x")
-  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /상호배제/)
+  setTaskRunStatus(root, "feat-x", "T1", "building")
+  registerBuilderThread(root, "feat-x", "T1", "dead-th")
+  const EV = "MCP error: Session not found for thread_id dead-th"
+  assert.equal(armApproval(root, "feat-x").ok, true)
+  assert.throws(() => rebindArm(root, "feat-x", { taskId: "T1", oldThread: "dead-th", evidence: EV }), /상호배제/)
   recordPendingApproval(root, "feat-x", "ask-1")
-  assert.throws(() => errataArm(root, "feat-x", { id, disposition: "approved-workaround", correction: "정정" }), /상호배제/)
+  assert.throws(() => rebindArm(root, "feat-x", { taskId: "T1", oldThread: "dead-th", evidence: EV }), /상호배제/)
+  assert.equal(existsSync(join(dir, ".arm-rebind.json")), false)
 })
 
-test("rebind-task: correction 라운드도 카운터·기산점을 리셋하지 않는다(0.11 DR-107 — 예산 우회 방지)", () => {
+test("rebind-task: finding 라운드도 카운터·기산점을 리셋하지 않는다(0.11 DR-107 — 예산 우회 방지)", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
@@ -722,7 +672,7 @@ test("rebind-task: correction 라운드도 카운터·기산점을 리셋하지 
   ex.tasks.T1.codexCalls = 7
   ex.tasks.T1.watchdogExtensions = [{ at: "earlier", reason: "auto-cap" }]
   writeFileSync(execPath, JSON.stringify(ex))
-  rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" })
+  rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:CR-001" })
   const rebound = JSON.parse(readFileSync(execPath, "utf8")).tasks.T1
   assert.equal(rebound.startedAt, "2000-01-01T00:00:00.000Z")
   assert.equal(rebound.builderBoundAt, "2000-01-01T00:00:00.000Z")
@@ -731,7 +681,7 @@ test("rebind-task: correction 라운드도 카운터·기산점을 리셋하지 
   assert.deepEqual(rebound.watchdogExtensions, [{ at: "earlier", reason: "auto-cap" }])
 })
 
-test("rebind-task: finding:<unit>:CR-NNN·verification:integration 사유도 correction과 동일한 마커 경로", () => {
+test("rebind-task: finding:<unit>:CR-NNN·verification:integration만 유효한 사유(errata correction 소멸)", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
@@ -739,6 +689,7 @@ test("rebind-task: finding:<unit>:CR-NNN·verification:integration 사유도 cor
   registerBuilderThread(root, "feat-x", "T1", "old-thread")
   assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:CR-042" }), /형식 오류/)      // 유닛 식별자 필수
   assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:DR-001" }), /형식 오류/)
+  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" }), /형식 오류/)   // errata 삭제(0.13)
   assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:CR-042" }).pendingRunRootBootstrap, "T1")
   rebindTask(root, "feat-x", { taskId: "T1", reason: `approved-artifact:${"a".repeat(40)}`, cancel: true })
   registerBuilderThread(root, "feat-x", "T1", "new-thread")
@@ -751,8 +702,8 @@ test("rebind-task: 중복 marker 거부·cancel 감사 기록", () => {
   run(["init", "--root", root, "--slug", "feat-x"])
   setTaskRunStatus(root, "feat-x", "T1", "building")
   registerBuilderThread(root, "feat-x", "T1", "old-thread")
-  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-001" }).pendingRunRootBootstrap, "T1")
-  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "correction:E-002" }), /이미 존재/)
+  assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:CR-001" }).pendingRunRootBootstrap, "T1")
+  assert.throws(() => rebindTask(root, "feat-x", { taskId: "T1", reason: "finding:final-review:CR-002" }), /이미 존재/)
   assert.equal(rebindTask(root, "feat-x", { taskId: "T1", reason: `approved-artifact:${"a".repeat(40)}`, cancel: true }).pendingRunRootBootstrap, null)
   const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
   assert.deepEqual(ex.threadRebindings.map((e) => e.action), ["rebind", "cancel"])
@@ -781,16 +732,13 @@ function makeCompleteRun(root, slug) {
   return dir
 }
 
-test("completion: pending blocker/degrade와 correction 없는 approved-workaround를 blocker로 산입", () => {
+test("completion: errata는 완료 입력이 아니다(0.13 삭제) — 잔존 errata.md도 M 완료를 막지 않는다", () => {
   const root = gitRepo()
-  const dir = makeCompleteRun(root, "errata-complete")
-  assert.equal(run(["completion", "--root", root, "--slug", "errata-complete"]).complete, true)
-  errataAdd(root, "errata-complete", { severity: "blocker", designRef: "rev-1.md §D2", defect: "미해결" })
-  let result = run(["completion", "--root", root, "--slug", "errata-complete"])
-  assert.ok(result.blockers.some((b) => /E-001.*pending/.test(b)))
-  writeFileSync(join(dir, "design", "errata.md"), "## E-001\n- severity: blocker\n- disposition: approved-workaround\n")
-  result = run(["completion", "--root", root, "--slug", "errata-complete"])
-  assert.ok(result.blockers.some((b) => /correction 없음/.test(b)))
+  const dir = makeCompleteRun(root, "m-complete")
+  assert.equal(run(["completion", "--root", root, "--slug", "m-complete"]).complete, true)
+  mkdirSync(join(dir, "design"), { recursive: true })
+  writeFileSync(join(dir, "design", "errata.md"), "## E-001\n- severity: blocker\n- disposition: pending\n")
+  assert.equal(run(["completion", "--root", root, "--slug", "m-complete"]).complete, true)
 })
 
 test("slugify: prefix-hash·결정적·한국어 지원·동일prefix 구분(P1-1)", () => {
@@ -1361,11 +1309,11 @@ test("CLI 공통 가드(CR-001): 변이 서브커맨드는 활성 run 불일치�
   const root = gitRepo()
   writePlan(root, "feat-x")
   run(["init", "--root", root, "--slug", "feat-x"])
-  // 활성 run과 다른 slug — set-task/seal/errata-add 모두 진입부에서 거부
+  // 활성 run과 다른 slug — set-task/seal/watchdog-extend 모두 진입부에서 거부
   for (const args of [
     ["set-task", "--root", root, "--slug", "other", "--task", "T1", "--run-status", "building"],
     ["seal", "--root", root, "--slug", "other"],
-    ["errata-add", "--root", root, "--slug", "other", "--severity", "note", "--design-ref", "x", "--defect", "y"],
+    ["watchdog-extend", "--root", root, "--slug", "other", "--task", "T1", "--reason", "사용자 승인"],
   ]) {
     const e = runFail(args)
     assert.ok(e && /불일치/.test(String(e.stderr)), args[0])
@@ -1429,7 +1377,7 @@ test("registerBuilderThread: 레거시(rebind 이력·builderBoundAt 부재) tas
   const execPath = join(root, ".harnie", "plan", "feat-x", "execution.json")
   const ex = JSON.parse(readFileSync(execPath, "utf8"))
   ex.tasks.T1.startedAt = "2000-01-01T00:00:00.000Z" // 레거시 anchor
-  ex.threadRebindings = [{ action: "rebind", taskId: "T1", oldThreadId: "old", reason: "correction:E-001", at: "t" }]
+  ex.threadRebindings = [{ action: "rebind", taskId: "T1", oldThreadId: "old", reason: "finding:final-review:CR-001", at: "t" }]
   writeFileSync(execPath, JSON.stringify(ex))
   registerBuilderThread(root, "feat-x", "T1", "new-th")
   const t = JSON.parse(readFileSync(execPath, "utf8")).tasks.T1

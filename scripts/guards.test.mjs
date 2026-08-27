@@ -7,7 +7,6 @@ test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용
     ".harnie/active.json", ".harnie/plan/x/manifest.json", ".harnie/plan/x/execution.json",
     ".harnie/plan/x/review/u/ledger.json", ".harnie/plan/x/review/u/state.json",
     ".harnie/plan/x/review/u/receipt.json", ".harnie/state.lock",
-    ".harnie/plan/x/design/errata.md", ".harnie/plan/x/.arm-errata.json", ".harnie/plan/x/.pending-errata.json",
   ]) assert.equal(isControlPath(p), true, p)
   for (const p of [".harnie/pending-route/s.json", ".harnie/plan/x/plan.md", ".harnie/plan/x/review/u/round-1.txt", ".harnie/plan/x/review/u/delta.patch", "src/x.ts"])
     assert.equal(isControlPath(p), false, p)

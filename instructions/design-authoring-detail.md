@@ -4,7 +4,7 @@ Output contract for a **detailed design inside settled boundaries**: one task of
 
 **Altitude:** translate the settled contract into implementable code-level decisions — specific enough that an implementer begins **without additional core decisions**, without unnecessary classes or patterns.
 
-**Respect the parent.** Preserve the parent CONTRACT/architecture's names, ownership, and interfaces exactly; never change them silently — a needed change is escalated through the central path (errata / re-approval), not designed around. In an L task, open the document by naming the **brief edition (vN) and contract revision you read** (the approval hash binds to them). If the target is too large for one document, propose a decomposition first.
+**Respect the parent.** Preserve the parent architecture's names, ownership, and interfaces exactly; never change them silently — a needed change is escalated through the A5.2 re-approval path, not designed around. If the target is too large for one document, propose a decomposition first.
 
 ## Environment facts first
 

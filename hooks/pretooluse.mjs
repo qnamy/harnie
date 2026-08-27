@@ -3,7 +3,7 @@
 import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
-import { loadContext, recordPendingApproval, recordPendingErrata, recordPendingRebind, taskWatchdogUsage } from "../scripts/execution.mjs"
+import { loadContext, recordPendingApproval, recordPendingRebind, taskWatchdogUsage } from "../scripts/execution.mjs"
 import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, taskIdFromActiveTaskWorktree } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
@@ -100,7 +100,6 @@ try {
         allow()
       } else if (toolName === "AskUserQuestion" && !ctx.failClosed && track === "plan") {
         try { recordPendingApproval(root, slug, p.tool_use_id) } catch { /* best-effort */ }
-        try { recordPendingErrata(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         try { recordPendingRebind(root, slug, p.tool_use_id) } catch { /* best-effort */ }
         allow()
       } else allow()

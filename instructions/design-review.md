@@ -8,7 +8,7 @@ Review the design **before implementation** — design mistakes are cheap now, e
 
 - **ARCH**: boundaries, components, data ownership, technology choices, SPOFs. Findings about classes, SQL, task-internal logic, or per-task detail are out of altitude.
 - **CONTRACT**: task decomposition (each task's independent-review-value rationale), inter-task interface/data/event contracts, per-task Env Fact Sheets, verification strategy (automated/human split). Task-internal implementation findings are out of altitude.
-- **TASK-DETAIL**: decision completeness inside one task's settled contract — an implementer can start without further core decisions; failure modes (errors, duplicates, timeouts, retries, partial success, concurrency); requirement coverage. Demands to change the CONTRACT itself are out of altitude (that goes through the central errata/A5.2 path).
+- **TASK-DETAIL**: decision completeness inside one task's settled contract — an implementer can start without further core decisions; failure modes (errors, duplicates, timeouts, retries, partial success, concurrency); requirement coverage. Demands to change the settled contract itself are out of altitude (that goes through the A5.2 re-approval path).
 
 Do not reopen an approved higher-altitude decision at a lower altitude. An out-of-altitude demand raised as blocking will be **contested** (`CONTEST … reason=altitude`, `loop.md`); on a contest, concede (`resolved`, optionally a new non-blocking ID) unless you can show the finding truly belongs to this altitude.
 

@@ -118,7 +118,6 @@ test("control·review-state 직접 Write는 phase 무관 deny", () => {
   toExecuting(root)
   assert.ok(deny(hook(PRE, { tool_name: "Write", tool_input: { file_path: join(dir, "manifest.json") }, cwd: root })))
   assert.ok(deny(hook(PRE, { tool_name: "Edit", tool_input: { file_path: join(dir, "review", "task-a", "ledger.json") }, cwd: root })))
-  assert.ok(deny(hook(PRE, { tool_name: "Edit", tool_input: { file_path: join(dir, "design", "errata.md") }, cwd: root })))
 })
 
 test("executing: 소스 Write allow", () => {
@@ -287,23 +286,12 @@ test("rebind marker: run-root 호출만 지정 task에 원자 재바인딩하고
   exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
   const firstWt = join(root, ".harnie-wt", "harnie-feat-x-tT1"); mkdirSync(firstWt, { recursive: true })
   hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: firstWt }, tool_response: '{"threadId":"old-thread"}', cwd: root })
-  exec(["rebind-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--reason", "correction:E-001"])
+  exec(["rebind-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--reason", "finding:final-review:CR-001"])
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, cwd: root }), null)
   hook(POST, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: root }, tool_response: '{"threadId":"new-thread"}', cwd: root })
   const ex = JSON.parse(readFileSync(join(dir, "execution.json"), "utf8"))
   assert.equal(ex.tasks.T1.builderThreadId, "new-thread")
   assert.equal(ex.pendingRunRootBootstrap, undefined)
-})
-
-test("errata-arm: 다음 AskUserQuestion 승인만 disposition+correction을 기록", () => {
-  const { root, dir } = setupRepo()
-  exec(["errata-add", "--root", root, "--slug", "feat-x", "--severity", "blocker", "--design-ref", "rev-1.md §D3", "--defect", "설계 오류"])
-  exec(["errata-arm", "--root", root, "--slug", "feat-x", "--id", "E-001", "--disposition", "approved-workaround", "--correction", "정정 기준"])
-  hook(PRE, { ...askPayload("errata-q"), cwd: root })
-  hook(POST, { tool_name: "AskUserQuestion", tool_use_id: "errata-q", tool_response: JSON.stringify({ answers: { [AQ]: "승인" } }), cwd: root })
-  const text = readFileSync(join(dir, "design", "errata.md"), "utf8")
-  assert.match(text, /disposition: approved-workaround \(user approved/)
-  assert.match(text, /correction: 정정 기준/)
 })
 
 test("승인 바인딩 e2e: arm(A5) → Pre(pending) → Post(승인 답) → executing", () => {
