@@ -1074,16 +1074,27 @@ test("set-mode: 상향 전이만, sentinel/execution 불일치 fail-closed, S는
 
 // DR-002: set-mode 거부만으로는 부족하다 — 디스크에 mode:"L"이 남은 업그레이드 전 run이
 // 레거시 4게이트 경로로 흘러들어 부당한 완료 판정을 받는 경로를 readMode에서 막는다.
-test("readMode/completion: 디스크에 남은 mode L은 fail-closed(0.13 삭제 모드)", () => {
-  const root = gitRepo()
-  writePlan(root, "feat-x")
-  run(["init", "--root", root, "--slug", "feat-x"])
-  const dir = join(root, ".harnie", "plan", "feat-x")
-  for (const p of [join(root, ".harnie", "active.json"), join(dir, "execution.json")]) {
-    const j = JSON.parse(readFileSync(p, "utf8")); j.mode = "L"; writeFileSync(p, JSON.stringify(j))
+test("readMode/completion/loadContext: 디스크에 남은 미지 mode는 전부 fail-closed(0.13 삭제 모드)", () => {
+  const setMirrors = (root, mode) => {
+    const dir = join(root, ".harnie", "plan", "feat-x")
+    for (const p of [join(root, ".harnie", "active.json"), join(dir, "execution.json")]) {
+      const j = JSON.parse(readFileSync(p, "utf8")); j.mode = mode; writeFileSync(p, JSON.stringify(j))
+    }
   }
-  assert.throws(() => readMode(root, "plan", "feat-x"), /알 수 없는 mode\(L\)/)
-  assert.throws(() => computeCompletion(root, "plan", "feat-x"), /알 수 없는 mode\(L\)/)
+  // "constructor"·"toString"은 MODE_ORDER의 프로토타입 키다 — own-key로 보지 않으면 이 검사를 통과한다.
+  for (const mode of ["L", "constructor", "toString"]) {
+    const root = gitRepo()
+    writePlan(root, "feat-x")
+    run(["init", "--root", root, "--slug", "feat-x"])
+    setMirrors(root, mode)
+    const re = new RegExp(`알 수 없는 mode\\(${mode}\\)`)
+    assert.throws(() => readMode(root, "plan", "feat-x"), re, mode)
+    assert.throws(() => computeCompletion(root, "plan", "feat-x"), re, mode)
+    // 훅 문맥도 같은 허용 집합을 본다 — 미지 mode run을 정상 실행 문맥으로 열지 않는다.
+    const ctx = loadContext(root)
+    assert.equal(ctx.failClosed, true, mode)
+    assert.match(ctx.reason, re)
+  }
 })
 
 test("set-difficulty: CLI 경유 — 승인된 manifest.json 바이트·planHash 불변, execution.json.difficulty만 갱신", () => {

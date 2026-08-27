@@ -194,8 +194,12 @@ export function canonicalManifest(obj) {
 
 // ── 0.11 mode(S/M) — 크기 판정의 권위 기록. 상향 전이만 허용된다. L은 0.13에서 삭제됐다. ─────────
 const MODE_ORDER = { sizing: 0, S: 1, M: 2 }
+// 0.13: 디스크의 mode가 알려진 값인지. `in`은 프로토타입 키(`constructor`·`toString`…)까지 참으로
+// 판정하므로 own-key로 본다 — 그 구멍이 있으면 미지 mode가 fail-closed를 통과한다(CR-001).
+function isKnownMode(mode) { return Object.prototype.hasOwnProperty.call(MODE_ORDER, mode) }
 // sentinel·execution 양쪽 mode를 검증해 읽는다(권위 소비자용 — CR-001). 레거시(0.10)는 양쪽 모두 부재일 때만
 // null; 한쪽만 있으면 손상으로 fail-closed. 이 run이 활성 run인지(slug·track 일치)도 함께 검증한다.
+const unknownModeReason = (mode) => `알 수 없는 mode(${mode}) — 0.13에서 삭제된 모드일 수 있음(L). 이 run은 재개·완료할 수 없다`
 export function readMode(root, track, slug) {
   const s = readJSONOrNull(sentinelPath(root))
   const ex = readJSONOrNull(join(planDir(root, track, slug), "execution.json"))
@@ -207,8 +211,7 @@ export function readMode(root, track, slug) {
     throw new FailClosed(`mode 불일치(sentinel=${sMode}, execution=${exMode}) — 상태 손상, fail-closed`)
   // 0.13: L 삭제. 디스크에 남은 미지 mode(업그레이드 전 L run 등)는 레거시 4게이트 경로로 흘러들어
   // 부당한 완료 판정을 받을 수 있으므로 여기서 fail-closed한다(설계 rev-1 §6 X2 / DR-002).
-  if (exMode != null && !(exMode in MODE_ORDER))
-    throw new FailClosed(`알 수 없는 mode(${exMode}) — 0.13에서 삭제된 모드일 수 있음(L). 이 run은 재개·완료할 수 없다`)
+  if (exMode != null && !isKnownMode(exMode)) throw new FailClosed(unknownModeReason(exMode))
   return exMode
 }
 export function setMode(root, slug, mode) {
@@ -484,6 +487,7 @@ export function loadContext(root) {
   const sMode = typeof s.mode === "string" ? s.mode : null
   const exMode = typeof ex.mode === "string" ? ex.mode : null
   if (sMode !== exMode) return fc(`mode 불일치(sentinel=${sMode}, execution=${exMode})`)
+  if (sMode != null && !isKnownMode(sMode)) return fc(unknownModeReason(sMode))
   const mode = sMode
   const authority = typeof s.authority === "string" ? s.authority : "hook"
   const builderThreads = Object.values(ex.tasks || {}).map((t) => t && t.builderThreadId).filter(Boolean)

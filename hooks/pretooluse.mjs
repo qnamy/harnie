@@ -4,7 +4,7 @@ import { resolve, dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { readStdin, findRoot, resolveRoot, classifyCodex, canonicalRelPath, harnieControlSuffix, isOwnerSession, denyPreTool, allow, allowPreTool } from "./lib.mjs"
 import { loadContext, recordPendingApproval, recordPendingRebind, taskWatchdogUsage } from "../scripts/execution.mjs"
-import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath, taskIdFromActiveTaskWorktree } from "../scripts/guards.mjs"
+import { decideWriteEdit, decideBash, decideTask, decideCodex, decideWatchdog, isControlPath } from "../scripts/guards.mjs"
 
 const SCRIPTS = resolve(dirname(fileURLToPath(import.meta.url)), "..", "scripts")
 const TRUSTED_CLIS = new Set([join(SCRIPTS, "loop.mjs"), join(SCRIPTS, "execution.mjs"), join(SCRIPTS, "worktree.mjs")])
@@ -80,8 +80,7 @@ try {
         try {
           let usage = null
           if (!isReply && input.sandbox === "workspace-write") {
-            const mapped = taskIdFromActiveTaskWorktree(root, slug, input.cwd)
-            const taskId = mapped || ctx.pendingRunRootBootstrap || (input.cwd == null && ctx.buildingUnboundTaskIds?.length === 1 ? ctx.buildingUnboundTaskIds[0] : null)
+            const taskId = ctx.pendingRunRootBootstrap || (ctx.buildingUnboundTaskIds?.length === 1 ? ctx.buildingUnboundTaskIds[0] : null)
             if (taskId) usage = taskWatchdogUsage(root, slug, { taskId })
           } else if (isReply && (ctx.builderThreads || []).includes(input.threadId)) {
             usage = taskWatchdogUsage(root, slug, { threadId: input.threadId })

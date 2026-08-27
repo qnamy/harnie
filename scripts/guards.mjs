@@ -182,7 +182,7 @@ export function decideTask({ subagentType, phase }) {
   return { deny: false }
 }
 
-// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 run root cwd만 허용한다.
+// 승인 전 codex는 read-only, 승인 후 builder는 workspace-write + 활성 run root cwd만 허용한다(0.13).
 export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId, phase, readOnlyThreads = [], builderThreads = [], hasBuildingUnbound = false, buildingUnboundTasks = null, pendingRunRootBootstrap = null, taskRepoWorkroots = {} }) {
   const registered = new Set([...readOnlyThreads, ...builderThreads])
   if (PLANNING_PHASES.has(phase)) {
@@ -199,24 +199,19 @@ export function decideCodex({ isReply, sandbox, cwd, root, slug = null, threadId
     if (sandbox === "read-only") return { deny: false }
     if (sandbox !== "workspace-write")
       return { deny: true, reason: `빌더 codex sandbox는 정확히 "workspace-write"만(${JSON.stringify(sandbox)} 차단 — danger-full-access·미지정 불가)` }
-    const roots = [root]
-    const taskId = roots.map((r) => taskIdFromActiveTaskWorktree(r, slug, cwd)).find((id) => id != null)
-    const directRoot = roots.includes(cwd)
-    const allowedCwd = cwd != null && root != null && (directRoot || taskId != null)
-    if (!allowedCwd)
-      return { deny: true, reason: `빌더 codex cwd는 활성 repo root 또는 활성 task worktree로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)} 또는 그 task worktree)` }
+    // 0.13: 태스크별 worktree가 사라져 빌더 cwd는 활성 run root뿐이다. 이 가드가 task worktree cwd를
+    // 계속 허용하면 PostToolUse(registerBuilderAuto)가 귀속하지 못하는 호출을 열어, 리뷰·캡처 트리
+    // 밖에서 소스가 바뀐다 — 두 게이트의 허용 집합을 같게 유지한다.
+    if (cwd == null || root == null || cwd !== root)
+      return { deny: true, reason: `빌더 codex cwd는 활성 run root로 명시돼야 함(got ${JSON.stringify(cwd)}, expect ${JSON.stringify(root)})` }
     if (Array.isArray(buildingUnboundTasks)) {
-      if (taskId != null && !buildingUnboundTasks.includes(taskId))
-        return { deny: true, reason: `task worktree cwd의 task ${taskId}가 building·미바인딩 상태 아님` }
-      if (directRoot) {
-        if (pendingRunRootBootstrap) {
-          if (!buildingUnboundTasks.includes(pendingRunRootBootstrap) || taskRepoWorkroots[pendingRunRootBootstrap] !== cwd)
-            return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
-        } else {
-          const serialTaskId = buildingUnboundTasks.length === 1 ? buildingUnboundTasks[0] : null
-          if (!serialTaskId || taskRepoWorkroots[serialTaskId] !== cwd)
-            return { deny: true, reason: "run-root 빌더 부트스트랩은 marker 필요 — marker 없는 serial 예외는 단일 building-unbound일 때만" }
-        }
+      if (pendingRunRootBootstrap) {
+        if (!buildingUnboundTasks.includes(pendingRunRootBootstrap) || taskRepoWorkroots[pendingRunRootBootstrap] !== cwd)
+          return { deny: true, reason: `marker task ${pendingRunRootBootstrap}의 building 상태 또는 repo workroot와 cwd 불일치` }
+      } else {
+        const serialTaskId = buildingUnboundTasks.length === 1 ? buildingUnboundTasks[0] : null
+        if (!serialTaskId || taskRepoWorkroots[serialTaskId] !== cwd)
+          return { deny: true, reason: "run-root 빌더 부트스트랩은 marker 필요 — marker 없는 serial 예외는 단일 building-unbound일 때만" }
       }
     } else if (!hasBuildingUnbound)
       return { deny: true, reason: "빌더 workspace-write 호출은 building·미바인딩 task가 있을 때만(set-task로 표시 후) — 임의 쓰기 차단" }

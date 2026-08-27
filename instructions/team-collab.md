@@ -34,13 +34,13 @@ Teammate messages and idle notifications arrive only at the lead's turn boundari
 
 ## 5. Handoff to the review loop
 
-Team output enters the **existing DR loop without exception** — Codex as the design reviewer at the stated altitude (`n-arch/`, `n-contract/`), full ledger, contests, and revision cycle. Team-internal debate is same-provider and **does not replace a single cross-model review round**; never shorten the loop, lower the altitude, or pre-mark issues resolved because "the team already argued it".
+Team output enters the **existing DR loop without exception** — Codex as the design reviewer at the ARCH altitude (`n-arch/`), full ledger, contests, and revision cycle. Team-internal debate is same-provider and **does not replace a single cross-model review round**; never shorten the loop, lower the altitude, or pre-mark issues resolved because "the team already argued it".
 
 ## 6. Failure and abort
 
 - Team state is **disposable**: teammates do not survive session loss or `/resume`. Recovery is to restart the stage from the on-disk artifact, or to degrade to a single `harnie-designer` that continues from the partial artifact.
 - **Anomaly triggers**: the owner still silent after the §4 nudge, or artifact absent at the named path. On either, abandon the team and take the degradation path — do not retry the same team.
-- Record the abort in `notepad.md` (one append: stage, trigger, path taken) so the run's later stages and the digest see it.
+- Record the abort in `notepad.md` (one append: stage, trigger, path taken) so later stages see it.
 
 ## 7. Escalation from a solo subagent
 

@@ -144,7 +144,8 @@ test("isActiveTaskWorktree: 활성 slug의 직접 task worktree만 허용", () =
 test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building task", () => {
   const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": "/repo" } }
   assert.equal(decideCodex(base).deny, false)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, false)
+  // 0.13: 태스크별 worktree cwd는 더 이상 허용되지 않는다 — PostToolUse가 귀속할 수 없는 호출을 열지 않는다
+  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-other-t1" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
@@ -154,14 +155,6 @@ test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building
   assert.equal(decideCodex({ ...base, buildingUnboundTasks: [] }).deny, true)
   // marker 없는 run-root 호출은 별도 테스트(단일 building-unbound serial 예외)가 다룬다
   assert.equal(decideCodex({ ...base, pendingRunRootBootstrap: null, buildingUnboundTasks: ["1", "2"], taskRepoWorkroots: { "1": "/repo", "2": "/repo" } }).deny, true)
-})
-
-test("decideCodex: 복수 building 중 cwd가 가리키는 task의 첫 호출을 허용", () => {
-  const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", phase: "executing", buildingUnboundTasks: ["1", "2"] }
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, false)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t2" }).deny, false)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t3" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
 })
 
 test("decideCodex: marker 없는 root cwd는 단일 building-unbound일 때만 허용", () => {

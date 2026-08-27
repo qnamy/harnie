@@ -178,16 +178,18 @@ test("codex: planning workspace-write deny, read-only allow", () => {
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "read-only" }, cwd: root }), null)
 })
 
-test("codex: executing 첫 빌더 호출은 building task 자신의 worktree cwd만 allow", () => {
+test("codex: executing 첫 빌더 호출은 활성 run root cwd만 allow(0.13 — task worktree cwd 소멸)", () => {
   const { root } = setupRepo()
   toExecuting(root)
-  const taskWt = join(root, ".harnie-wt", "harnie-feat-x-tT1")
-  mkdirSync(taskWt, { recursive: true })
-  const ti = { sandbox: "workspace-write", cwd: taskWt }
+  const ti = { sandbox: "workspace-write", cwd: root }
   // 아직 building 표시 없음 → deny
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root })))
   exec(["set-task", "--root", root, "--slug", "feat-x", "--task", "T1", "--run-status", "building"])
   assert.equal(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: ti, cwd: root }), null)
+  // task worktree cwd는 PostToolUse가 귀속할 수 없으므로 PreToolUse에서 막는다
+  const taskWt = join(root, ".harnie-wt", "harnie-feat-x-tT1")
+  mkdirSync(taskWt, { recursive: true })
+  assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write", cwd: taskWt }, cwd: root })))
   // cwd 누락이면 building-unbound라도 deny
   assert.ok(deny(hook(PRE, { tool_name: "mcp__codex__codex", tool_input: { sandbox: "workspace-write" }, cwd: root })))
 })
