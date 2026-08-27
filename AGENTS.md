@@ -4,15 +4,15 @@
 
 런타임 계약의 정본은 `instructions/`, 설계 근거·이력은 `docs/`(architecture · execution-state · enforcement-map · design-0.11-process/-detail · design-0.10-restructure · bootstrap-adherence · codex-mechanisms · permission-prompt-reduction)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다).
 
-## 언어 정책 — 영문 정본 + 한국어 미러 (필수)
+## 언어 정책 — 영문 정본 + 한국어 미러는 요청 시에만 (2026-08-27 확정)
 
-`agents/`·`commands/`·`instructions/`·`skills/` 문서는 **영문(`*.md`)이 실행 정본**이다 — 에이전트·플러그인은 이 영문을 로드·실행한다. 그러나 각 영문 문서는 **한국어 미러(`*-ko.md`)를 항상 쌍으로 유지**해 사용자가 한국어로 읽을 수 있게 한다.
+`agents/`·`commands/`·`instructions/`·`skills/` 문서는 **영문(`*.md`)이 실행 정본**이다 — 에이전트·플러그인은 이 영문을 로드·실행한다. 한국어 미러(`*-ko.md`)는 **사람이 명시적으로 요청할 때만** 갱신하는 on-demand 번역이다.
 
-- **동시 갱신 필수**: `agents/foo.md`, `commands/foo.md`, `instructions/foo.md`, `skills/<name>/SKILL.md`(및 스킬 내 하위 문서)를 수정하면 **같은 변경을 대응 `*-ko.md`에도 반영**한다(내용 동등성 유지). 한쪽만 고쳐 두 버전이 어긋나게 두지 않는다.
-- **신규 추가**: 새 에이전트·커맨드·지침·스킬 문서를 만들 때도 **영문 정본 + 한국어 미러를 쌍으로** 만든다.
-- **정본 우선**: 충돌·모호 시 영문(`*.md`)이 실행 기준이고, `*-ko.md`는 사람이 읽기 위한 번역이다.
+- **동시 갱신 안 함**: 영문 문서를 고칠 때 대응 `*-ko.md`를 같이 갱신하지 않는다. ko 미러가 영문보다 **오래된 상태로 남는 것이 정상**이며, 세션이 이를 자동으로 동기화하지 않는다.
+- **삭제는 예외**: 영문 정본 파일을 삭제할 때는 대응 `*-ko.md`도 같이 삭제한다(고아 문서 금지).
+- **정본 우선**: 충돌·모호 시 영문(`*.md`)이 실행 기준이고, `*-ko.md`는 갱신 시점이 다를 수 있는 참고 번역이다.
 - **실행 대상 제한**: `agents/`·`commands/`의 `*-ko.md`가 별도 플러그인 컴포넌트로 자동 등록되지 않도록 `.claude-plugin/plugin.json`의 `agents`·`commands` 목록에는 영문 정본만 명시한다.
-- **CLAUDE.md ↔ AGENTS.md 미러**: 두 파일은 **동일 내용 미러**다(한쪽 수정 시 다른 쪽도 반드시 같이 갱신).
+- **CLAUDE.md ↔ AGENTS.md 미러**: 두 파일은 **동일 내용 미러**다(한쪽 수정 시 다른 쪽도 반드시 같이 갱신) — 이 규칙은 ko 미러 예외와 무관하게 유지된다.
 
 ## 릴리스 후속 — Codex 플러그인 동기화 (필수)
 
