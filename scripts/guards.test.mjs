@@ -147,11 +147,16 @@ test("decideBash: loop CLI는 활성 task worktree를 repo로 허용", () => {
   assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${other} --ledger ${other}/.harnie/review/code/ledger.json --review ${other}/.harnie/review/code/round-1.txt --ns CR --state ${other}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, true)
 })
 
-test("decideBash: sanctioned auto-allow는 4종만", () => {
+test("decideBash: sanctioned auto-allow 집합", () => {
   assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs capture /repo", ...ctx }).autoAllow, true)
   assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs delta /repo a --out .harnie/x", ...ctx }).autoAllow, true)
   assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs completion --root /repo --slug stale", ...ctx }).autoAllow, true)
   assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs seal-verify --root /repo --slug stale", ...ctx }).autoAllow, true)
+  // seal은 멱등·조건부(미검증 seal 위 오염 재-seal 거부)가 된 뒤 auto-allow 대상 — DR-005 해소
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs seal --root /repo --slug stale", ...ctx }).autoAllow, true)
+  // 단, 오염 흡수 차단을 해제하는 --after-mismatch 는 사용자 프롬프트로 되돌린다
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs seal --root /repo --slug stale --after-mismatch", ...ctx }).autoAllow, false)
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs seal --root /repo --slug stale --after-mismatch", ...ctx }).deny, false)
   assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs verify --root /repo --slug stale", ...ctx }).autoAllow, false)
 })
 

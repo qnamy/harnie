@@ -410,6 +410,59 @@ test("seal: advisory(execution.json) 변경은 mismatch 아님", () => {
   assert.equal(run(["seal-verify", "--root", root, "--slug", "feat-x"]).sealMismatch, false)
 })
 
+test("seal: 멱등 — 같은 권위 상태로 두 번 호출해도 거부 없이 같은 seal", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const first = run(["seal", "--root", root, "--slug", "feat-x"])
+  const stored = JSON.parse(readFileSync(join(dir, ".seal.json"), "utf8"))
+  const second = run(["seal", "--root", root, "--slug", "feat-x"])
+  assert.equal(second.ok, true)
+  assert.equal(second.sealHash, first.sealHash)
+  assert.equal(second.unchanged, true)
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, ".seal.json"), "utf8")), stored, "재호출로 seal 상태가 바뀌지 않는다")
+  assert.equal(run(["seal-verify", "--root", root, "--slug", "feat-x"]).sealMismatch, false)
+})
+
+test("seal: 미검증 seal 위의 baseline 오염 재-seal은 fail-closed, verify 후에는 재-seal 허용", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  mkdirSync(join(dir, "review", "task-a"), { recursive: true })
+  writeFileSync(join(dir, "review", "task-a", "ledger.json"), "{}")
+  const first = run(["seal", "--root", root, "--slug", "feat-x"])
+  // 빌더가 권위 ledger를 변경한 뒤 재-seal 시도 → 새 baseline으로 흡수되면 안 된다
+  writeFileSync(join(dir, "review", "task-a", "ledger.json"), '{"CR-001":{"id":"CR-001"}}')
+  const e = runFail(["seal", "--root", root, "--slug", "feat-x"])
+  assert.ok(e, "미검증 seal + 변경된 권위 상태의 재-seal은 거부")
+  assert.equal(JSON.parse(readFileSync(join(dir, ".seal.json"), "utf8")).sealHash, first.sealHash)
+  // seal-verify가 mismatch를 보고하며 seal을 소비한다
+  assert.ok(runFail(["seal-verify", "--root", root, "--slug", "feat-x"]).status === 3)
+  // 오염 상태 그대로의 재-seal은 여전히 거부 — mismatch 라운드의 오염이 다음 baseline으로 흡수되면 안 된다
+  assert.ok(runFail(["seal", "--root", root, "--slug", "feat-x"]), "mismatch 후 오염 상태 재-seal은 거부")
+  assert.equal(JSON.parse(readFileSync(join(dir, ".seal.json"), "utf8")).sealHash, first.sealHash)
+  // 명시 승인(--after-mismatch)으로만 새 baseline 인정
+  const forced = run(["seal", "--root", root, "--slug", "feat-x", "--after-mismatch"])
+  assert.notEqual(forced.sealHash, first.sealHash)
+  assert.equal(run(["seal-verify", "--root", root, "--slug", "feat-x"]).sealMismatch, false)
+})
+
+test("seal: mismatch 후 권위 파일을 복구하면 명시 승인 없이 원래 baseline으로 재-seal", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  mkdirSync(join(dir, "review", "task-a"), { recursive: true })
+  writeFileSync(join(dir, "review", "task-a", "ledger.json"), "{}")
+  const first = run(["seal", "--root", root, "--slug", "feat-x"])
+  writeFileSync(join(dir, "review", "task-a", "ledger.json"), '{"CR-001":{"id":"CR-001"}}')
+  assert.ok(runFail(["seal-verify", "--root", root, "--slug", "feat-x"]).status === 3)
+  writeFileSync(join(dir, "review", "task-a", "ledger.json"), "{}") // 복구
+  const again = run(["seal", "--root", root, "--slug", "feat-x"])
+  assert.equal(again.sealHash, first.sealHash)
+  assert.equal(again.recoveredFromMismatch, true)
+  assert.equal(run(["seal-verify", "--root", root, "--slug", "feat-x"]).sealMismatch, false)
+})
+
 test("verify: execFile로 실제 실행 + receipt(scopeHash·planHash)", () => {
   const root = gitRepo()
   // scope 파일 생성

@@ -58,6 +58,11 @@ matcher는 **앵커 정규식으로 확정**(설치 시 `Task`/`Agent`·MCP 정�
 ### 5.3 H3 실행 워치독 (advisory)
 태스크별 기본 예산은 wall-clock 30분과 빌더 Codex 호출 15회다. 80%에서는 PostToolUse additionalContext로 마무리·보고를 경고하고, 100%에서는 다음 빌더 호출을 PreToolUse에서 deny한다. 계속해야 하면 먼저 진행 상황과 블로커를 사용자에게 surface하고, 사용자 동의 근거를 `--reason`으로 남긴 `execution.mjs watchdog-extend`로만 예산을 재시작한다. 이 상태는 `execution.json`의 advisory 데이터이므로 읽기·계산·기록 오류는 §0.1의 실수-안전 경계에 맞춰 fail-open이며, 권위 가드의 fail-closed 동작을 바꾸지 않는다.
 
+### 5.4 seal 멱등·조건부 (0.13 T3 — DR-005 해소)
+`seal`은 `.seal.json`에 `verified:false`로 baseline을 기록하고, `seal-verify`가 판정과 함께 그 표식을 `verified:true`로 소비한다. **미검증 seal이 있는데 권위 상태가 그 사이 달라졌으면 재-seal은 fail-closed로 거부**한다 — 무조건 덮어쓰기를 허용하면 빌더가 만든 변경이 새 baseline으로 흡수되어 탐지 채널이 죽는다(DR-005가 지목한 baseline 오염). 같은 권위 상태의 재호출은 no-op(`unchanged:true`)이라 멱등이다. 이 두 성질 때문에 `seal`은 `seal-verify`·`completion`과 같은 auto-allow 집합에 들어간다(`docs/permission-prompt-reduction.md`) — 빌더 라운드마다 고정으로 발생하던 권한 프롬프트 1회가 사라진다. 탐지력은 변하지 않는다: mismatch 판정 경로와 exit 3은 그대로다.
+
+**mismatch 이후**: `seal-verify`는 판정 결과도 `.seal.json`에 남긴다(`mismatch:true`). mismatch가 기록된 뒤에는 오염된 상태 그대로의 재-seal이 **거부**된다 — 무효화된 라운드의 오염이 조용히 다음 baseline으로 흡수되면 탐지 채널이 한 번의 무효 라운드로 무력화되기 때문이다. 빠져나가는 길은 둘뿐이다: ① 권위 파일을 복구하면 해시가 원래 baseline으로 돌아와 재-seal이 no-op으로 통과한다(`recoveredFromMismatch`), ② 현재 상태를 새 baseline으로 인정하려면 `seal --after-mismatch`로 명시 승인한다. 이 플래그가 붙은 `seal`은 **auto-allow에서 제외**되어 사용자 프롬프트가 뜬다 — 자동 허용의 근거인 "엔진이 오염 흡수를 막는다"를 해제하는 유일한 경로이므로 사람이 본다.
+
 ## 6. read-only 코드 리뷰어 (DR-007)
 전용 `harnie-reviewer`(tools=`Read,Grep,Glob`만). 설계 리뷰어(Codex)는 `sandbox:read-only`. driver·quick·plan에서 main-inline 제거(C 구현).
 
@@ -80,3 +85,13 @@ repo root 상향 탐색·slug `^[A-Za-z0-9._-]+$`(traversal 차단)·realpath co
 - `hooks/hooks.json` + H1·H2(+PostToolUse 등록) 스크립트.
 - 음성 테스트: 빌더가 `.harnie/`에 실수 쓰기해도 delta 제외·loop.mjs fail-closed·완료 재도출 재검증으로 무해 / planning workspace-write·비승인 threadId codex-reply 차단·read-only 통과 / control·review-state 직접·Bash 조작 차단 / **execution.json/task 삭제해도 manifest 재도출로 Stop 차단** / **Stop 재호출에서 `HARNIE_STATUS:COMPLETE`(권위 incomplete)면 계속 차단·`INCOMPLETE`+blocker면 통과** / 검증실패·Final Wave REJECT 무효화 / planHash·traversal·symlink·부분기록 fail-closed / stale slug 무시.
 - loop.md·driver·quick·plan 동기화, `harnie-reviewer` 신설. 완료 후 **B(스왑 full-loop E2E)**.
+
+## 12. 난이도 재판정 배선 (0.13 T3 — `instructions/model-matrix.md` §2에서 이관)
+
+판정 규칙(무엇을 easy/medium/hard/very hard로 볼지, 언제 재판정하는지)은 매트릭스가 계속 소유한다. 아래는 그 판정이 엔진에 어떻게 실리는지의 배선 서사다 — 매트릭스에서 **삭제한 것이 아니라 여기로 옮겼다**.
+
+- **쓰기 대상 분리**: `set-difficulty`는 `execution.json`의 `difficulty`만 쓴다. `manifest.json`의 `difficulty`는 승인 시점에 `planHash`로 얼어붙으므로 절대 건드리지 않는다.
+- **읽기 우선순위**: `taskWatchdogUsage`는 `execution.json.difficulty`를 먼저 읽고, 재판정이 없던 run에서는 승인된 `manifest.json.difficulty`로 폴백한다.
+- **승인 前 동기화가 필요한 이유**: `arm-approval`은 `execution.json`이 아니라 `plan.md`를 읽는다. 그래서 M의 두 체크포인트(둘 다 A5 승인 앞)에서 재판정했다면 `plan.md` 자체(난이도 줄 + `harnie-manifest` 블록의 `"difficulty"`)를 같이 고쳐야 사용자가 승인하는 매니페스트와 실제 판정이 일치한다. 승인 後에는 `plan.md`를 다시 편집하지 않는다 — `planHash`가 어긋난다.
+- **워치독에 즉시 반영**: `resolveTaskDifficulty()`는 호출마다 디스크에서 다시 읽고(캐시 없음), `decideWatchdog()`은 건네받은 난이도 문자열로 `guards.mjs`의 정적 표 `WATCHDOG_TIERS`를 조회한다. 별도 배선이 없으므로 기록값이 바뀌는 순간 이미 `building`인 태스크의 예산에도 적용된다. **하향 조정은 무음 no-op가 아니다** — 이미 소모한 횟수/시간보다 낮은 `maxCodexCalls`·wall-clock으로 내려가면 다음 빌더 호출이 즉시 deny된다(advisory이므로 `watchdog-extend`로 복구 가능).
+- **모델 티어는 소급되지 않는다**: 체크포인트 前에 이미 APPROVED된 리뷰 유닛은 리뷰받은 티어를 유지한다. 러닝 중 바뀔 수 있는 것은 워치독 예산뿐이다.

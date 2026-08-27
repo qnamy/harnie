@@ -64,7 +64,7 @@ try {
     } else if (toolName === "Bash") {
       const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, activeRuns })
       if (d.deny) denyPreTool(d.reason)
-      else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal-verify) — active repo 바인딩·경로 containment 검증됨")
+      else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal·seal-verify) — active repo 바인딩·경로 containment 검증됨")
       else allow()
     } else if (toolName === "Task" || toolName === "Agent") {
       const d = decideTask({ subagentType: input.subagent_type, phase })

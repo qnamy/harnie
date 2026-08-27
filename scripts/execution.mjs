@@ -1150,9 +1150,30 @@ function cmdSeal({ flags }) {
   const slug = flags.slug || die("--slug 필요")
   guardActive(flags, track)
   const dir = planDir(root, track, slug)
+  const sealPath = join(dir, ".seal.json")
   const files = collectAuthorityFiles(root, track, slug)
   const hash = sealHashOf(files)
-  writeJSONAtomic(join(dir, ".seal.json"), { sealHash: hash, files: files.map((f) => f.path), at: new Date().toISOString() })
+  // 멱등·조건부(DR-005 해소): 아직 seal-verify로 소비되지 않은 seal 위에 **다른** baseline을 덮어쓰면
+  // 빌더가 만든 변경이 새 baseline으로 흡수되어 탐지 채널이 죽는다. 같은 baseline이면 no-op, 다르면 fail-closed.
+  if (existsSync(sealPath)) {
+    const prev = readJSONStrict(sealPath)
+    if (!prev.verified) {
+      if (prev.sealHash !== hash) die("미검증 seal이 있는데 권위 상태가 변경됨 — seal-verify 먼저, fail-closed")
+      out({ ok: true, sealHash: hash, unchanged: true })
+      return
+    }
+    // mismatch로 무효화된 라운드의 오염 상태를 다음 baseline으로 조용히 흡수하지 못하게 한다.
+    // 복구했다면 해시가 되돌아와 아래 no-op 경로로 통과하고, 오염 상태를 새 baseline으로 인정하려면
+    // --after-mismatch 로 명시 승인해야 한다(이 플래그가 붙은 seal은 auto-allow에서 제외 = 사용자 프롬프트).
+    if (prev.mismatch && prev.sealHash !== hash && !flags["after-mismatch"])
+      die("직전 seal-verify가 SEAL MISMATCH를 기록했고 권위 상태가 아직 그 baseline과 다름 — 권위 파일을 복구해 재-seal하거나, 현재 상태를 새 baseline으로 인정하려면 --after-mismatch")
+    if (prev.mismatch && prev.sealHash === hash) {
+      writeJSONAtomic(sealPath, { ...prev, mismatch: false, verified: false })
+      out({ ok: true, sealHash: hash, unchanged: true, recoveredFromMismatch: true })
+      return
+    }
+  }
+  writeJSONAtomic(sealPath, { sealHash: hash, files: files.map((f) => f.path), at: new Date().toISOString(), verified: false })
   out({ ok: true, sealHash: hash })
 }
 
@@ -1165,7 +1186,11 @@ function cmdSealVerify({ flags }) {
   if (!existsSync(sealPath)) die("seal 없음 — 먼저 seal 필요, fail-closed")
   const stored = readJSONStrict(sealPath)
   const hash = sealHashOf(collectAuthorityFiles(root, track, slug))
-  if (hash !== stored.sealHash) {
+  // 검증했다는 사실과 그 결과를 기록한다(판정은 아래 그대로). 이 소비 표식이 있어야 다음 라운드의 seal이 멱등 조건을 통과하고,
+  // mismatch 표식은 오염 상태가 조용히 다음 baseline이 되는 것을 seal 쪽에서 막는 근거가 된다.
+  const mismatch = hash !== stored.sealHash
+  if (!stored.verified || stored.mismatch !== mismatch) writeJSONAtomic(sealPath, { ...stored, verified: true, mismatch })
+  if (mismatch) {
     process.stderr.write(`harnie-exec: SEAL MISMATCH — 빌더가 권위 파일을 변경(그 라운드 무효)\n`)
     out({ ok: false, sealMismatch: true, stored: stored.sealHash, actual: hash })
     process.exit(3)

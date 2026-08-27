@@ -149,16 +149,16 @@ test("Bash: .harnie 변형 deny, 신뢰 경로 sanctioned 4종 auto-allow, 임�
   assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node /tmp/scripts/loop.mjs capture " + root }, cwd: root }), null)
 })
 
-test("Bash: sanctioned auto-allow는 4종만 — apply/verify/seal 등은 통과하되 프롬프트(무의견)", () => {
+test("Bash: sanctioned auto-allow 집합 — apply/verify 등은 통과하되 프롬프트(무의견)", () => {
   const { root, dir } = setupRepo()
   const rev = join(dir, "review", "task-a")
-  // completion·seal-verify(execution.mjs) auto-allow
+  // completion·seal·seal-verify(execution.mjs) auto-allow
   assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " completion --root " + root + " --slug feat-x" }, cwd: root })))
   assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal-verify --root " + root + " --slug feat-x" }, cwd: root })))
-  // apply(loop.mjs)·verify/seal(execution.mjs)는 sanctioned지만 auto-allow 아님 → 무의견(null=프롬프트)
+  // apply(loop.mjs)·verify(execution.mjs)는 sanctioned지만 auto-allow 아님 → 무의견(null=프롬프트)
   assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + REAL_LOOP + " apply --root " + root + " --ledger " + join(rev, "ledger.json") + " --review " + join(rev, "round-1.txt") + " --ns CR --state " + join(rev, "state.json") + " --artifact " + "0".repeat(40) }, cwd: root }), null)
   assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " verify --root " + root + " --slug feat-x --task T1" }, cwd: root }), null)
-  assert.equal(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal --root " + root + " --slug feat-x" }, cwd: root }), null)
+  assert.ok(autoAllow(hook(PRE, { tool_name: "Bash", tool_input: { command: "node " + EXEC + " seal --root " + root + " --slug feat-x" }, cwd: root })))
 })
 
 test("Bash: bare node가 아닌 인터프리터는 sanctioned 아님", () => {

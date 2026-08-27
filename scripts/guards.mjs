@@ -179,7 +179,7 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
   return false
 }
 
-const AUTO_ALLOW_SUB = { "loop.mjs": new Set(["capture", "delta", "export"]), "execution.mjs": new Set(["completion", "seal-verify"]) }
+const AUTO_ALLOW_SUB = { "loop.mjs": new Set(["capture", "delta", "export"]), "execution.mjs": new Set(["completion", "seal", "seal-verify"]) }
 function hasValidActiveContext(root, slug, track) {
   return typeof root === "string" && root.length > 0 && typeof slug === "string" && slug.length > 0 && (track === "plan" || track === "quick")
 }
@@ -187,6 +187,8 @@ function isAutoAllowSanctionedSub(cmd) {
   const toks = cmd.trim().split(/\s+/)
   const script = toks[1] || "", sub = toks[2]
   if (sub == null || sub.startsWith("--")) return false
+  // seal의 자동 허용 근거는 "오염 흡수를 엔진이 막는다"인데, --after-mismatch는 바로 그 차단을 해제하는 승인이다 → 사용자 프롬프트로 되돌린다.
+  if (sub === "seal" && toks.includes("--after-mismatch")) return false
   for (const [name, subs] of Object.entries(AUTO_ALLOW_SUB)) if (script.endsWith(name) && subs.has(sub)) return true
   return false
 }

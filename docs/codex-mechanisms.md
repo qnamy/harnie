@@ -48,3 +48,10 @@ harnie 구현이 의존하는 외부 메커니즘의 **확정 사실**. codex �
 - **스왑 풀 루프 E2E (B)**: Codex 빌더 REJECT→codex-reply 수정→Claude 리뷰 APPROVE 1사이클 end-to-end. 이 문서 작성 시점에는 미실행이었으나 **2026-08-10 통과 완료**(배포 ⑦ 前 P0 게이트였음).
 - **플러그인 설치 검증(⑦)**: 위 E2E는 **로컬 .mcp.json**(툴명 `mcp__codex__codex`)로 수행하므로, 개인 GitHub push 후 **플러그인 설치** 시 `mcp__plugin_harnie_codex__*`로 뜨는지는 배포 단계(⑦)에서 별도 확인(B와 분리).
 - 스킬(`quick`/`plan`)이 플러그인 로드 상태에서 `${CLAUDE_PLUGIN_ROOT}` 치환·canonical Read 주입까지 포함해 end-to-end로 도는 라이브 실행도 ⑦에서 확인(현재는 스크립트·codex 메커니즘 단위로 검증).
+
+## effort 오버라이드 실측 (2026-08-26 · `instructions/model-matrix.md`에서 이관)
+
+- Codex MCP 호출부는 `config: {model_reasoning_effort: "high"}`로 **호출 스코프 reasoning effort**를 줄 수 있다. 키 이름 `model_reasoning_effort`의 오타는 Codex가 **무음으로 무시**하므로 철자가 중요하다.
+- Agent 툴로 디스패치되는 Claude 서브에이전트에는 effort 필드가 **없다**(부재 확인). 그래서 Claude 쪽 very-hard 티어는 effort가 아니라 **모델 승급**으로만 표현된다.
+- 검증 출처: `~/Tradlinx/task2-recovery/effort-e2e.md`.
+
