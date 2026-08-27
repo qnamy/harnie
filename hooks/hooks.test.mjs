@@ -437,6 +437,36 @@ test("resolveRoot: 세션이 이미 worktree 안에서 시작했으면(cwd 자�
   assert.equal(resolveRoot(join(wt, "src"), "no-binding-sid"), wt)
 })
 
+test("resolveRoot(③): 바인딩 조회 실패 + cwdRoot에 활성 run 없음 + 등록 run 1개면 그 workroot로 해석", () => {
+  const repo = gitRepo("harnie-resolve-3-")
+  const wt = createWorktree({ repo, branch: "harnie/only-run" }).worktreePath
+  mkdirSync(join(wt, ".harnie"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "active.json"), JSON.stringify({ slug: "only-run", track: "plan" }))
+  // 이 세션의 바인딩이 없다(세션 id가 바뀐 경우) — ②라면 main repo로 떨어져 게이트가 풀린다.
+  assert.equal(real(resolveRoot(join(repo, "src"), "rotated-sid")), real(wt))
+  assert.equal(real(resolveRoot(join(repo, "src"), null)), real(wt)) // session_id 없는 payload도 동일
+})
+
+test("resolveRoot(③): 등록 run이 2개 이상이면 모호하므로 ② 유지(cwdRoot)", () => {
+  const repo = gitRepo("harnie-resolve-3b-")
+  for (const slug of ["run-a", "run-b"]) {
+    const wt = createWorktree({ repo, branch: `harnie/${slug}` }).worktreePath
+    mkdirSync(join(wt, ".harnie"), { recursive: true })
+    writeFileSync(join(wt, ".harnie", "active.json"), JSON.stringify({ slug, track: "plan" }))
+  }
+  assert.equal(real(resolveRoot(join(repo, "src"), "rotated-sid")), real(repo))
+})
+
+test("resolveRoot(③): cwdRoot 자신에 활성 run이 있으면 ③은 발동하지 않는다", () => {
+  const repo = gitRepo("harnie-resolve-3c-")
+  mkdirSync(join(repo, ".harnie"), { recursive: true })
+  writeFileSync(join(repo, ".harnie", "active.json"), JSON.stringify({ slug: "in-place", track: "plan" }))
+  const wt = createWorktree({ repo, branch: "harnie/other-run" }).worktreePath
+  mkdirSync(join(wt, ".harnie"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "active.json"), JSON.stringify({ slug: "other-run", track: "plan" }))
+  assert.equal(real(resolveRoot(join(repo, "src"), "rotated-sid")), real(repo))
+})
+
 test("세션 바인딩: write/read/resolveRoot가 그걸 따라가고, clear 후엔 findRoot로 폴백(②)", () => {
   const root = gitRepo("harnie-resolve-2-")
   const wt = mkdtempSync(join(tmpdir(), "harnie-fake-wt-"))

@@ -2,7 +2,7 @@
 
 **AI 서브에이전트 개발 하네스 + 스킬 허브** — Claude Code 플러그인. 한 세션에서 Claude와 Codex(GPT)를 조합해 **설계 → 설계 리뷰 → 개발 → 코드 리뷰**를 돌린다. 구독 로그인만으로 동작하고 API 키는 쓰지 않는다.
 
-`v0.13.0` · 테스트 282 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · MIT
+`v0.13.1` · 테스트 288 pass / 0 fail (`node --test scripts/*.test.mjs hooks/*.test.mjs`) · MIT
 
 산출물의 producer와 리뷰어는 서로 다른 프로바이더에 배정한다. 자기 산출물을 리뷰하는 모델은 자기 맹점을 그대로 통과시킨다. 배정 자체는 스킬 본문과 [instructions/model-matrix.md](instructions/model-matrix.md)가 정하는 규약이고, 리뷰어가 파일을 쓰지 못하는 것은 `agents/*.md` frontmatter의 `tools` allowlist가 기계로 막는다.
 

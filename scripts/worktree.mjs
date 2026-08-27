@@ -97,11 +97,11 @@ export function createWorktree({ repo, branch, from = null }) {
   return { worktreePath: dir, created: true }
 }
 
-// remove --repo <abs> --branch <name> [--delete-branch] : worktree 제거. **기본은 브랜치 유지**(T2 스펙 §1)
+// remove --repo <abs> --branch <name> [--delete-branch] [--abandon] : worktree 제거. **기본은 브랜치 유지**(T2 스펙 §1)
 // — 브랜치까지 지우려면 --delete-branch를 명시(-d, 안전삭제 — 미병합 커밋이 있으면 git이 거부해 fail-closed).
 // 기본을 "삭제"로 두면 흔한 정리 케이스(미완료·미병합 run 정리)에서 worktree는 이미 지워졌는데 branch -d만
 // 실패해 부분 상태 + 오해하기 쉬운 에러가 남는다 — 기본 유지가 그 부분-실패 창을 없앤다.
-export function removeWorktree({ repo, branch, deleteBranch = false }) {
+export function removeWorktree({ repo, branch, deleteBranch = false, abandon = false }) {
   if (!repo || typeof repo !== "string") throw new Error("--repo 필요")
   if (!branch || typeof branch !== "string") throw new Error("--branch 필요")
   const dir = worktreeDirFor(repo, branch)
@@ -118,7 +118,11 @@ export function removeWorktree({ repo, branch, deleteBranch = false }) {
   // 두 rename 사이에 프로세스가 죽으면 `.harnie-wt/.harnie-stash-*`에 고아로 남을 수 있으나(데이터 소실은 아님),
   // 복구 경로는 그 디렉터리를 그대로 `<dir>/.harnie`로 옮기는 것뿐이다(§0.1: 적대적 방어·프로세스 크래시 복구는 비목표).
   let stashRoot = null, stashPath = null
-  if (existsSync(harniePath) && !hasRunState && onlyHarnie) {
+  // 기본은 run 상태가 있으면 stash하지 않는다 — 살아 있는 run을 정리 명령 한 번으로 지우지 않기 위해서다(T8).
+  // 그 결과 실패·폐기된 run의 워크트리는 정상 경로로 지울 수 없었다(remove가 미커밋 `.harnie/`에 걸려 실패하고,
+  // Bash rm은 가드가 막는다). --abandon은 그 데드엔드만 연다: 사용자가 폐기를 명시했을 때만 run 상태를 stash로
+  // 넘겨 remove를 진행시킨다. 소스 변경이 남아 있으면(onlyHarnie=false) 여전히 stash하지 않고 실패한다.
+  if (existsSync(harniePath) && (abandon || !hasRunState) && onlyHarnie) {
     stashRoot = mkdtempSync(join(repo, ".harnie-wt", ".harnie-stash-"))
     stashPath = join(stashRoot, ".harnie")
     renameSync(harniePath, stashPath)
@@ -160,7 +164,7 @@ function cmdCreate({ flags }) {
   catch (e) { die(e.message) }
 }
 function cmdRemove({ flags }) {
-  try { out(removeWorktree({ repo: flags.repo, branch: flags.branch, deleteBranch: flags["delete-branch"] === true })) }
+  try { out(removeWorktree({ repo: flags.repo, branch: flags.branch, deleteBranch: flags["delete-branch"] === true, abandon: flags.abandon === true })) }
   catch (e) { die(e.message) }
 }
 

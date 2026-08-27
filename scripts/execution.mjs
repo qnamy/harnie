@@ -504,6 +504,17 @@ export function loadContext(root) {
   return { active: true, root, track: s.track, slug: s.slug, mode, authority, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
 }
 
+// "state.json 없음"만으로는 리뷰를 안 돌린 것과 다른 유닛 이름에 기록한 것이 구분되지 않는다 — 실제로
+// 관측된 혼동이다. 실재하는 유닛 디렉터리 이름을 그대로 붙여 그 둘을 가른다(진단 문자열일 뿐 권위 아님).
+function describeReviewDir(dir) {
+  const reviewDir = join(dir, "review")
+  if (!existsSync(reviewDir)) return "review/ 디렉터리 없음 — 리뷰 라운드 미실행"
+  let units
+  try { units = readdirSync(reviewDir) } catch { return "review/ 디렉터리 읽기 실패" }
+  if (!units.length) return "review/ 비어 있음 — 리뷰 라운드 미실행"
+  return `review/ 하위: [${units.join(", ")}] — S의 유닛 이름은 code여야 한다`
+}
+
 export function computeCompletion(root, track, slug) {
   const dir = planDir(root, track, slug)
   const mode = readMode(root, track, slug)
@@ -512,7 +523,8 @@ export function computeCompletion(root, track, slug) {
     // reviewedPostSHA=현재 tree 바인딩이 완료 권위다(검증 증거는 리뷰 前 수행되어 리뷰 APPROVE가 보증).
     const blockers = []
     const state = readJSONOrNull(join(dir, "review", "code", "state.json"))
-    if (!state || state.machineState !== "APPROVED") blockers.push(`S: review/code 미승인(machineState=${state ? state.machineState : "없음"})`)
+    if (!state) blockers.push(`S: review/code 미승인(state.json 없음 — ${describeReviewDir(dir)})`)
+    else if (state.machineState !== "APPROVED") blockers.push(`S: review/code 미승인(machineState=${state.machineState})`)
     else if (!state.reviewedPostSHA) blockers.push("S: reviewedPostSHA 없음 — 리뷰 tree 바인딩 불가")
     else {
       let current = null

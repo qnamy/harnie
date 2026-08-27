@@ -137,7 +137,7 @@ export function decideActiveRunDeletion(cmd, activeRuns = []) {
   if (!wantsWorktreeRemoval && !wantsBranchRemoval) return { deny: false }
   for (const run of activeRuns) {
     if (wantsWorktreeRemoval && commandTargetsWorktree(s, run.worktreePath))
-      return { deny: true, reason: `활성 run(slug=${run.slug})의 워크트리 삭제 금지 — 정리하려면 worktree.mjs remove --repo <repo> --branch ${run.branch}[--delete-branch]를 쓰거나, run을 완료·폐기한 뒤 다시 시도하세요` }
+      return { deny: true, reason: `활성 run(slug=${run.slug})의 워크트리 삭제 금지 — 정리하려면 worktree.mjs remove --repo <repo> --branch ${run.branch}[--delete-branch]를 쓰세요. run을 폐기하는 것이면 같은 명령에 --abandon을 더하면 run 상태까지 함께 정리됩니다` }
     if (wantsBranchRemoval && commandTargetsBranch(s, run.branch))
       return { deny: true, reason: `활성 run(slug=${run.slug})의 브랜치(${run.branch}) 삭제 금지 — worktree.mjs remove --delete-branch를 쓰거나, run을 완료·폐기한 뒤 다시 시도하세요` }
   }

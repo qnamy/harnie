@@ -88,12 +88,23 @@ export function clearSessionBinding(root, sessionId) {
 //    있는(흔한) 경우. **이게 항상 먼저다**: cwdRoot 자신에 (이 세션과 무관한) active.json이 남아 있다고 해서
 //    (예: 다른 세션의 quick 트랙 잔재, pre-T2 run, 완료 후 정리 전 상태) 그걸 이 세션의 run으로 오인해선 안
 //    된다 — 그러면 이 세션 자신의 worktree run이 H1·H2 보호 없이 통째로 무방비가 된다(CR-003).
+//    ①의 "먼저"는 cwdRoot 안에서의 우선순위다 — 바인딩 파일은 cwdRoot 아래에서만 찾으므로, cwd가 이미 어떤
+//    worktree 안이면 main root의 바인딩은 조회되지 않는다(그 경우 ②가 옳은 답을 낸다).
 // ② 바인딩이 없거나 workroot가 사라졌으면(정리됨 등) findRoot 그대로 — 여기엔 "세션이 이미 worktree 안에서
 //    시작"(findRoot이 그 `.git`에서 멈춤)과 "비-worktree run(quick 트랙 등)·비활성" 둘 다 하위호환으로 흡수된다.
+// ③ ②로 떨어졌는데 cwdRoot 자신에는 활성 run이 없고 등록된 run worktree가 **정확히 1개**면 그걸 쓴다. 세션
+//    id가 바뀌어(resume 등) 바인딩 조회가 실패하는 경우가 여기 걸린다 — 그대로 두면 활성 root가 main으로
+//    떨어져 capture가 deny되는 동시에 H1·H2 게이트가 통째로 풀린다(관측된 증상). 2개 이상이면 어느 run인지
+//    결정할 근거가 없으므로 ②를 유지한다. 새 상태 파일 없이, 오늘 이미 오답을 내는 경로에서만 발동한다.
 export function resolveRoot(cwd, sessionId) {
   const cwdRoot = findRoot(cwd)
   const b = sessionId ? readSessionBinding(cwdRoot, sessionId) : null
-  return b && existsSync(b.workroot) ? b.workroot : cwdRoot
+  if (b && existsSync(b.workroot)) return b.workroot
+  if (!existsSync(join(cwdRoot, ".harnie", "active.json"))) {
+    const runs = listActiveRunWorktrees(cwdRoot)
+    if (runs.length === 1) return runs[0].worktreePath
+  }
+  return cwdRoot
 }
 
 export function sentinelSessionIds(root) {

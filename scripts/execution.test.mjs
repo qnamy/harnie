@@ -1234,6 +1234,19 @@ test("computeCompletion(S): APPROVED + 현재 트리 바인딩만 complete, 트�
   assert.ok(c2.blockers.some((b) => /리뷰 후 변경/.test(b)))
 })
 
+test("computeCompletion(S): state.json 없을 때 blocker가 리뷰 미실행과 유닛 이름 오기를 구분한다", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "S")
+  const b0 = computeCompletion(root, "plan", "feat-x").blockers.join("\n")
+  assert.match(b0, /review\/ 디렉터리 없음/) // 리뷰를 아예 안 돌림
+  mkdirSync(join(root, ".harnie", "plan", "feat-x", "review", "cr"), { recursive: true })
+  const b1 = computeCompletion(root, "plan", "feat-x").blockers.join("\n")
+  assert.match(b1, /review\/ 하위: \[cr\]/) // 다른 유닛 이름에 기록됨
+  assert.match(b1, /code여야 한다/)
+})
+
 test("registerBuilderAuto(S): run root cwd만 암묵 t1에 귀속, 타 cwd는 fail-closed", () => {
   const root = gitRepo()
   writePlan(root, "feat-x")

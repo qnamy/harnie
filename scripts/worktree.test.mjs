@@ -130,6 +130,27 @@ test("remove: active.json이 있는 run worktree의 권위 상태는 자동 정�
   assert.ok(existsSync(active))
 })
 
+test("remove --abandon: run 상태가 있어도 제거된다(폐기 의도를 명시했을 때만)", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/abandon-me" }).worktreePath
+  mkdirSync(join(wt, ".harnie", "plan", "x"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "active.json"), "{}\n")
+  writeFileSync(join(wt, ".harnie", "plan", "x", "execution.json"), "{}\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/abandon-me" }), /git worktree remove 실패/) // 기본은 그대로 거부
+  assert.doesNotThrow(() => removeWorktree({ repo, branch: "harnie/abandon-me", abandon: true }))
+  assert.equal(existsSync(wt), false)
+})
+
+test("remove --abandon: 소스 변경이 남아 있으면 여전히 거부(폐기는 .harnie만 넘긴다)", () => {
+  const repo = gitRepo()
+  const wt = createWorktree({ repo, branch: "harnie/abandon-dirty" }).worktreePath
+  mkdirSync(join(wt, ".harnie"), { recursive: true })
+  writeFileSync(join(wt, ".harnie", "active.json"), "{}\n")
+  writeFileSync(join(wt, "src.txt"), "uncommitted work\n")
+  assert.throws(() => removeWorktree({ repo, branch: "harnie/abandon-dirty", abandon: true }), /git worktree remove 실패/)
+  assert.ok(existsSync(join(wt, "src.txt")))
+})
+
 test("remove: bootstrap 중 plan 상태만 있는 run worktree도 자동 정리하지 않음", () => {
   const repo = gitRepo()
   const wt = createWorktree({ repo, branch: "harnie/bootstrap-state" }).worktreePath
