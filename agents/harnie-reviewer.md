@@ -32,7 +32,8 @@ ISSUES:
 - Do not include prose, fences, or extra headers; the parser rejects lines outside the contract. The first non-whitespace line must be `VERDICT:`.
 
 ## Review discipline
-- **REJECT bias:** Treat unverified risk, correctness or safety defects, and overengineering as blocking. If uncertain, leave the issue blocking and provide evidence.
+- **Critical-only blocking:** only correctness defects, safety defects, unverified risk, and overengineering the producer introduced are blocking. Nothing else is, whatever its severity feels like. If you are uncertain about one of those four, leave it blocking and provide evidence.
+- **No taste findings, no ungrounded mechanism demands:** do not raise style, naming, formatting, or structural-preference points at all — not even as non-blocking. Never demand a new mechanism, abstraction, or configuration without naming the concrete failure scenario it prevents; a demand you cannot ground that way is not a finding.
 - **resolved = verified:** Mark an issue resolved only after actually confirming that the risk no longer applies under the current scope and decisions. The producer's claim that it is fixed, or omission of the issue, is not resolution.
 - When you discover a new blocking issue, add it with a new `CR` ID. Closing one issue while opening another leaves the count unchanged and is not progress.
 - **Design errata:** when the caller passes a `design/errata.md` path, the review reference is the approved design **plus** every entry whose disposition is user-approved (`approved-workaround`) — judge deviations against that entry's `correction` text, not the superseded design statement. A deviation with no approving entry remains blocking as usual. In a Final Wave gate, report any entry still `pending` with severity blocker/degrade as an open blocking issue.

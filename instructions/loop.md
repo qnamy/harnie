@@ -52,6 +52,8 @@ Contract:
 
 Accept or reject each finding by whether fixing it is *necessary*, not by its severity label. Accept: it prevents a concrete failure or misreading, it names a real defect (factual error, broken reference), or it's low-cost with clear value. Reject: it adds a mechanism with no concrete mistake scenario, expands scope, or is a taste-only polish. Never accept everything wholesale, and never leave everything unfixed wholesale.
 
+A non-blocking finding's default is **unfixed**: it stays open in the ledger and is reported open at completion — fix it only when the necessity test above says fixing is necessary.
+
 Accepted non-blocking fixes ride in the same round as blocking fixes — no separate non-blocking-only re-review round.
 
 Rejected findings are passed to the next reviewer call with the rejection reason so they're excluded from re-review scope (no reappearing). Blocking rejections follow the contest gate above (altitude/overengineering grounds, reviewer settles it); non-blocking rejections need only be passed along. Completion is unchanged: blocking count zero.
