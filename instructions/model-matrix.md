@@ -25,6 +25,17 @@ Judge **easy / medium / hard / very hard** at entry, alongside the provisional s
 
 ## 3. Model Assignment
 
+**This file solely owns the tier → (Claude model, Codex model) mapping.** Agent bodies (`agents/*.md`) and skill bodies (`skills/*/SKILL.md`) name **tier symbols T1–T4 only**, never a concrete model name, so replacing a model generation is a one-file edit here. The one exception is an agent's frontmatter `model:` field — that is the Claude dispatch adapter, not prose, and takes a concrete name.
+
+| Tier | Claude | Codex |
+|---|---|---|
+| T1 | haiku | `gpt-5.6-luna` (`gpt-5.3-codex-spark` when purely mechanical) |
+| T2 | sonnet | `gpt-5.6-terra` |
+| T3 | opus | `gpt-5.6-sol` |
+| T4 | fable (fallback: opus at effort high) | `gpt-5.6-sol` at effort high |
+
+The role tables below stay in concrete names — they are this file's own mapping surface.
+
 **Producers (by difficulty):**
 
 | Producer role | easy | medium | hard | very hard |
@@ -43,9 +54,7 @@ Judge **easy / medium / hard / very hard** at entry, alongside the provisional s
 | Final Review (L, single unit — last line of defense) | **opus** | **opus** | **opus** | **opus** (effort high) |
 | Design reviewer (Codex, all `DR` loops) | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` | `gpt-5.6-sol` (effort high) |
 
-**Tier-naming legend** (shorthand overlay only — the tables above are canonical): T1 = haiku/luna, T2 = sonnet/terra, T3 = opus/sol, T4 = fable/sol+high.
-
-**Fixed:** `harnie-scout` = haiku (frontmatter-pinned).
+**Exploration (`harnie-scout`):** default **T1**; **T2** when the exploration needs semantic or structural judgment (what a boundary means, which of several patterns a file follows). The axis is judgment density, not how much there is to search. The frontmatter model pin is removed, so the caller picks the tier per call.
 
 **Effort-override footnote (VERIFIED 2026-08-26):** Codex MCP call sites can set call-scoped reasoning effort with `config: {model_reasoning_effort: "high"}`; a typo in the exact `model_reasoning_effort` key is silently ignored by Codex, so its spelling matters. Claude subagents dispatched through the Agent tool have no effort field (confirmed absent), so those call sites can only use model-tier upgrades for the very-hard tier, never an effort override. Verification source: `~/Tradlinx/task2-recovery/effort-e2e.md`.
 

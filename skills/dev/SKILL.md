@@ -18,7 +18,7 @@ The entry command judged a provisional size; **if you entered without it** (dire
 
 ## MUST
 
-- **Grounding before questions**: spawn `harnie-scout` (haiku) in parallel for anything unfamiliar; decide from files, not assumptions. Ask the user only what evidence cannot settle (product intent, materially different interpretations, costly-if-wrong guesses, external context) — ≤3 questions per round, each with evidence, options, impact, and your recommended default; record adopted defaults as assumptions in the plan.
+- **Grounding before questions**: spawn `harnie-scout` (T1; T2 when the exploration needs semantic or structural judgment — `model-matrix.md` §3) in parallel for anything unfamiliar; decide from files, not assumptions. Ask the user only what evidence cannot settle (product intent, materially different interpretations, costly-if-wrong guesses, external context) — ≤3 questions per round, each with evidence, options, impact, and your recommended default; record adopted defaults as assumptions in the plan.
 - **Every modification is reviewed**; ledger/state move only through `loop.mjs apply` (`review-loop-driver.md` R1–R5). Apply round N (`committed: true`) before any next producer call.
 - **Delegation by disk paths of record only** — criteria/profiles/designs are paths the delegate Reads; never inline their contents, never pass tool-result blob paths. Exception: the builder gets brief/design **content** inlined (never a `.harnie` path) plus the `builder-contract.md` path.
 - **Contest instead of over-complying** (`loop.md` contest gate): an out-of-altitude or unjustified-mechanism blocking finding gets a CONTEST, settled by the reviewer's next response or immediate user escalation. Correctness/safety findings are never contested.
