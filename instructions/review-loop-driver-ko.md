@@ -2,9 +2,9 @@
 
 `loop.md`가 계약(ledger, 전이, progress, contest)을 소유하고, 이 파일은 그것을 결정적으로 실행하는 방법을 소유한다. ledger 병합이나 상태 전이 판정을 절대 수동으로 하지 않는다 — `scripts/loop.mjs`가 거짓 승인을 막는다.
 
-**리뷰어 = `harnie:dev`에서 생산자의 반대 제공자.** 설계 루프(`DR`): 생산자 Claude designer → 리뷰어 Codex(`sandbox:"read-only"`). 코드 루프(`CR`): 생산자 Codex builder → 리뷰어 Claude(`harnie-reviewer` 서브에이전트 — 또는 L 러너 경로에서는 해당 태스크의 `harnie-task-runner` 인라인, 소스를 쓰지 않으므로 정당하다). **예외는 dev-solo다**: 생산자와 리뷰어가 둘 다 Codex다 — 리뷰어는 서브에이전트가 아니라 fresh하고 컨텍스트가 격리된 `codex exec --sandbox read-only` 셀프리뷰 서브프로세스다(`skills/dev-solo/SKILL.md` 참고).
+**리뷰어 = `harnie:dev`에서 생산자의 반대 제공자.** 설계 루프(`DR`): 생산자 Claude designer → 리뷰어 Codex(`sandbox:"read-only"`). 코드 루프(`CR`): 생산자 Codex builder → 리뷰어 Claude(`harnie-reviewer` 서브에이전트). **예외는 dev-solo다**: 생산자와 리뷰어가 둘 다 Codex다 — 리뷰어는 서브에이전트가 아니라 fresh하고 컨텍스트가 격리된 `codex exec --sandbox read-only` 셀프리뷰 서브프로세스다(`skills/dev-solo/SKILL.md` 참고).
 
-`<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = 리뷰 유닛 디렉터리(`.harnie/plan/<slug>/review/<unit>/`, 또는 태스크 worktree 내부의 `.harnie/review/<design|code>/`). `<repo>` = 이 루프가 다루는 루트 — run workroot, 또는 L 경로에서 태스크의 격리 worktree / 멤버 레포 workroot.
+`<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = 리뷰 유닛 디렉터리(`.harnie/plan/<slug>/review/<unit>/`). `<repo>` = run workroot.
 
 ## 빌더 위임 (코드 루프)
 
@@ -23,8 +23,8 @@ baseline은 각 생산자 윈도우 직전에 캡처한다(`loop.mjs capture <re
 
 기준(criteria)은 리뷰어가 스스로 Read하는 파일이다 — 네가 인라인하지 않는다.
 
-- **Codex 리뷰어 (설계)**: 첫 리뷰 = `codex`, `sandbox:"read-only"`, `model:"gpt-5.6-sol"`, `developer-instructions` = 해당 기준(`design-review.md` + `review-schema.md`, 스레드당 1회 주입), 프롬프트 = 의도 + 제약 + 설계 파일의 절대 경로와 읽으라는 지시, **고도(ARCH / CONTRACT / TASK-DETAIL) 명시**. 재리뷰 = `codex-reply`에 수정본 경로 + 변경된 섹션 이름만. threadId를 기록한다.
-- **Claude 리뷰어 (코드)**: `harnie-reviewer`에 위임(모델 = 이 리뷰 종류의 tier, `model-matrix.md`), 경로만 전달: `<dir>/delta.patch`, 이전 ledger, 짧은 범위/의도 요약, **섹션 이름을 포함한** 설계/브리프 참조, errata 경로(존재 시). 새 유닛(이전 ledger 없음)은 모든 이슈를 `(open)`으로 내야 한다. 재리뷰 라운드는 아직 open인 ID를 명명하고 delta에서 판정한다 — 이후 라운드는 1라운드보다 비용이 적어야 한다.
+- **Codex 리뷰어 (설계)**: 첫 리뷰 = `codex`, `sandbox:"read-only"`, `model:"gpt-5.6-sol"`, `developer-instructions` = 해당 기준(`design-review.md` + `review-schema.md`, 스레드당 1회 주입), 프롬프트 = 의도 + 제약 + 설계 파일의 절대 경로와 읽으라는 지시, **고도(ARCH / TASK-DETAIL) 명시**. 재리뷰 = `codex-reply`에 수정본 경로 + 변경된 섹션 이름만. threadId를 기록한다.
+- **Claude 리뷰어 (코드)**: `harnie-reviewer`에 위임(모델 = 이 리뷰 종류의 tier, `model-matrix.md`), 경로만 전달: `<dir>/delta.patch`, 이전 ledger, 짧은 범위/의도 요약, **섹션 이름을 포함한** 설계 참조. 새 유닛(이전 ledger 없음)은 모든 이슈를 `(open)`으로 내야 한다. 재리뷰 라운드는 아직 open인 ID를 명명하고 delta에서 판정한다 — 이후 라운드는 1라운드보다 비용이 적어야 한다.
 - **Contest** (loop.md contest 게이트): `CONTEST` 블록을 이 호출에 전달하고, 응답 후 사이드카 `<dir>/contest-N.txt`를 쓴다.
 
 ## R3. 영수증 저장
@@ -38,10 +38,9 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> --ledger <dir>/ledger.json \
   --review <dir>/round-N.txt --ns <CR|DR> --state <dir>/state.json --artifact <artifact> \
   [--limit 3] [--progress auto|yes|no] [--reentry <reason>]
 ```
-- `--artifact`: **CR** = 이 라운드의 `postSHA`(또는 run 전체 게이트에는 `ws:` 복합) — 필수, 검증을 리뷰된 트리에 바인딩한다. **DR** = 고도별 입력을 가진 `dr:<sha256(…)>`: **승인 전 중앙 루프(ARCH, CONTRACT)**는 설계 파일 내용만 해시한다 — 아직 권위가 존재하지 않고 리비전마다 새 파일이므로, 내용 정체성으로 충분하다; **승인 후 TASK-DETAIL 루프(L 각 태스크의 설계; M의 단일 설계 — M에는 승인 전 설계 리뷰가 없다)**는 `design content ‖ planHash ‖ edition token ‖ 인용 섹션의 마지막 승인 errata ID(없으면 "none")`를 해시하며, edition token은: L 러너 = 브리프 판(`t<id>-brief.vN`); M = 리터럴 `m-plan`; dev-solo L(브리프 없음) = `solo:contract-rev-N`(그 태스크 설계가 읽은 계약 리비전)이다 — 재개 때마다 현재 권위에서 재계산해 저장값과 대조한다(불일치 = 낡은 승인 → 재설계).
+- `--artifact`: **CR** = 이 라운드의 `postSHA` — 필수, 검증을 리뷰된 트리에 바인딩한다. **DR** = 고도별 입력을 가진 `dr:<sha256(…)>`: **승인 전 루프(ARCH)**는 설계 파일 내용만 해시한다 — 아직 권위가 존재하지 않고 리비전마다 새 파일이므로, 내용 정체성으로 충분하다; **승인 후 TASK-DETAIL 루프(M의 단일 설계 — M에는 승인 전 설계 리뷰가 없다)**는 `design content ‖ planHash ‖ edition token`을 해시하며, edition token은 리터럴 `m-plan`이다 — 재개 때마다 현재 권위에서 재계산해 저장값과 대조한다(불일치 = 낡은 승인 → 재설계). `planHash`가 입력이므로 A5.2 재승인은 낡은 설계 승인을 기계적으로 무효화한다.
 - 출력: `needsReRequest` → 스키마 오류를 명시해 리뷰어를 재프롬프트한다(생산자 호출 아님). `needsReentry` → STALLED 래치; 먼저 사용자에게 표면화. `machineState` REVISING → 생산자 수정(코드: 먼저 baseline 재캡처); APPROVED → 완료(`sessionSplitRecommended`는 세션 분할 제안을 발화); STALLED → 멈추고 보고.
 - **순서 하드 룰**: 라운드 N의 `apply`가 `committed: true`로 끝난 **뒤에야 다음 생산자 호출**이 가능하다 — apply 누락은 복구 불가(낡은 artifact, 알 수 없는 ID); 재구성하지 말고 그 리뷰를 새 라운드로 재실행한다.
-- **Seal 인터리빙 (공유 run 루트)**: `seal`은 run 전체 스코프다 — 한 유닛의 라운드를 완전히 끝낸 뒤(build → seal-verify → apply → verify) 다른 유닛의 빌더 호출을 시작한다; 다른 유닛의 정당한 `apply`/`verify`가 대기 중인 seal을 무효화한다.
 
 ## R5. 선택적 최종 사인오프
 

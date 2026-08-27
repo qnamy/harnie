@@ -34,9 +34,9 @@ STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 
 ## Contest 게이트 (0.11) — 발견을 구현하지 않고 반박하기
 
-생산자 측이 틀렸다고 믿는 open **blocking** 발견에 대해, 오케스트레이터/러너는 정확히 두 가지 근거로 **수정 대신 contest**할 수 있다:
+생산자 측이 틀렸다고 믿는 open **blocking** 발견에 대해, 오케스트레이터는 정확히 두 가지 근거로 **수정 대신 contest**할 수 있다:
 
-- `altitude` — 그 요구가 현재 리뷰 고도(ARCH / CONTRACT / TASK-DETAIL / code) 밖이다.
+- `altitude` — 그 요구가 현재 리뷰 고도(ARCH / TASK-DETAIL / code) 밖이다.
 - `overengineering` — 메커니즘 추가로만 충족 가능하며, 리뷰어가 그것이 방지하는 구체적 실수 시나리오를 제시하지 않았다.
 
 계약:
@@ -45,12 +45,14 @@ STALLED   ─explicit re-entry assertion→ REVISING (stagnation=0)
 2. **리뷰어의 다음 응답이 판가름한다**: 인정(concede) → 그 ID를 `resolved`로 보고(선택적으로 새 non-blocking ID 개설); 고수(insist) → `open` 유지하고 구체적 실수 시나리오를 명시.
 3. 고수 시: 재논쟁 없음, stagnation 소모 없음 — **즉시 사용자에게 에스컬레이션**한다(ID, 리뷰어의 시나리오, 네 근거, 각 경로의 비용). 사용자가 위험을 수용 → 기존 `user-decision` 해제 경로; 사용자가 리뷰어 편 → 일반 REVISING.
 4. **Contest 불가**: 정확성·안전·미검증-위험 발견. 그런 발견에 CONTEST를 받은 리뷰어는 고수한다.
-5. **종결 권한은 절대 이동하지 않는다**: ID를 닫는 것은 리뷰어의 응답 또는 사용자 결정뿐이다. 각 contest 라운드를 `<dir>/contest-N.txt` 사이드카에 기록한다(CONTEST 원문, verdict, `--progress yes` 근거 `contest-adjudication`, 에스컬레이션 여부) — harness-digest가 이를 감사한다.
+5. **종결 권한은 절대 이동하지 않는다**: ID를 닫는 것은 리뷰어의 응답 또는 사용자 결정뿐이다. 각 contest 라운드를 `<dir>/contest-N.txt` 사이드카에 기록한다(CONTEST 원문, verdict, `--progress yes` 근거 `contest-adjudication`, 에스컬레이션 여부) — contest가 어떻게 판가름됐는지에 대한 run 자체의 기록이다.
 6. 판정(adjudication) 라운드는 blocking 수가 그대로여도 정당하다 — 사이드카 근거와 함께 `--progress yes`를 전달해 stagnation을 소모하지 않게 한다.
 
 ## 발견 수용 — 심각도가 아니라 필요성
 
 각 발견의 수용/기각은 심각도 라벨이 아니라 수정이 *필요한지*로 판단한다. 수용: 구체적 실패나 오독을 막거나, 명백한 실결함(사실 오류, 깨진 참조)이거나, 비용은 낮고 가치는 분명한 것. 기각: 구체적 실수 시나리오 없이 메커니즘을 추가하는 것, 스코프 확장, 취향성 다듬기. 전부 일괄 수용도, 전부 일괄 미수정도 하지 않는다.
+
+non-blocking 발견의 기본값은 **미수정**이다: ledger에서 open으로 남고 완료 시 open으로 보고된다 — 위 필요성 판정이 수정이 필요하다고 말할 때만 고친다.
 
 수용한 non-blocking 수정은 blocking 수정과 같은 라운드에 실린다 — non-blocking 전용 재리뷰 라운드를 따로 만들지 않는다.
 

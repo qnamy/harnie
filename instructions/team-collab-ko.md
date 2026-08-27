@@ -8,21 +8,21 @@ Agent Teams 범용 규칙 — 라우팅(5문 기준), 하드 룰, 팀원 축, �
 
 두 곳뿐이다:
 
-- **`harnie:dev` 설계 단계** — L 단계의 ARCH 스텝(`design/arch-rev-N.md`)과 CONTRACT 스텝(`design/contract-rev-N.md`).
+- **독립 아키텍처 설계** — `design-authoring` 스킬을 통해 작성하는 ARCH 문서(`design/arch-rev-N.md`), 어떤 run 밖에서도.
 - **장애 분석** — T-B 경쟁 가설 템플릿, 산출물 경로는 오케스트레이터가 지정한다.
 
-이 지점에서 범용 파일의 ≥3/5 기준이 성립하고 **같은 턴에 사용자가 동의**하면, 단독 `harnie-designer` 서브에이전트를 팀으로 업그레이드한다. 파이프라인의 나머지(그라운딩, 빌드, 코드 리뷰, 검증, S/M 크기)는 절대 팀을 만들지 않는다.
+이 지점에서 범용 파일의 ≥3/5 기준이 성립하고 **같은 턴에 사용자가 동의**하면, 단독 `harnie-designer` 서브에이전트를 팀으로 업그레이드한다. `harnie:dev` run 안의 모든 것(그라운딩, 설계, 빌드, 코드 리뷰, 검증)은 절대 팀을 만들지 않는다.
 
 ## 2. 팀 구성
 
 - 팀원은 **기존 기능 agent 정의를 참조**한다 — `harnie-scout`(탐색 역할), `harnie-designer`(디자이너 / 산출물 owner). 도메인 전문성은 스폰 프롬프트로 주입한다. 팀을 위해 새 agent 정의를 만들지 않는다. 범용 파일의 사고 렌즈(`skeptic-challenger` · `simplicity-advocate` · `ops-risk`)도 `harnie-scout`에 스폰 프롬프트 주입으로 얹는다 — 팀당 최대 1~2개.
 - `harnie-reviewer`는 **절대** teammate가 아니다. 팀 내부의 challenger 역할은 리뷰어가 아니라 explorer다.
-- 팀원 ≤4명. 각 팀원의 모델을 `instructions/model-matrix.md` 기준으로 **스폰 시 명시**한다(예: ARCH 디자이너는 very hard 난이도에만 fable, 그 외는 matrix대로, CONTRACT 디자이너 = 난이도에 따라 sonnet/opus, `harnie-scout` = haiku, T3 challenger = opus).
+- 팀원 ≤4명. 각 팀원의 모델을 `instructions/model-matrix.md` 기준으로 **스폰 시 명시**한다(예: ARCH 디자이너는 very hard 난이도에만 fable, 그 외는 matrix대로, `harnie-scout` = haiku, T3 challenger = opus).
 - 서브에이전트 정의를 참조한 팀원은 그 `tools:`/`model:`은 상속하지만 `skills:`/`mcpServers:`는 상속하지 않는다 — 필요한 지침 경로는 스폰 프롬프트에 다시 적어라.
 
 ## 3. 쓰기 범위
 
-- 팀 단계당 **산출물 owner는 정확히 1명**이며, 오케스트레이터가 지정한 경로(예: `design/contract-rev-N.md`)의 **파일 1개**에만 쓴다. 나머지 팀원은 읽기 전용 기여자로 메시지로 보고한다.
+- 팀 단계당 **산출물 owner는 정확히 1명**이며, 오케스트레이터가 지정한 경로(예: `design/arch-rev-N.md`)의 **파일 1개**에만 쓴다. 나머지 팀원은 읽기 전용 기여자로 메시지로 보고한다.
 - 팀 단계에서 **소스 코드 쓰기는 전면 금지** — 팀 단계는 설계·분석 전용이다.
 - 팀원은 **`.harnie/` CLI를 호출하지 않는다**(`execution.mjs`, 렛저, 승인 게이트). 권위 상태는 오케스트레이터가 소유하며, 상태 변경이 필요하다고 판단한 팀원은 보고만 하고 판단은 오케스트레이터가 한다.
 
@@ -34,13 +34,13 @@ Agent Teams 범용 규칙 — 라우팅(5문 기준), 하드 룰, 팀원 축, �
 
 ## 5. 리뷰 루프로의 인계
 
-팀 산출물은 **예외 없이 기존 DR 루프**로 들어간다 — 해당 고도의 Codex 설계 리뷰어(`n-arch/`, `n-contract/`), 전체 렛저, contest, 리비전 사이클 그대로. 팀 내부 토론은 same-provider이므로 **크로스모델 리뷰를 한 라운드도 대체하지 않는다**. "팀에서 이미 논쟁했다"는 이유로 루프를 단축하거나, 고도를 낮추거나, 이슈를 미리 resolved 처리하지 않는다.
+팀 산출물은 **예외 없이 기존 DR 루프**로 들어간다 — ARCH 고도의 Codex 설계 리뷰어(`n-arch/`), 전체 렛저, contest, 리비전 사이클 그대로. 팀 내부 토론은 same-provider이므로 **크로스모델 리뷰를 한 라운드도 대체하지 않는다**. "팀에서 이미 논쟁했다"는 이유로 루프를 단축하거나, 고도를 낮추거나, 이슈를 미리 resolved 처리하지 않는다.
 
 ## 6. 실패·중단 처리
 
 - 팀 상태는 **소모품**이다: 팀원은 세션 유실이나 `/resume`을 넘기지 못한다. 복구는 디스크 산출물에서 해당 단계를 재시작하거나, 부분 산출물을 이어받는 단독 `harnie-designer`로 강등하는 것이다.
 - **이상 징후 트리거**: §4 nudge 이후에도 owner 무응답, 또는 지정 경로에 산출물 부재. 어느 하나라도 발생하면 팀을 폐기하고 강등 경로를 탄다 — 같은 팀을 재시도하지 않는다.
-- 중단 사실을 `notepad.md`에 기록한다(1회 append: 단계, 트리거, 선택한 경로). 이후 단계와 다이제스트가 볼 수 있게 한다.
+- 중단 사실을 `notepad.md`에 기록한다(1회 append: 단계, 트리거, 선택한 경로). 이후 단계가 볼 수 있게 한다.
 
 ## 7. 단독 서브에이전트로부터의 escalation
 
