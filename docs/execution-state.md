@@ -27,7 +27,7 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 - 의도적 sentinel 삭제로 하는 우회는 §0.1 위협모델 밖(적대적). 실수-안전엔 sentinel-first로 충분.
 
 ## 4. manifest·planHash (DR-011)
-- **승인 바인딩 (DR-014)**: planning→executing은 **실제 사용자 승인 응답**에만 근거한다. `/harnie:dev-full`(구 `/harnie:plan`) A5는 Plan mode 진입 미보장이라 `ExitPlanMode` 전제 없이 **`AskUserQuestion`("이 계획을 승인/거절?")** 을 쓰고, 성공 여부가 아니라 **선택지·planHash까지 바인딩**한다:
+- **승인 바인딩 (DR-014)**: planning→executing은 **실제 사용자 승인 응답**에만 근거한다. `/harnie:dev` A5는 Plan mode 진입 미보장이라 `ExitPlanMode` 전제 없이 **`AskUserQuestion`("이 계획을 승인/거절?")** 을 쓰고, 성공 여부가 아니라 **선택지·planHash까지 바인딩**한다:
   - **PreToolUse(AskUserQuestion)**: pending receipt `{tool_use_id, planHash(현재 plan.md 해시), 승인 질문·옵션}` 기록.
   - **PostToolUse(AskUserQuestion)**: **같은 `tool_use_id`의 실제 답이 "승인"이며 현재 planHash가 pending과 동일**할 때만 `execution.mjs`가 manifest 파생·planHash 확정·phase=executing 전이. **거절·질문 불일치·질문 이후 plan 변경(hash 불일치)** 은 **awaiting-approval 유지(fail-closed)**.
   → 사용자가 실제로 "승인"을 누르고, 그 시점 plan이 승인받은 그대로일 때만 실행이 열린다(over-eager main의 self-승인·승인 후 몰래 변경 차단). (Plan mode 배선 시 `ExitPlanMode` PostToolUse도 동일 패턴.)

@@ -186,8 +186,8 @@ provider 자체를 바꾸는 것(다른 AI CLI 추가)은 이 범위가 아니�
 - [docs/architecture.md](docs/architecture.md) — 스킬·에이전트·크로스-모델 리뷰 루프 설계
 - [docs/execution-state.md](docs/execution-state.md) — 실행 상태, 강제 훅, 권위 재도출
 - [docs/enforcement-map.md](docs/enforcement-map.md) — 지침 문장 ↔ 기계 강제 대응표 (문서 경량화의 선행 산출물)
-- [docs/design-0.11-process.md](docs/design-0.11-process.md) · [docs/design-0.11-detail.md](docs/design-0.11-detail.md) — 0.11 단일 파이프라인 재설계(아키텍처 + 상세; 각 5라운드 Codex 리뷰 APPROVE)
-- [docs/design-0.10-restructure.md](docs/design-0.10-restructure.md) — 상세 설계: dev-full 0.10 플랜-분배-병렬-통합 재편(0.11로 대체, 이력)
+- [docs/design-0.13-L-dismantle.md](docs/design-0.13-L-dismantle.md) — L 파이프라인 완전 삭제 설계(계약 마이그레이션 매트릭스 · 크로스모델 DR 2라운드)
+- [docs/m-pipeline-kill-criteria.md](docs/m-pipeline-kill-criteria.md) — M 파이프라인 존폐 기준(측정 항목 · 판정 · 미사용 조항)
 - [docs/codex-mechanisms.md](docs/codex-mechanisms.md) — codex MCP·플러그인 메커니즘과 재현 방법
 - [docs/bootstrap-adherence.md](docs/bootstrap-adherence.md) — ADR: 진입점 재편과 부트스트랩 강제
 - [docs/permission-prompt-reduction.md](docs/permission-prompt-reduction.md) — ADR: 좁은 훅 auto-allow
