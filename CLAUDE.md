@@ -2,7 +2,9 @@
 
 > 플러그인/repo 이름 = **harnie**(AI 서브에이전트 개발 하네스 + 스킬 허브). 크로스-모델 빌드/리뷰 루프 = **단일 파이프라인** 커맨드 `/harnie:dev` + 스킬 `dev`(크기 S/M로 스테이지 스킵 — 0.13에서 L 파이프라인 완전 삭제, M보다 큰 작업은 사람+orca로 인계), Codex 단독 스킬 `dev-solo`, 에이전트 `harnie-scout`·`harnie-designer`·`harnie-builder`·`harnie-reviewer`. 상태 디렉터리 = `.harnie/`, 툴 네임스페이스 = `mcp__plugin_harnie_codex__*`.
 
-런타임 계약의 정본은 `instructions/`, 설계 근거·이력은 `docs/`(architecture · execution-state · enforcement-map · design-0.11-process/-detail · design-0.10-restructure · bootstrap-adherence · codex-mechanisms · permission-prompt-reduction)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다).
+런타임 계약의 정본은 `instructions/`, 설계 근거·이력은 `docs/`(architecture · execution-state · enforcement-map · design-0.13-L-dismantle · m-pipeline-kill-criteria · design-0.11-process/-detail · design-0.10-restructure · bootstrap-adherence · codex-mechanisms · permission-prompt-reduction)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다).
+
+**디스패치·worktree 수명주기는 orca 소유다** — harnie는 품질·증거·강제화를 소유하며 둘은 경쟁하지 않는다. M보다 큰 작업의 분해·병렬 실행·통합은 사람 + orca가 오케스트레이션한다(`orca worktree create` · `orca terminal create` · `orca worktree rm`). harnie가 조립 가이드나 디스패처를 다시 들이지 않는다.
 
 ## 언어 정책 — 영문 정본 + 한국어 미러는 요청 시에만 (2026-08-27 확정)
 
