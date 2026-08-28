@@ -44,3 +44,11 @@ Dismantle the M pipeline (keeping `cross-review`) if, in **at least 2 of the 3 s
 - The same task cannot be done twice by two methods. This is an **adjacent-task comparison, not a measurement**. Confounds (task difficulty, the day's context, model version) are not controlled.
 - **The numbers — 2×, 3 samples, 2 of 3 — have no precise basis.** They were chosen to force a decision at a defined moment, not derived from data. Do not present them as a measured threshold; this is a device for making a judgment happen, and it should be read that way.
 - What is *not* in question either way: the cross-model review loop itself (different providers for producer and reviewer, a read-only reviewer, ledger-based approval). That value survives any outcome here, because `cross-review` holds it independently of the pipeline.
+
+## Records
+
+Valid samples: **0 of 3.** Deadline 2026-11-27.
+
+| Date | Run | Counts as a sample? | Note |
+|---|---|---|---|
+| 2026-08-28 | 0.14 U7 integration canary — M run started by Claude `/harnie:dev`, handed off mid-run to interactive Codex `dev-solo`, closed `complete:true` after 2 design-review rounds and 4 code-review rounds | **No** | A canary, excluded by the synthetic-exercise rule above. Recorded because it is the first real end-to-end M run since 0.13, and because the machinery under test here caught a blocking defect the 270-test suite did not: `buildSnapshot` validated every unit's ledger under the `CR` namespace, so any M run whose design review recorded findings could never complete (fixed in 0.14.1). No plain-path counterpart was run, so there is nothing to compare. |
