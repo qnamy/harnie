@@ -17,6 +17,7 @@ import {
   detectVacuous, loadContext, validateRepoBinding,
   rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
+  abandonRun,
 } from "./execution.mjs"
 import { captureTree } from "./delta.mjs"
 
@@ -869,7 +870,7 @@ test("bootstrapRun: resume은 소유자를 **추가**한다 — 이전 소유자
 test("bootstrapRun: 세션 식별자 없는 resume은 집합을 보존한다 — 비우면 다음 resume이 다시 좁힌다(리뷰 P1)", () => {
   const root = gitRepo()
   bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 이 세션은 isOwnerSession에서 이미 owner라 지울 이유가 없다
+  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 기록할 키가 없을 뿐, 기존 집합을 지울 이유는 없다
   assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
   bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" }) // 비웠다면 여기서 ["sid-b"]가 되어 sid-a가 빠졌다
   assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
@@ -1407,4 +1408,52 @@ test("approve(CLI): authority=cli run 전용 — hook run에서는 fail-closed",
   assert.equal(r.phase, "executing")
   const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
   assert.equal(ex.cliApprovals.length, 1) // 감사 기록
+})
+
+// ── abandon: 잠긴 트리의 출구(0.14 DEC-1) ─────────────────────────────────
+// 방어는 `--confirm` 하나뿐이고 그것이 막는 것은 오타다. 그 대신 결과를 되돌릴 수 있어야 한다 —
+// plan 디렉터리는 지워지지 않고 `.harnie/abandoned/` 아래로 이동한다.
+test("abandon: 활성 run을 폐기하면 active.json이 사라지고 plan 디렉터리는 abandoned/ 아래에 그대로 남는다", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  writeFileSync(join(dir, "note.txt"), "리뷰 원장 대용")
+  const r = run(["abandon", "--root", root, "--slug", "feat-x", "--confirm", "feat-x"])
+  assert.equal(r.wasActive, true)
+  assert.equal(existsSync(join(root, ".harnie", "active.json")), false)
+  assert.equal(existsSync(dir), false)
+  assert.match(r.movedTo, /\.harnie\/abandoned\/feat-x-/)
+  assert.equal(readFileSync(join(r.movedTo, "note.txt"), "utf8"), "리뷰 원장 대용")
+  assert.ok(existsSync(join(r.movedTo, "plan.md")))
+})
+
+test("abandon: --confirm이 slug와 다르면 거부(상태 불변)", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  assert.throws(() => abandonRun(root, "feat-x", "feat-y"), (e) => e instanceof FailClosed && /--confirm/.test(e.message))
+  assert.throws(() => abandonRun(root, "feat-x", undefined), FailClosed)
+  assert.ok(existsSync(join(root, ".harnie", "active.json")))
+  assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x")))
+  assert.ok(runFail(["abandon", "--root", root, "--slug", "feat-x"])) // --confirm 누락도 실패
+})
+
+// 소급 미완료된 과거 run(활성 아님)도 폐기 대상이다 — 그렇지 않으면 `runs`에 영원히 남는다(DEC-3).
+test("abandon: 비활성 slug도 폐기되고 활성 run은 건드리지 않는다", () => {
+  const root = gitRepo()
+  writePlan(root, "old-run")
+  run(["init", "--root", root, "--slug", "old-run"])
+  run(["abandon", "--root", root, "--slug", "old-run", "--confirm", "old-run"])
+  writePlan(root, "feat-x")
+  run(["init", "--root", root, "--slug", "feat-x"])
+  const dir = writePlan(root, "stale")
+  const r = run(["abandon", "--root", root, "--slug", "stale", "--confirm", "stale"])
+  assert.equal(r.wasActive, false)
+  assert.equal(existsSync(dir), false)
+  assert.equal(readSentinel(root).slug, "feat-x") // 활성 run 불변
+})
+
+test("abandon: 폐기할 것이 없으면 실패", () => {
+  const root = gitRepo()
+  assert.throws(() => abandonRun(root, "nothing", "nothing"), (e) => e instanceof FailClosed && /폐기할 run 없음/.test(e.message))
 })

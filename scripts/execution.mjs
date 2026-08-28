@@ -6,9 +6,8 @@ import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import { captureTree } from "./delta.mjs"
-import { createWorktree } from "./worktree.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
-import { extractSelectedAnswers } from "../hooks/lib.mjs"
+import { extractSelectedAnswers, ensureExcludeEntries } from "../hooks/lib.mjs"
 
 export class FailClosed extends Error {}
 
@@ -649,7 +648,11 @@ export function bootstrapRun(root, { base, track = "plan", sessionId = null, aut
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
     else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
     else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
-    else throw new FailClosed(`미완료 run ${s.track}/${s.slug}가 활성 상태입니다. 기존 run을 완료하거나, 별도 worktree checkout에서 이 스킬을 다시 실행해 새 run을 시작하세요.`)
+    else throw new FailClosed(
+      `미완료 run ${s.track}/${s.slug}가 이 트리에서 활성 상태입니다. 셋 중 하나를 고르세요 — ` +
+      `다른 작업이면 별도 워크스페이스(orca worktree)를 만들어 거기서 시작, ` +
+      `이 run을 이어가려면 인자 없이 \`/harnie:dev\`, ` +
+      `버리려면 \`node <plugin>/scripts/execution.mjs abandon --root ${root} --slug ${s.slug} --confirm ${s.slug}\`.`)
     return result
   })
 }
@@ -672,7 +675,7 @@ function parseArgs(argv) {
 function cmdInit({ flags }) {
   const root = flags.root || die("--root 필요")
   const slug = flags.slug || die("--slug 필요")
-  if (flags.authority === "cli") { out(initCliAuthority(root, slug)); return } // dev-solo(훅 부재) — run worktree 생성 포함
+  if (flags.authority === "cli") { out(initCliAuthority(root, slug)); return } // dev-solo(훅 부재) 진입점
   if (flags.authority != null) die(`--authority는 cli만(훅 run은 bootstrap 훅이 생성 — init 직접 호출 금지)`)
   const track = flags.track || "plan"
   const dir = planDir(root, track, slug)
@@ -1073,14 +1076,15 @@ export function bindRebind(root, slug, toolUseId, toolInput, response) {
 }
 
 // ── dev-solo(훅 부재 환경) CLI 권위 경로(0.11 §9) ─────────────────────────────
-// init --authority cli: 훅 부트스트랩이 하던 실행 환경 준비(run worktree/branch)를 CLI로 수행한다.
+// init --authority cli: 훅 부트스트랩이 하던 준비를 CLI로 수행한다. 0.14 D1 이후 그 준비는 훅과 같다 —
+// run root는 넘겨받은 git repo root 자신이고(worktree 생성 없음), `.harnie/`를 info/exclude에 등록한다.
 // authority:"cli" run에서만 approve 서브커맨드가 유효하다(훅 run의 자가승인 차단 불변).
 export function initCliAuthority(root, slug) {
   validateSlug(slug)
   if (!existsSync(join(root, ".git"))) throw new FailClosed(`init --authority cli: root가 git repo가 아님(${root})`)
-  const workroot = createWorktree({ repo: root, branch: `harnie/${slug}` }).worktreePath
-  const result = bootstrapRun(workroot, { base: slug, track: "plan", sessionId: null, authority: "cli" })
-  return { ok: true, workroot, slug: result.slug, reused: result.reused === true, authority: "cli" }
+  ensureExcludeEntries(root, ".harnie/")
+  const result = bootstrapRun(root, { base: slug, track: "plan", sessionId: null, authority: "cli" })
+  return { ok: true, root, slug: result.slug, reused: result.reused === true, authority: "cli" }
 }
 
 export function approveCli(root, slug, planHashArg) {
@@ -1136,6 +1140,33 @@ export function registerReadonlyThread(root, track, slug, threadId) {
   })
 }
 
+// ── 폐기 출구(0.14 DEC-1) ─────────────────────────────────────────────────
+// 훅 게이트가 세션을 보지 않게 된 뒤로, 미완료 run이 잠근 트리에서 나오는 유일한 길이 이 커맨드다. 그래서
+// guardActive를 부르지 않고 owner도 보지 않는다 — 그 둘이 곧 잠긴 상태의 원인이다. 방어는 `--confirm`
+// 하나이고 그것이 막는 것은 오타이지 의도가 아니다. 대신 삭제가 아니라 이동이라, 잘못 당겨도 리뷰 원장과
+// 승인 기록이 `.harnie/abandoned/` 아래에 그대로 남는다.
+export function abandonRun(root, slug, confirm) {
+  validateSlug(slug)
+  if (confirm !== slug)
+    throw new FailClosed(`abandon: --confirm은 slug와 정확히 같아야 함(got ${JSON.stringify(confirm)}, expect ${JSON.stringify(slug)})`)
+  return withStateLock(root, () => {
+    const dir = planDir(root, "plan", slug)
+    const s = readJSONOrNull(sentinelPath(root))
+    const wasActive = !!s && s.slug === slug
+    if (!existsSync(dir) && !wasActive)
+      throw new FailClosed(`abandon: 폐기할 run 없음 — ${dir} 부재이고 활성 run도 아님`)
+    let movedTo = null
+    if (existsSync(dir)) {
+      movedTo = join(root, ".harnie", "abandoned", `${slug}-${new Date().toISOString().replace(/[:.]/g, "-")}`)
+      if (existsSync(movedTo)) throw new FailClosed(`abandon: 대상 경로가 이미 존재함(${movedTo}) — 덮어쓰지 않는다`)
+      mkdirSync(dirname(movedTo), { recursive: true })
+      renameSync(dir, movedTo)
+    }
+    if (wasActive) unlinkSync(sentinelPath(root))
+    return { ok: true, slug, movedTo, wasActive }
+  })
+}
+
 // CLI 진입 공통 가드(CR-001): 권위 상태를 변경하는 서브커맨드는 실행 전에 ① 인자(track/slug)가 활성 run과
 // 일치하고 ② sentinel/execution의 mode mirror가 정합함을 검증한다(불일치 = 손상, fail-closed). init 제외.
 export function assertActiveRun(root, slug, track = "plan") {
@@ -1147,6 +1178,13 @@ export function assertActiveRun(root, slug, track = "plan") {
 }
 function guardActive(flags, track = flags.track || "plan") {
   assertActiveRun(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), track)
+}
+
+function cmdAbandon({ flags }) {
+  const root = flags.root || die("--root 필요")
+  const slug = flags.slug || die("--slug 필요")
+  if (typeof flags.confirm !== "string") die("--confirm <slug> 필요(폐기 확인)")
+  out(abandonRun(root, slug, flags.confirm))
 }
 
 function cmdArmApproval({ flags }) {
@@ -1405,6 +1443,7 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "set-difficulty": cmdSetDifficulty(args); break
       case "approve": cmdApprove(args); break
       case "set-phase": cmdSetPhase(args); break
+      case "abandon": cmdAbandon(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)
     }
   } catch (e) {

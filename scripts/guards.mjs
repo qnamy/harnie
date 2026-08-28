@@ -1,5 +1,5 @@
 // harnie 강제 훅의 순수 결정 함수. 위협모델은 fallible·over-eager 오케스트레이터/빌더의 실수 방지다.
-import { basename, dirname, isAbsolute, resolve } from "node:path"
+import { isAbsolute, resolve } from "node:path"
 
 const CONTROL_BASENAMES = new Set([
   "manifest.json", "execution.json", "active.json", "ledger.json", "state.json", "receipt.json",
@@ -9,7 +9,6 @@ const CONTROL_BASENAMES = new Set([
 export function isControlPath(relPath) {
   const p = String(relPath).replace(/\\/g, "/")
   if (!p.startsWith(".harnie/")) return false
-  if (p.startsWith(".harnie/sessions/")) return true // 세션→run(worktree) 바인딩 보호(T2 DEC-001)
   if (p === ".harnie/state.lock") return true
   const base = p.split("/").pop()
   if (/^manifest\.v\d+\.json$/.test(base)) return true // 재승인으로 교체된 manifest 아카이브(감사 기록) 보호
@@ -63,102 +62,36 @@ export function decideWatchdog({
 }
 
 // control 파일은 항상 보호하고, 승인 전에는 활성 run 디렉터리 밖 Write/Edit를 막는다.
-export function decideWriteEdit({ relPath, phase, track, slug, outside = false }) {
+// 0.14 D4 이후 이 deny를 받는 세션은 대개 run과 무관한 방관자다(게이트가 세션을 보지 않는다). 그래서 문구는
+// 오케스트레이터가 아니라 그 세션에게 쓴다 — 어느 run이 잠갔는지(slug)와 나가는 두 출구를 담는다.
+export function decideWriteEdit({ relPath, phase, track, slug, outside = false, root = null, execCli = null }) {
   const p = String(relPath).replace(/\\/g, "/")
   if (isControlPath(p))
     return { deny: true, reason: `control·review-state 직접 쓰기 금지(${p}) — 기록은 execution.mjs·loop.mjs로만` }
   if (!outside && PLANNING_PHASES.has(phase)) {
     const allowed = `.harnie/${track}/${slug}/`
     if (!p.startsWith(allowed))
-      return { deny: true, reason: `승인 前(${phase}) 소스 쓰기 금지 — ${allowed} 밖(${p})은 승인 게이트 후에만` }
+      return { deny: true, reason: `승인 前(${phase}) 소스 쓰기 금지 — ${allowed} 밖(${p})은 승인 게이트 후에만. 이 트리는 미완료 harnie run(slug=${slug})이 잠갔다. 출구 둘: 이어가려면 인자 없이 \`/harnie:dev\`, 버리려면 ${abandonHint(root, slug, execCli)}` }
   }
   return { deny: false }
+}
+// 잠긴 세션에 실행 가능한 명령을 준다. 훅이 아닌 경로(단위 테스트 등)에서 인자가 없으면 형태만 안내한다.
+function abandonHint(root, slug, execCli) {
+  const cli = execCli || "<plugin>/scripts/execution.mjs"
+  const r = root || "<repo root>"
+  return `node ${cli} abandon --root ${r} --slug ${slug} --confirm ${slug}`
 }
 
 // Bash는 sanctioned CLI 외 `.harnie` 접근만 차단한다. 승인 전 Bash 소스 쓰기는 계획된 트레이드오프로 차단하지 않는다.
-// 첫 대안은 `.harnie` 자체(어디에 nested든) — `\b`가 아니라 `(?![\w-])`를 쓴다: worktree-per-run(T2)의 컨테이너
-// `.harnie-wt`는 "harnie"와 "-" 사이가 단어경계라 `\b` 기준으로는 매치돼, 그 안의 평범한 파일까지 Bash로 전부
-// 접근 불가능해지는 회귀가 있었다. 둘째 대안은 `.harnie-wt` **컨테이너 자체**(뒤에 실제 worktree 이름(`/<slug>`)
-// 으로 이어지지 않는 형태 — `rm -rf .harnie-wt`·트레일링 슬래시(`.harnie-wt/`)·glob(`.harnie-wt/*`) 포함) — 모든
-// run의 상태를 한 번에 지우는 실수를 막는다. `.harnie-wt/<slug>/…`처럼 특정 worktree 안의 평범한 파일은 매치하지
-// 않아 그 worktree에서 build·test·git 등을 자유롭게 쓸 수 있다.
+// `(?![\\w-])`는 `.harnie`로 시작하는 다른 이름(`.harnie-x` 등)을 매치에서 빼는 경계다 — 보호 대상은 상태
+// 디렉터리 `.harnie/` 자신뿐이다. run root가 사용자 트리인 0.14에서는 이 blanket deny가 `cat .harnie/active.json`
+// 같은 조회까지 막지만, 완화하지 않는다(설계 §8 — 공인 조회 경로는 loop.mjs export와 Read 도구다).
 const HARNIE_STATE_REF = /\.harnie(?![\w-])/
-const GLOB_META = /[*?\[\]{}]/
-function referencesWorktreeContainer(cmd) {
-  const s = String(cmd || "")
-  const marker = ".harnie-wt"
-  for (let from = 0, at; (at = s.indexOf(marker, from)) >= 0; from = at + marker.length) {
-    const tail = (s.slice(at + marker.length).match(/^[^\s'\"]*/) || [""])[0]
-    // Empty/container-only tokens and any glob can span the container or multiple paths. A concrete `/segment`
-    // without glob syntax names one worktree/path and is intentionally allowed.
-    if (tail === "" || tail === "/" || !tail.startsWith("/") || GLOB_META.test(tail)) return true
-  }
-  return false
-}
 export function referencesHarnie(cmd) {
-  const s = String(cmd || "")
-  return HARNIE_STATE_REF.test(s) || referencesWorktreeContainer(s)
+  return HARNIE_STATE_REF.test(String(cmd || ""))
 }
 
-// 활성 run worktree·브랜치 삭제 방어(0.13 T8, 2026-08-26 사고 대응) — deny-only, 새 상태 파일 없음. 위
-// referencesWorktreeContainer는 "이 worktree 안에서 자유롭게 작업"을 의도적으로 허용하는데, 그 허용 분기에
-// `git worktree remove <정확히 이 worktree>` 같은 삭제 자체도 함께 떨어져 사고의 직접 원인이 됐다(bureaucracy-audit
-// §2.1). activeRuns(hooks/lib.mjs listActiveRunWorktrees)가 각 run의 worktreePath·slug·branch를 이미
-// `.harnie/active.json`에서 파생해 주므로, 여기서는 명령이 그 경로/브랜치를 "삭제 의도"로 지목하는지만 본다.
-// worktree.mjs remove(신뢰 CLI)는 decideBash에서 이미 sanctioned로 분류돼 이 함수까지 오지 않는다 — 정상 정리
-// 경로는 막지 않는다.
-const WORKTREE_REMOVE_RE = /\bgit\s+(?:-C\s+\S+\s+)?worktree\s+remove\b/
-const BRANCH_DELETE_RE = /\bgit\s+branch\s+(?:-D|-d|--delete)\b/
-const PUSH_DELETE_RE = /\bgit\s+push\b[^\n]*--delete\b/
-function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&") }
-// `rm`의 자기 인자 구간(다음 `;`·개행 前까지)에서 recursive·force 두 플래그가 각각(결합형 `-rf`·분리형
-// `-r -f`·긴 이름 모두) 존재하는지만 본다 — 전체 셸 파싱은 하지 않는다(§0.1 적대적 방어 비목표와 같은 수준).
-function isRecursiveForceRm(cmd) {
-  const m = String(cmd).match(/\brm\b([^\n;]*)/)
-  if (!m) return false
-  const args = m[1]
-  const hasRecursive = /(?:^|\s)-[a-zA-Z]*r[a-zA-Z]*(?:\s|$)/.test(args) || /--recursive\b/.test(args)
-  const hasForce = /(?:^|\s)-[a-zA-Z]*f[a-zA-Z]*(?:\s|$)/.test(args) || /--force\b/.test(args)
-  return hasRecursive && hasForce
-}
-// `.harnie-wt/<dir>`를 정확히 지목할 때만 매치 — 그 밑의 하위 경로(`.harnie-wt/<dir>/src/x.js` 등, 정상 작업)는
-// 다음 문자가 `/`라서 배제된다. 트레일링 슬래시 하나(디렉터리 자체를 가리키는 흔한 형태)는 허용한다.
-function commandTargetsWorktree(cmd, worktreePath) {
-  const leaf = escapeRegExp(basename(worktreePath))
-  return new RegExp(`\\.harnie-wt/${leaf}/?(?![\\w./-])`).test(cmd)
-}
-function commandTargetsBranch(cmd, branch) {
-  return new RegExp(`(?<![\\w./-])${escapeRegExp(branch)}(?![\\w.-])`).test(cmd)
-}
-export function decideActiveRunDeletion(cmd, activeRuns = []) {
-  const s = String(cmd || "")
-  const wantsWorktreeRemoval = WORKTREE_REMOVE_RE.test(s) || isRecursiveForceRm(s)
-  const wantsBranchRemoval = BRANCH_DELETE_RE.test(s) || PUSH_DELETE_RE.test(s)
-  if (!wantsWorktreeRemoval && !wantsBranchRemoval) return { deny: false }
-  for (const run of activeRuns) {
-    if (wantsWorktreeRemoval && commandTargetsWorktree(s, run.worktreePath))
-      return { deny: true, reason: `활성 run(slug=${run.slug})의 워크트리 삭제 금지 — 정리하려면 worktree.mjs remove --repo <repo> --branch ${run.branch}[--delete-branch]를 쓰세요. run을 폐기하는 것이면 같은 명령에 --abandon을 더하면 run 상태까지 함께 정리됩니다` }
-    if (wantsBranchRemoval && commandTargetsBranch(s, run.branch))
-      return { deny: true, reason: `활성 run(slug=${run.slug})의 브랜치(${run.branch}) 삭제 금지 — worktree.mjs remove --delete-branch를 쓰거나, run을 완료·폐기한 뒤 다시 시도하세요` }
-  }
-  return { deny: false }
-}
-
-export function isActiveTaskWorktree(root, slug, candidate) {
-  return taskIdFromActiveTaskWorktree(root, slug, candidate) != null
-}
-
-export function taskIdFromActiveTaskWorktree(root, slug, candidate) {
-  if (root == null || slug == null || candidate == null) return null
-  const parent = resolve(root, ".harnie-wt")
-  const target = resolve(root, candidate)
-  const escapedSlug = String(slug).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-  if (dirname(target) !== parent) return null
-  const m = basename(target).match(new RegExp(`^harnie-${escapedSlug}-t([A-Za-z0-9._-]+)$`))
-  return m ? m[1] : null
-}
-
-function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
+function isSanctionedCli(cmd, { trustedClis, activeRoot }) {
   if (/[;|&`\n\r]|\$\(|<\(|>\(|[<>]/.test(cmd)) return false
   const toks = String(cmd || "").trim().split(/\s+/)
   if (toks[0] !== "node") return false
@@ -167,15 +100,13 @@ function isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug }) {
   if (!trustedClis.has(scriptAbs)) return false
   if (activeRoot == null) return true
   const root = resolve(activeRoot)
-  const roots = [root]
   const rest = toks.slice(2)
   const flagVal = (name) => { const i = rest.lastIndexOf(name); return i >= 0 ? rest[i + 1] : undefined }
-  const isActiveRoot = (v) => v !== undefined && resolve(root, v) === root
-  const isRepo = (v) => v !== undefined && roots.includes(resolve(root, v))
-  const isRepoOrTaskWt = (v) => isRepo(v) || (v !== undefined && activeSlug != null && roots.some((rt) => isActiveTaskWorktree(rt, activeSlug, resolve(root, v))))
-  if (scriptAbs.endsWith("execution.mjs")) return isActiveRoot(flagVal("--root"))
-  if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRepoOrTaskWt(flagVal("--root")) : isRepoOrTaskWt(rest[1])
-  if (scriptAbs.endsWith("worktree.mjs")) return isRepo(flagVal("--repo"))
+  const isRoot = (v) => v !== undefined && resolve(root, v) === root
+  // 0.14: run root 하나뿐이므로 두 CLI 모두 run root만 받는다(태스크별 worktree 소멸).
+  // abandon도 이 분기로 통과한다 — `--root`만 보므로 활성·비활성 slug 대상 둘 다 열린다(DEC-1의 성립 조건).
+  if (scriptAbs.endsWith("execution.mjs")) return isRoot(flagVal("--root"))
+  if (scriptAbs.endsWith("loop.mjs")) return rest[0] === "apply" ? isRoot(flagVal("--root")) : isRoot(rest[1])
   return false
 }
 
@@ -200,16 +131,14 @@ function sanctionFailureWhy(cmd, { trustedClis, activeRoot }) {
   const toks = cmd.trim().split(/\s+/)
   if (toks[0] !== "node" || !isAbsolute(toks[1] || "") || !trustedClis.has(resolve(toks[1])))
     return "`node <신뢰 CLI 절대경로> …` 형태가 아님"
-  return `root/repo 인자가 활성 run 바인딩과 불일치(활성 root ${activeRoot}) — 인자 오타이거나, 훅이 이 세션의 run 문맥을 읽지 못한 경우(비-owner 세션 등)`
+  return `--root 인자가 이 트리의 run root와 불일치(run root ${activeRoot}) — 인자 오타이거나, 다른 트리의 run을 이 세션에서 조작하려는 경우`
 }
-export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null, activeRuns = [] }) {
+export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
   const cmd = String(command || "")
-  if (isSanctionedCli(cmd, { trustedClis, activeRoot, activeSlug })) {
+  if (isSanctionedCli(cmd, { trustedClis, activeRoot })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
   }
-  const runDeletion = decideActiveRunDeletion(cmd, activeRuns)
-  if (runDeletion.deny) return runDeletion
   if (referencesHarnie(cmd)) {
     const why = sanctionFailureWhy(cmd, { trustedClis, activeRoot })
     return { deny: true, reason: why ? `Bash로 .harnie 접근 금지 — 신뢰 CLI 형태이나 승인 실패: ${why}` : "Bash로 .harnie 접근 금지 — 상태 접근은 loop.mjs·execution.mjs(신뢰 CLI)로만" }

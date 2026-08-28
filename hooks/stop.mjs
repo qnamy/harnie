@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Stop re-derives completion from authority files instead of trusting narration or phase.
-import { readStdin, resolveRoot, isOwnerSession, blockStop, allow } from "./lib.mjs"
+import { readStdin, findRoot, blockStop, allow } from "./lib.mjs"
 import { loadContext, computeCompletion, parseStatusFooter } from "../scripts/execution.mjs"
 import { decideStop } from "../scripts/guards.mjs"
 
@@ -13,10 +13,10 @@ const failClosed = (blockers) => {
 }
 
 try {
-  const root = resolveRoot(p.cwd, p.session_id)
+  const root = findRoot(p.cwd)
   const ctx = loadContext(root)
+  // 0.14 D4: 활성 run이 있는 트리의 모든 세션이 완료 강제 대상이다(세션 소유 개념 삭제).
   if (!ctx.active) allow()
-  else if (!isOwnerSession(root, ctx, p.session_id)) allow()
   else if (ctx.failClosed) failClosed([`상태 손상: ${ctx.reason}`])
   // S mode(0.11): 승인 권위 없음 — canonical 리뷰 유닛 APPROVED + 현재 트리 바인딩 + 정직 footer가 완료 판정.
   // decideStop은 complete를 단락 평가하므로, S의 3항 중 footer는 여기서 별도 강제한다(CR-002 — footer 없는 false-completion 차단).
@@ -32,8 +32,6 @@ try {
     const comp = computeCompletion(root, ctx.track, ctx.slug)
     const d = decideStop({ complete: comp.complete, blockers: comp.blockers, footer, stopHookActive })
     if (d.block) blockStop(d.reason)
-    // 한 세션 = 한 run(v1): 완료 후에도 바인딩을 세션 수명 동안 유지한다. 그래야 후속 수정이 생겨도
-    // resolveRoot가 같은 workroot를 찾아 H1/H2가 다시 권위를 재검증한다.
     allow()
   }
   else if (ctx.approvalEvidence)
