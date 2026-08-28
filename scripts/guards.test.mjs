@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, isExecutionSubcommand } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
@@ -75,6 +75,29 @@ test("decideBash: abandon은 활성 slug·비활성 slug 대상 모두 통과(�
   assert.equal(decideBash({ command: cmd("x"), ...ctx }).deny, false)        // 활성 slug
   assert.equal(decideBash({ command: cmd("stale-run"), ...ctx }).deny, false) // 비활성 slug
   assert.equal(decideBash({ command: cmd("x"), ...ctx }).autoAllow, false)   // 자동 허용은 아님 — 사용자 프롬프트를 거친다
+})
+
+// DEC-2: 승인 권위는 run에 적힌 라벨이 아니라 실행 시점의 훅 유무가 정한다. 훅이 도는 세션에서
+// 오케스트레이터가 Bash로 approve를 부르는 것은 AskUserQuestion 원샷 바인딩의 우회다.
+// **`decideBash`가 deny를 내는 것으로 못박는다** — `isSanctionedCli`만 보는 테스트는 이 회귀를 통과시킨다.
+// 그 함수의 false는 deny가 아니라 다음 검사로의 통과이고, 이 명령 문자열에는 `.harnie`가 없어
+// `referencesHarnie`가 불일치해 fail-open이 되기 때문이다.
+test("decideBash: execution.mjs approve의 Bash 호출은 신뢰 CLI 형태여도 deny(자가승인 차단)", () => {
+  // 전제: 이 형태는 신뢰 CLI 승인을 통과한다(같은 형태의 다른 서브커맨드가 allow인 것이 그 증거).
+  // 그래서 approve의 deny는 `isSanctionedCli` 뒤가 아니라 **앞**에 있어야만 성립한다.
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs completion --root /repo --slug x", ...ctx }).deny, false)
+  const d = decideBash({ command: `node /plugin/scripts/execution.mjs approve --root /repo --slug x --plan-hash ${"a".repeat(64)}`, ...ctx })
+  assert.equal(d.deny, true)
+  assert.match(d.reason, /자가승인/)
+  assert.match(d.reason, /AskUserQuestion/)
+  // 신뢰 CLI 형태가 아닌 호출(--root 불일치·다른 경로)도 같은 자리에서 걸린다
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs approve --root /other --slug x", ...ctx }).deny, true)
+  assert.equal(decideBash({ command: "node /tmp/execution.mjs approve --root /repo --slug x", ...ctx }).deny, true)
+  // approve만 막는다 — 승인으로 가는 정규 경로(arm-approval)는 열려 있어야 한다
+  assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs arm-approval --root /repo --slug x", ...ctx }).deny, false)
+  assert.equal(isExecutionSubcommand("node /p/execution.mjs approve --root /r", "approve"), true)
+  assert.equal(isExecutionSubcommand("node /p/execution.mjsx approve", "approve"), false)
+  assert.equal(isExecutionSubcommand("node /p/loop.mjs approve", "approve"), false)
 })
 
 // 0.14: run root 하나뿐 — loop CLI도 run root 인자만 받는다(태스크별 worktree 소멸).

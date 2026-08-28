@@ -10,7 +10,7 @@
 // 0.14 D1: run root = 세션 cwd의 git repo root다(main 브랜치 포함). harnie는 worktree를 만들지도 지우지도
 // 않는다 — 격리는 사용자와 orca가 만든 워크스페이스가 제공한다. 그래서 이 훅이 하는 일은 셋뿐이다:
 // git repo 확인, `.harnie/`의 info/exclude 등록, bootstrapRun.
-import { existsSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { join } from "node:path"
 import { execFileSync } from "node:child_process"
 import { findRoot, ensureExcludeEntries } from "./lib.mjs"
@@ -34,6 +34,20 @@ function okAllow(text) {
   process.exit(0)
 }
 const NOT_RUNNABLE = (root) => `harnie는 git repo 안에서만 실행됩니다 — 현재 root(${root})는 git repo가 아님`
+// 인자 없는 진입 = 재개(0.14 D7). `resumeRun`이 요구하는 정확 일치를 사람이 원 프롬프트를 글자 그대로
+// 재현해 충족할 필요가 없도록, 활성 run의 sentinel에 이미 있는 `base`를 그대로 되돌려준다. 활성 run이
+// 없으면 null을 내고 호출부가 오늘과 같이 fail한다. **두 진입 경로 모두에 쓴다** — U1c 카나리아에서 Skill
+// 도구 경로가 sentinel을 보기도 전에 실패하는 것이 관측됐고, 슬래시 커맨드만 고치면 동선이 절반만 열린다.
+const NO_RESUME = "재개할 활성 run도 없습니다"
+function activeBase(root) {
+  const sentinel = join(root, ".harnie", "active.json")
+  if (!existsSync(sentinel)) return null
+  try {
+    const s = JSON.parse(readFileSync(sentinel, "utf8"))
+    const base = s && (s.base || s.slug)
+    return typeof base === "string" && base ? base : null
+  } catch { return null } // 손상 sentinel의 진단은 bootstrapRun이 fail-closed로 낸다
+}
 // repo 모드 판정: root 자체가 git 작업트리인가(디렉터리 .git 또는 worktree의 .git 파일).
 function isGitRoot(root) { return existsSync(join(root, ".git")) }
 // 기본 브랜치 경고(차단 아님, 설계 §8). D1이 차단을 배제했으므로 통지만 한다.
@@ -72,7 +86,6 @@ try {
 try {
   const event = p.hook_event_name || ""
   const root = findRoot(p.cwd)
-  const sessionId = p.session_id
   // bootstrap 성공은 emit이 이벤트에 맞는 방식으로 exit하고, 실패는 호출을 fail-closed한다.
   const doBootstrap = (base, emit) => {
     try {
@@ -80,7 +93,7 @@ try {
       // 전제하므로 상태만 생기고 머신이 돌 수 없는 곳에 run을 만들지 않는다.
       if (!isGitRoot(root)) throw new Error(NOT_RUNNABLE(root))
       ensureExcludeEntries(root, ".harnie/")
-      const result = bootstrapRun(root, { base, track: "plan", sessionId })
+      const result = bootstrapRun(root, { base, track: "plan" })
       emit(runMessage(root, result.slug, defaultBranchWarning(root)))
     } catch (e) { const msg = e && e.message ? e.message : String(e); fail(msg) }
   }
@@ -93,8 +106,8 @@ try {
     if (/^\/harnie:dev-quick(?:\s|$)/.test(prompt)) okContext(RETIRED_ROUTE_MSG)
     const mDev = prompt.match(/^\/harnie:dev(?:\s+([\s\S]*))?$/) // 0.11 단일 파이프라인 진입(정확 prefix; dev-full/dev-quick은 위에서 처리)
     if (mDev) {
-      const base = slugify((mDev[1] || "").trim())
-      if (!base) fail("`/harnie:dev`에 작업 설명이 필요합니다 — `/harnie:dev <작업>`") // 빈 인자 → exit 2(P1-1)
+      const base = slugify((mDev[1] || "").trim()) || activeBase(root)
+      if (!base) fail(`\`/harnie:dev\`에 작업 설명이 필요합니다 — \`/harnie:dev <작업>\`(${NO_RESUME})`) // 빈 인자 → exit 2(P1-1)
       // `/harnie:dev`는 유일한 라이브 진입점이며 즉시 부트스트랩한다(mode는 sizing으로 시작).
       doBootstrap(base, okContext)
     }
@@ -103,8 +116,8 @@ try {
     const skill = p.tool_input && p.tool_input.skill
     if (skill === "harnie:dev-full" || skill === "harnie:dev-quick") okAllow(RETIRED_ROUTE_MSG)
     if (skill === "harnie:dev") {
-      const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim())
-      if (!base) fail(`작업 인자가 비어 있음 — ${skill} skill args 필요`)
+      const base = slugify(String((p.tool_input && p.tool_input.args) || "").trim()) || activeBase(root)
+      if (!base) fail(`작업 인자가 비어 있음 — ${skill} skill args 필요(${NO_RESUME})`)
       doBootstrap(base, okAllow)
     }
     ok() // 기타 skill

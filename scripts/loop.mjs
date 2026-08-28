@@ -263,6 +263,11 @@ function cmdApply({ flags }) {
   if (!PROGRESS_FLAGS.has(progressFlag)) die(`--progress는 auto|yes|no (got ${JSON.stringify(progressFlag)})`)
   const reentry = flags.reentry || null
   if (reentry != null && !REENTRY_REASONS.has(reentry)) die(`--reentry는 ${[...REENTRY_REASONS].join("|")} 중 하나 (got ${JSON.stringify(reentry)})`)
+  // 0.14 D6: 이 라운드를 누가 리뷰했는지 기록만 한다. 어떤 판정에도 들어가지 않으므로 loop.mjs는
+  // 포터블 코어로 남는다. apply가 리뷰어를 스폰하지 않으니 이 값은 호출자의 신고이지 관측이 아니고,
+  // 완료 리포트 문구가 그 사실을 담는다.
+  const reviewerRuntime = flags["reviewer-runtime"] || null
+  const reviewerModel = flags["reviewer-model"] || null
   const artifact = flags.artifact || null
   if (namespace === "CR" && artifact == null) die(`CR(코드 리뷰) apply는 --artifact <postSHA> 필수(리뷰된 tree 바인딩)`)
   if (artifact != null) {
@@ -315,6 +320,10 @@ function cmdApply({ flags }) {
   const persisted = { round: nextState.round, stagnation: nextState.stagnation, machineState: nextState.machineState, lastVerdict: nextState.lastVerdict, openBlocking: nextState.openBlocking }
   if (reentry) persisted.reentry = reentry
   if (artifact) persisted.reviewedPostSHA = artifact
+  // 라운드별 누적 — persisted를 매번 새로 만들므로 이전 라운드의 기록은 명시적으로 이어 붙인다.
+  const reviewers = Array.isArray(prevState.reviewers) ? [...prevState.reviewers] : []
+  if (reviewerRuntime || reviewerModel) reviewers.push({ round: nextState.round, runtime: reviewerRuntime, model: reviewerModel })
+  if (reviewers.length) persisted.reviewers = reviewers
   writeJSON(statePath, persisted)
   const contextBudget = {}
   if (nextState.machineState === "APPROVED") {

@@ -133,8 +133,23 @@ function sanctionFailureWhy(cmd, { trustedClis, activeRoot }) {
     return "`node <신뢰 CLI 절대경로> …` 형태가 아님"
   return `--root 인자가 이 트리의 run root와 불일치(run root ${activeRoot}) — 인자 오타이거나, 다른 트리의 run을 이 세션에서 조작하려는 경우`
 }
+// 명령이 `node <…>/execution.mjs <sub> …` 형태로 그 서브커맨드를 부르는지. 신뢰 CLI 판정과 독립이다 —
+// 여기서 보는 것은 "무엇을 하려는가"이지 "승인된 형태인가"가 아니다.
+export function isExecutionSubcommand(cmd, sub) {
+  const toks = String(cmd || "").trim().split(/\s+/)
+  const i = toks.findIndex((t) => /(?:^|\/)execution\.mjs$/.test(t))
+  return i >= 0 && toks[i + 1] === sub
+}
+
 export function decideBash({ command, trustedClis = new Set(), activeRoot = null, activeSlug = null, activeTrack = null }) {
   const cmd = String(command || "")
+  // DEC-2: 승인 경로를 정하는 것은 run에 적힌 라벨이 아니라 실행 시점의 훅 유무다. 훅이 도는 세션에서
+  // 오케스트레이터가 Bash로 approve를 부르는 것은 AskUserQuestion 원샷 바인딩의 우회이므로 여기서 막는다.
+  // **자리가 계약의 일부다** — `isSanctionedCli` 안에 넣으면 그 함수의 false가 deny가 아니라 다음 검사로의
+  // 통과이고, 다음 `referencesHarnie`는 이 명령 문자열에 `.harnie`가 없어(스크립트 경로는 플러그인, --root는
+  // repo root) 불일치한다. 결과는 fail-open이라 오늘보다 나빠진다.
+  if (isExecutionSubcommand(cmd, "approve"))
+    return { deny: true, reason: "훅이 도는 세션에서 `execution.mjs approve`의 Bash 호출 금지(자가승인 차단) — 승인은 `arm-approval`로 arm한 뒤 plan.md를 사용자에게 제시하고 AskUserQuestion 응답으로 바인딩하는 경로만 유효하다" }
   if (isSanctionedCli(cmd, { trustedClis, activeRoot })) {
     const bound = hasValidActiveContext(activeRoot, activeSlug, activeTrack)
     return { deny: false, autoAllow: bound && isAutoAllowSanctionedSub(cmd) }
