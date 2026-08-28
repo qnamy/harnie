@@ -517,6 +517,7 @@ graph LR
   3. 두 번째 세션을 같은 클론에 붙여 소스 쓰기가 막히는지, `abandon`으로 풀리는지 확인한다.
   4. 실패가 나오면 U2를 시작하기 전에 U1로 되돌린다. 이 시점의 revert는 순수 삭제의 되돌리기라 비용이 낮다.
 - **검증**: 위 셋의 관측 결과를 명시적으로 보고. 실패 시 U2 착수 보류.
+- **결과(2026-08-28, 통과)**: 0.14.0-rc.1 설치본으로 스크래치 클론에서 S/easy run 1건 완주(Codex 빌드 → Claude 리뷰 APPROVE → `complete:true`). ① 상태 디렉터리는 `!! .harnie/`(ignored)로 `git status`에 뜨지 않고 exclude 등록이 실재한다. ② 기본 브랜치 경고가 매 진입마다 뜨고, **부트스트랩 emit이 workroot가 아니라 run root와 slug를 냈다** — 갱신 반영의 육안 증거. ③ 무관한 파일 한 줄에 `complete:false` + "리뷰 후 변경됨" blocker로 fail-closed, 원복하니 `complete:true` 복귀(`rebind-tree`는 U2 대기). 3단계도 통과 — 진입한 적 없는 세션의 소스 쓰기가 막히고, deny 문구가 활성 slug와 두 출구를 담았으며, `abandon`이 `wasActive:true`·`movedTo=.harnie/abandoned/<slug>-<ts>`로 응답한 뒤 같은 편집이 통과했다. **0.13.x부터 이어진 실런 0회 부채가 여기서 1회로 갚혔다.**
 
 ---
 
@@ -540,7 +541,7 @@ graph LR
   6. `runs --root <r>` 신설: `.harnie/plan/*` 스캔 → `closedAt` 없는 run의 `{slug, mode, active, blockers[]}`. `.harnie/abandoned/` 아래는 스캔하지 않는다. `guardActive` 안 부른다.
   7. `handoff --root <r> --slug <s>` 신설: `withStateLock` 아래에서 ① `active.json`을 그 slug로 전환 ② arm·rebind 파일 넷 삭제 ③ `readOnlyThreads`와 `tasks[].builderThreadId` 비우기 ④ `tasks[].builderBoundAt`·`startedAt`을 현재 시각으로 재기산(`codexCalls`·`watchdogExtensions`는 유지) ⑤ 각 리뷰 유닛의 `reviewedPostSHA`와 현재 `captureTree(root)`를 비교해 불일치 시 변경 파일 목록 반환. `guardActive` 안 부른다. **`--runtime` 인자는 두지 않는다** — 소비자가 없는 자기신고 값이다(§9).
   8. `rebind-tree --root <r> --slug <s> --unit <u> --files <목록>` 신설: 기록 SHA와 현재 트리의 delta가 `--files`와 정확히 일치하고, 그 파일들이 해당 리뷰 유닛의 범위(M은 manifest task scope, S는 리뷰가 승인한 delta의 파일 집합)와 하나도 겹치지 않을 때만 `reviewedPostSHA`를 갱신하고 `treeRebinds[]`에 append. `guardActive` 호출.
-  9. 인자 없는 `/harnie:dev` 재개: `bootstrap.mjs`가 빈 인자일 때 `active.json.base`를 읽어 `bootstrapRun`에 넘긴다. 활성 run이 없으면 오늘처럼 실패한다.
+  9. 인자 없는 `/harnie:dev` 재개: `bootstrap.mjs`가 빈 인자일 때 `active.json.base`를 읽어 `bootstrapRun`에 넘긴다. 활성 run이 없으면 오늘처럼 실패한다. **두 진입 경로 모두에 적용한다** — U1c 카나리아에서 Skill 도구 경로(`PreToolUse(Skill)`, 빈 `args`)가 `active.json`을 보기 전에 실패하는 것이 관측됐다. 슬래시 커맨드(`UserPromptSubmit`)만 고치면 재개 동선이 절반만 열린다.
   10. `loop.mjs apply`에 `--reviewer-runtime`·`--reviewer-model`을 받아 `state.json`의 그 라운드에 `reviewer: {runtime, model}`을 기록한다. 완료 도출에 영향을 주지 않는다.
   11. `computeCompletion`의 리포트가 라운드별 `reviewer`와 `treeRebinds`를 함께 낸다. 리뷰 구성 문구에 "오케스트레이터 신고 값"임을 담는다.
   12. `stop.mjs`의 드리프트 `blockStop` 메시지에 변경 파일 목록과 "사용자에게 물어라"를 담는다.
