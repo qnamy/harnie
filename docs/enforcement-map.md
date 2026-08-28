@@ -9,6 +9,7 @@
 | 승인 전 소스 쓰기 금지 | SKILL §Execution State | PreToolUse `decideWriteEdit`/`decideBash`/`decideCodex`(planning phase) | 불변식 ① — 문장 유지 |
 | 미완료를 done으로 확정 금지 | phase-b B6 | Stop 훅 = `computeCompletion` 재도출 | 불변식 ② — 문장 유지 |
 | A5 승인은 실제 AskUserQuestion에만 바인딩 | phase-a A5.1 | `arm-approval` + Pre/PostToolUse one-shot 바인딩 | 자기승인 차단 |
+| Claude 오케스트레이터의 `approve` Bash 호출 금지 | DEC-2 | `decideBash`의 `approve` deny | **강제 — 오케스트레이터 Bash 한정.** 훅 없는 세션과 그 세션이 spawn한 Codex에는 적용되지 않음 |
 | manifest는 planHash 봉인, A5.2로만 개정 | phase-a A5.2 | `bindApproval` 아카이브+교체, 직접 쓰기 훅 차단 | |
 | scope 배타 검증 | phase-b B1 | `validateManifest`@arm-approval | B1은 재검사 안 함(문서 그대로) |
 | `.harnie` 셸 접근 금지(읽기 포함) | SKILL §Execution State | Bash 가드(blanket — 명령 텍스트의 `.harnie` 참조 전부) | export/Read가 공인 경로 |

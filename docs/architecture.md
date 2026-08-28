@@ -1,6 +1,6 @@
 # harnie 아키텍처 — 크로스-모델 빌드/리뷰 루프
 
-> 한 세션 안에서 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, 각 단계를 **반대 모델이 리뷰**해 맹점을 없앤다(`harnie:dev` 기준 — dev-solo는 fresh Codex 셀프리뷰로 대체하는 예외다). 구독 auth만으로, 두 프로바이더(Claude·Codex)를 한 세션에서 조합한다.
+> 하나의 durable run을 Claude와 Codex 런타임이 이어받아 **설계 → 리뷰 → 개발 → 리뷰**를 진행하되, `harnie:dev`에서는 각 단계를 반대 모델이 리뷰한다. `dev-solo`는 fresh Codex 셀프리뷰로 대체하는 예외다. 구독 auth만으로 두 프로바이더를 조합한다.
 >
 > **0.13(2026-08-27)에서 L 파이프라인이 삭제됐다** — 러너 경로(`harnie-task-runner`·태스크별 worktree), CONTRACT 설계 고도, workspace(멀티레포) 모드, `worktree.mjs merge/archive`, errata v2, `harness-digest`가 모두 제거됐고, harnie가 자동화하는 범위는 **S/M 한 run**과 크로스모델 리뷰·강제 계층·스킬 허브다. L 이상의 분해·디스패치·통합은 사람 + orca가 소유한다. 근거 = [design-0.13-L-dismantle.md](design-0.13-L-dismantle.md).
 >
@@ -70,7 +70,7 @@ durable **파일 기반 상태** — `.harnie/plan/<slug>/` (경로의 `plan`은
 
 ## 4. 파이프라인 흐름 (S/M)
 
-풀 라이프사이클. main이 계획 국면 → 실행 국면으로 전환한다(에이전트 전환이 아니라 한 세션의 국면 전환). M보다 큰 작업은 harnie가 자동화하지 않는다 — 분해·디스패치·통합은 사람 + orca가 소유한다.
+풀 라이프사이클. durable 상태가 계획 국면 → 실행 국면으로 전환하며, 한 세션이 중단돼도 Claude `/harnie:dev`와 Codex `dev-solo`가 다음 스테이지부터 이어받을 수 있다. M보다 큰 작업은 harnie가 자동화하지 않는다. 분해·디스패치·통합은 사람과 orca가 소유한다.
 
 ### PHASE A — PLAN
 ```

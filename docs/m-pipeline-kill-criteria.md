@@ -1,14 +1,14 @@
-# M Pipeline Kill Criteria (0.13, decided 2026-08-27)
+# M Pipeline Kill Criteria (0.14, comparison axis decided 2026-08-28)
 
-**Proposition under test.** After the 0.13 changes (loop minimization, bureaucracy reduction, `cross-review` extracted as a standalone skill), if an `M` run of `/harnie:dev` shows no advantage over **a plain session + the `cross-review` skill**, the M pipeline is dismantled and only the skill is kept.
+**Proposition under test.** After the 0.14 user-tree handoff change, compare dispatched development units that run through `dev` with dispatched units that run plain. If the M pipeline shows no advantage over **a plain session + the `cross-review` skill**, the M pipeline is dismantled and only the skill is kept.
 
-This document records the criteria. It does not dismantle anything, and nothing in 0.13 acts on it.
+This document records the criteria. It does not dismantle anything, and nothing in 0.14 acts on it.
 
 ## What is compared
 
 | | Path A | Path B |
 |---|---|---|
-| Execution | `/harnie:dev` M run | plain session + `skills/cross-review/SKILL.md` |
+| Execution | dispatched unit running `/harnie:dev` M | dispatched unit running plain + `skills/cross-review/SKILL.md` |
 | Review contract | identical (`cross-review`) | identical (`cross-review`) |
 | Difference under test | the pipeline machinery **around** the review loop: mode/size state, the plan manifest and approval gate, seal windows, `verify` receipts, completion authority, the watchdog | none of it |
 
@@ -18,7 +18,7 @@ Because both paths now run the *same* review contract, what is being measured is
 
 ## Sample
 
-- **3 real M-sized work items.** Real work only. Synthetic exercises do not count — the same reason U2D dropped its two-task synthetic pilot: a synthetic task does not reproduce the real cost structure (grounding, user gates, rework).
+- **3 real dispatched development units.** Real work only. Each sample compares a unit that ran `dev` with an adjacent dispatched unit that ran plain. Synthetic exercises, including the 0.14 U1c and U7 canaries, do not count because they do not reproduce the real cost structure (grounding, user gates, rework).
 - Path B comparisons come from **adjacent work of similar character and size**, not from re-running the same task.
 
 ## Measures (record all four per sample)

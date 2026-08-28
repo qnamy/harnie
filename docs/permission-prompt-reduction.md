@@ -7,7 +7,7 @@
 
 1. **(A) allowlist(주 경로):** harnie CLI·read-only 조회·codex MCP를 **사용자가 명시적으로 `settings.json`에 allowlist**한다. "무엇을 신뢰할지"는 **사용자·플랫폼 계층의 결정**(harnie 5계층 원칙)이며 플러그인이 대신 증명하지 않는다. `settings.local.json`은 사용자·프로젝트 소유라 플러그인과 함께 이동하지 않는다.
 2. **(B') 좁은 훅 auto-allow(설치 사용자 무마찰):** allowlist가 플러그인과 함께 이동하지 않으므로, 설치 사용자에게도 **효과가 제한된 sanctioned 집합**만 PreToolUse `permissionDecision:"allow"`로 프롬프트를 skip한다 — `loop.mjs {capture, delta}`, `execution.mjs {completion, seal, seal-verify}`. 이는 넓은 (B)와 달리 안전이 증명 가능한 최소 집합이다:
-   - **자동 허용:** 위 집합만(capture=임시 index+tree object·worktree 불변 / delta=`.harnie/…/delta.patch`만 write / completion=read-only / seal·seal-verify=자기 상태 파일 `.seal.json`만 write, 멱등·조건부).
+   - **자동 허용:** 위 집합만(capture=임시 index+tree object·사용자 작업 트리 불변 / delta=`.harnie/…/delta.patch`만 write / completion=read-only / seal·seal-verify=자기 상태 파일 `.seal.json`만 write, 멱등·조건부).
    - **계속 프롬프트:** `apply`(ledger/state 전이)·`verify`(receipt+argv 실행)·`init`·`set-task`·`set-phase`·`arm-approval`, workspace-write codex, 모든 Write/Edit/Task, 일반 read-only Bash(범위 확대 안 함).
    - **불변식:** `autoAllow ⊂ deny:false` 엄격 부분집합(어떤 deny도 완화 안 함) · **완전한 active 바인딩**(root·slug·track) 전제 · 인터프리터 바인딩(bare `node`/`process.execPath`만, `/tmp/node` 거부) · `failClosed`면 auto-allow 없음.
    - **사용자 통제 유지:** PreToolUse `allow`는 user·project의 `deny`/`ask` 규칙에 밀린다(플러그인 공식 문서 확인).
