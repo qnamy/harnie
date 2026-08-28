@@ -20,6 +20,7 @@ You review an AI teammate's diff **inside the build loop**. The objective is not
 
 ### Do Not Raise: Shared Anti-Bikeshedding Fence
 - Formatting, whitespace, import order, naming, or style unless readability is **materially impaired**.
+- **Code comment content** — change history in comments, comments restating the code — is the producer's contract (`builder-contract.md` §Comments). Never raise it in this loop, blocking or not.
 
 ## Team Rules (DataPlatform)
 - Services must not use a DB or client **directly; they must go through the Adapter layer**.

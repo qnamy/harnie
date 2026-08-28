@@ -35,7 +35,7 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 
 ### Do Not Flag
 
-Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**.
+Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**. Code comment content is judged separately (§Comment Classification).
 
 ## How to Write Findings
 
@@ -63,6 +63,8 @@ The three prefixes communicate **the expected author response and whether the fi
 | `nit:` | An optional suggestion | Non-blocking |
 
 `issue:` and `discuss:` block merge until resolved. `nit:` is non-blocking; response and implementation are both optional. A `discuss:` finding can be resolved **without a code change** once the concern is addressed or the tradeoff reaches a conclusion. Leave comments only for problems actually found.
+
+**Code comment content is always `nit:`** — a code comment recording the change (dates, prior values, commented-out old code) or restating the code it sits on. Never raise it as `issue:` or `discuss:`. The criteria are canonical in `instructions/builder-contract.md` §Comments and are not restated here.
 
 Examples:
 
