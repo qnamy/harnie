@@ -76,13 +76,12 @@ bootstrap 실패(파싱 오류·빈 args·lock 경합·init 예외·rollover blo
 
 → bootstrap 부재 시 스킬이 **자체 init으로 복구하지 않는다**. 자체 복구를 허용하면 지침 의존 부트스트랩 갭이 재발한다. (C2에서 스킬이 자체 init한 것은 프로브에 bootstrap 훅이 없었기 때문 — 최종 계약에서 훅 의존이 정상 동작.)
 
-### 3.7 활성 run worktree/브랜치 삭제 방어 (0.13 T8, 2026-08-26 사고 대응)
+**self-init이 정당한 경우는 훅이 없는 런타임의 `init`뿐이다.** 해당 런타임은 훅이 sentinel을 만들 수 없으므로 CLI가 사용자 git repo root에 run을 만든다. 이미 남은 run을 다시 여는 경우에는 새 init이 아니라 `runs`로 후보와 다음 블로커를 확인한 뒤 `handoff`로 활성화한다.
 
-**사고**: 정리 세션(비-owner, cwd=main root)이 "워크트리·브랜치 정리" 지시를 과잉 해석해 실행 중이던 M run의 worktree와 미푸시 브랜치를 원문 `git`/`rm`으로 삭제했다. `scripts/guards.mjs`의 `referencesWorktreeContainer`는 "이 worktree **안**에서 build·test·git을 자유롭게 쓰게" 하려고 `.harnie-wt/<dir>` 형태의 **구체 경로**를 의도적으로 허용하는데, `git worktree remove <그 worktree>`·`rm -rf <그 worktree>` 같은 **삭제 자체**도 같은 허용 분기에 떨어져 어떤 술어도 막지 못했다(전수 분석: `~/Tradlinx/task2-recovery/bureaucracy-audit.md` §2.1). 상세는 그 문서 §2.3(도입 조건 3개)을 따른다 — 여기서는 구현·잔여 한계만 기록한다.
+### 3.7 사용자 트리 삭제 방어를 확장하지 않는 결정 (0.14)
 
-**구현**: 새 상태 파일 없음(감사 §2.3 조건 2). `hooks/lib.mjs`의 `listActiveRunWorktrees(mainRoot)`가 `<mainRoot>/.harnie-wt/*`를 훑어 자기 `.harnie/active.json`을 가진 run만 모으고(각 run의 `slug`는 이미 그 파일에 있다), 브랜치명은 bootstrap이 항상 `harnie/<slug>`로 만드는 결정적 관례에서 파생한다(`hooks/bootstrap.mjs`·`execution.mjs` `initCliAuthority` 두 프로덕션 경로 모두 이 관례를 따르므로 새 필드도 필요 없다). `hooks/pretooluse.mjs`가 세션의 owner 여부와 무관하게(사고의 가해 세션은 대상 run의 owner가 아니었다) 이 목록을 계산해 `scripts/guards.mjs`의 `decideActiveRunDeletion`(새 predicate 2개: 워크트리 삭제·브랜치 삭제)에 넘긴다. `worktree.mjs remove`(신뢰 CLI)는 `decideBash`에서 이미 sanctioned로 분류돼 이 predicate까지 오지 않으므로 정상 정리 경로는 그대로 열려 있다.
+0.13의 `decideActiveRunDeletion`은 harnie가 만든 worktree와 브랜치를 보호했다. 0.14에서는 그 보호 대상이 사라지고 run root가 사용자의 실작업 트리가 된다. 이 predicate를 사용자 트리로 확장하지 않는다.
 
-**잔여 한계(해결됐다고 쓰지 않는다)**: 이 deny는 **정리 세션의 `findRoot`가 그 run의 `.harnie-wt` 컨테이너를 찾을 수 있는 root에서만** 발화한다 — §0.1 잔여(위 §3.9)와 같은 계보다. 구체적으로:
-- 다른 repo 루트에서, 또는 절대경로로 다른 워크스페이스의 워크트리·브랜치를 지우는 경우는 커버되지 않는다.
-- 판정은 명령 문자열의 리터럴 부분일치다(§0.1 적대적 방어가 비목표인 것과 같은 수준) — 셸 변수·글롭 확장으로 같은 경로를 우회 지목하면 놓칠 수 있다.
-- **따라서 이 장치는 재발을 100% 막지 못하며**, 병행해야 할 저비용 대응은 엔진이 아니라 운영 규칙이다: 정리 지시는 **대상을 명시 열거**한다(메모리 `harnie-scope-framing-0.13-backlog` 항목 4). 엔진 장치를 도입했다고 이 규칙이 불필요해졌다고 오해하지 말 것.
+근거는 세 가지다. 첫째, 작업 트리의 수명주기와 정리는 orca와 사용자가 소유한다. harnie가 그 경계를 다시 지키기 시작하면 소유권이 겹친다. 둘째, 이전 장치가 남긴 한계인 명령 문자열 부분일치, 다른 root에서의 절대경로 지목, 셸 변수와 글롭 우회는 사용자 트리에서 더 넓은 삭제 표현을 만나므로 확대 적용의 신뢰도가 낮다. 셋째, 그 한계에 대한 저비용 대응은 이미 운영 규칙으로 판정됐다. 정리 지시는 대상을 명시 열거한다.
+
+이는 사용자 트리 삭제를 안전하다고 판단한 것이 아니다. harnie는 사용자 트리의 삭제를 새 엔진 게이트로 보호하지 않고, run 제어 상태는 `.git/info/exclude`와 control-path 가드로 별도 보호한다. 근거는 [0.14 사용자 트리 인계 설계](design-0.14-user-tree-handoff.md) §8이다.

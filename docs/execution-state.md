@@ -5,7 +5,7 @@
 > 근거: [Hooks](https://code.claude.com/docs/en/hooks), [Plugin hooks](https://code.claude.com/docs/en/plugins), [Subagents](https://code.claude.com/docs/en/sub-agents).
 
 ## 0. 비목표
-자동 retry 스케줄러·auto-continue·전문 에이전트 로스터·adversarial lane·compaction 자동 훅·다중 PR·worktree 격리(post-v0). **quick 트랙엔 execution.json·훅 없음.**
+자동 retry 스케줄러·auto-continue·전문 에이전트 로스터·adversarial lane·compaction 자동 훅·다중 PR·worktree 격리. **worktree 격리는 영구 미채택이다.** 사용자와 orca가 작업 트리 수명주기를 소유하며 harnie는 만들거나 지우지 않는다. **quick 트랙엔 execution.json·훅 없음.**
 
 ## 0.1 위협 모델 (설계 경계 — 이걸로 과-강화를 막는다)
 harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실수**를 막는다: 승인 전 코드 작성, 미완료를 done으로 확정, 태스크 누락, 실수로 심판 상태 훼손. **막지 않는(막을 수 없는) 것**: 세션 전체를 통제하는 **의도적으로 적대적인** 오케스트레이터가 포인터를 `rm`하거나 스레드를 위조하거나 권한 자체를 우회하는 것 — 이는 원리상 봉쇄 불가(main이 도구·FS를 소유)이며 harnie의 목표가 아니다. 따라서 아래 강제는 **실수-안전**을 높이되, 적대적 완전봉쇄를 좇지 않는다(경량 정체성 유지).
@@ -16,13 +16,13 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 ## 2. 파일 배치 + 빌더 격리 (DR-003)
 - `.harnie/plan/<slug>/`(**메인 트리**): `plan.md`(승인 명세) / `manifest.json`(A5에서 plan.md로부터 파생, planHash 고정, immutable) / `execution.json`(advisory) / `notepad.md`(append-only) / `review/<unit>/`(권위 ledger·state·round·evidence).
 - control·review-state 직접 Edit/Write/Bash-write는 항상 금지(§5.1); 기록은 `execution.mjs` 검증 전이(atomic)로만.
-- **빌더 격리 = lean (DR-013 결정, v0)**: v0에선 worktree 격리를 **defer**. 빌더(Codex workspace-write)는 **메인 트리(cwd=repo)** 에서 작업한다. 권위 상태(`.harnie/`)는 repo 안이라 빌더가 물리적으론 닿을 수 있지만, **실수-안전 가드**로 충분하다: ① **authority-state seal(DR-003)** — execution.mjs가 **빌더 호출 직전 권위 집합 전체의 canonical hash를 seal로 기록**한다. seal 입력 = `plan.md + manifest.json + 모든 review-unit의 ledger.json·state.json + 모든 verification/evidence receipt`(빌더 라운드 중 합법적으로 변하는 **advisory `active.json`·`execution.json`은 제외**). 빌더 산출 후 delta 귀속·ledger 적용 **전에 재해시 비교** → mismatch(빌더가 manifest·ledger·evidence 등 권위 파일을 건드림)면 **fail-closed**(그 라운드 무효·보고). delta 제외는 "숨기기"가 아니라 이 seal이 **독립 탐지**를 담당. ② loop.mjs가 ledger를 **fail-closed 구조 검증** ③ 빌더 프롬프트에 `.harnie/` 미접근 명시. **근거(§0.1)**: fallible 빌더가 *유효한 APPROVED ledger*를 실수로 위조할 확률은 무시가능 — 적대적 빌더 봉쇄는 비목표. **worktree lifecycle(생성·dirty seed·delta 승격·정리)은 구현 부담이 커 post-v0로 이연.**
+- **빌더 격리 = lean (DR-013 영구 미채택)**: 빌더(Codex workspace-write)는 **사용자가 이미 열어 둔 git repo root(cwd=repo)** 에서 작업한다. 권위 상태(`.harnie/`)는 repo 안이라 빌더가 물리적으론 닿을 수 있지만, **실수-안전 가드**로 충분하다: ① **authority-state seal(DR-003)** — execution.mjs가 **빌더 호출 직전 권위 집합 전체의 canonical hash를 seal로 기록**한다. seal 입력 = `plan.md + manifest.json + 모든 review-unit의 ledger.json·state.json + 모든 verification/evidence receipt`(빌더 라운드 중 합법적으로 변하는 **advisory `active.json`·`execution.json`은 제외**). 빌더 산출 후 delta 귀속·ledger 적용 **전에 재해시 비교** → mismatch(빌더가 manifest·ledger·evidence 등 권위 파일을 건드림)면 **fail-closed**(그 라운드 무효·보고). delta 제외는 "숨기기"가 아니라 이 seal이 **독립 탐지**를 담당. ② loop.mjs가 ledger를 **fail-closed 구조 검증** ③ 빌더 프롬프트에 `.harnie/` 미접근 명시. **근거(§0.1)**: fallible 빌더가 *유효한 APPROVED ledger*를 실수로 위조할 확률은 무시가능 — 적대적 빌더 봉쇄는 비목표. 작업 트리 생성·dirty seed·delta 승격·정리는 harnie 범위 밖이며 orca와 사용자가 소유한다.
 
 ## 3. Bootstrap·Active sentinel (DR-009 경계)
 
 > **교차참조:** 이 sentinel을 **누가/어떻게 생성**하는가(진입점 해석·자동 bootstrap 훅·run 수명주기·동시성·A0 계약)는 [`bootstrap-adherence.md`](bootstrap-adherence.md)가 **확장·우선**한다. 아래 sentinel-first·스키마는 유효하되, 최종 설계에서는 **스킬 A0의 자체 init 대신 bootstrap 훅이 sentinel을 결정적으로 생성**하고 `active.json`에 `base`/collision-free `slug`를 담는다.
 
-- **`.harnie/active.json`**(sentinel) = `{track, slug, planHash|null, readOnlyThreads:[…]}`. 훅은 이것만 본다. 부재=비활성 통과.
+- **`.harnie/active.json`**(sentinel) = `{track, slug, base, planHash|null, readOnlyThreads:[…]}`. `base`는 인자 없는 재개의 원 프롬프트를 재도출한다. `sessionIds`와 `authority`는 저장하지 않는다. 훅은 이것만 본다. 부재=비활성 통과.
 - **sentinel-first 부트스트랩**: PHASE A 시작 시(아직 아무 코드도 생성 전) sentinel을 **먼저** atomic write → execution.json 생성. sentinel이 있는데 execution.json이 없거나 malformed·planHash 불일치면 **fail-closed(차단)**. → crash 창 없음.
 - 의도적 sentinel 삭제로 하는 우회는 §0.1 위협모델 밖(적대적). 실수-안전엔 sentinel-first로 충분.
 
@@ -43,7 +43,7 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 ### 5.1 H1 승인-前·control 보호 (PreToolUse) — DR-002, DR-003
 matcher는 **앵커 정규식으로 확정**(설치 시 `Task`/`Agent`·MCP 정확 툴명 대조):
 - `Write|Edit`: **권위(authority) 파일** — basename이 `manifest.json`·`execution.json`·`active.json`·`ledger.json`·`state.json`·`receipt.json`·`.seal.json`·`.pending-approval.json`·`.arm-approval.json`인 `.harnie/` 하위 — 이면 phase 무관 차단(case-insensitive, symlink-해소 canonical relPath 기준). `round-N.txt`·`delta.patch`·`design.md`·`plan.md`·`notepad.md`는 오케스트레이터/loop의 정당한 산출물이라 허용(구현 초기 `**/review/**` 전면 차단은 기능 파손이라 authority-basename만으로 좁힘). planning/awaiting-approval이면 `.harnie/<track>/<slug>/` 밖 쓰기 전부 차단. repo 밖으로 벗어나는 symlink/traversal도 차단.
-- `Bash`: **sanctioned CLI**(신뢰 절대경로의 `node …/loop.mjs`·`…/execution.mjs`·`…/worktree.mjs`, 셸 메타·개행·프로세스치환 없음)만 상태 쓰기로 인정한다. repo 인자 바인딩은 스크립트별로 다르다: `execution.mjs`의 `--root`와 `worktree.mjs`의 `--repo`는 활성 repo(run worktree)와 **정확히 일치**해야 하고, `loop.mjs`의 repo/`--root`는 활성 repo **또는** 그 run의 활성 태스크 worktree(`<활성 repo>/.harnie-wt/harnie-<slug>-t<id>`, 웨이브2 — worktree-per-task 병렬 실행에서 `delta`/`apply`가 태스크 worktree를 대상으로 하는 걸 허용하기 위함)까지 허용한다. `--slug` 같은 나머지 플래그는 sanctioning 판정에 쓰이지 않는다(그건 auto-allow 대상 서브커맨드 판정·`decideCodex`의 cwd 판정 등 별도 목적으로만 쓰인다). **비-sanctioned 명령의 `.harnie` 리터럴 접근은 phase 무관 전면 차단**(`find .harnie -delete`·`git clean -fd .harnie`·`node -e` 포함; `.harnie-wt` 컨테이너 자체를 겨냥하는 형태도 포함되나, 그 컨테이너 안 특정 worktree의 평범한 파일은 예외). **가드 슬림화(T1) 이후 승인-前 read-only allowlist는 존재하지 않는다** — 이 절의 이전 버전(rev.10 설계 당시)이 서술한 "승인 前엔 read-only 명령만 허용"은 위협모델(§0.1) 밖 방어로 판단돼 제거됐다. 지금은 `.harnie`를 리터럴로 참조하지 않는 Bash 명령이면 phase와 무관하게(승인 前 포함) 허용된다 — 승인-前 소스 쓰기를 막는 건 `decideWriteEdit`(Write/Edit 툴)뿐이고, **Bash를 통한 승인-前 소스 쓰기 백스톱은 v1에 추가하지 않기로 확정한 트레이드오프**다(웨이브-2 통합, 2026-08-14). sanctioned CLI 판정·`.harnie` 리터럴 차단 자체는 여전히 보수적 fail-closed.
+- `Bash`: **sanctioned CLI**(신뢰 절대경로의 `node …/loop.mjs`·`…/execution.mjs`, 셸 메타·개행·프로세스치환 없음)만 상태 쓰기로 인정한다. `execution.mjs`의 `--root`와 `loop.mjs`의 repo/`--root`는 활성 사용자 repo root와 **정확히 일치**해야 한다. `--slug` 같은 나머지 플래그는 sanctioning 판정에 쓰이지 않는다(그건 auto-allow 대상 서브커맨드 판정·`decideCodex`의 cwd 판정 등 별도 목적으로만 쓰인다). **비-sanctioned 명령의 `.harnie` 리터럴 접근은 phase 무관 전면 차단**(`find .harnie -delete`·`git clean -fd .harnie`·`node -e` 포함). **가드 슬림화(T1) 이후 승인-前 read-only allowlist는 존재하지 않는다** — 이 절의 이전 버전(rev.10 설계 당시)이 서술한 "승인 前엔 read-only 명령만 허용"은 위협모델(§0.1) 밖 방어로 판단돼 제거됐다. 지금은 `.harnie`를 리터럴로 참조하지 않는 Bash 명령이면 phase와 무관하게(승인 前 포함) 허용된다 — 승인-前 소스 쓰기를 막는 건 `decideWriteEdit`(Write/Edit 툴)뿐이고, **Bash를 통한 승인-前 소스 쓰기 백스톱은 v1에 추가하지 않기로 확정한 트레이드오프**다(웨이브-2 통합, 2026-08-14). sanctioned CLI 판정·`.harnie` 리터럴 차단 자체는 여전히 보수적 fail-closed.
 - `Task`: planning 중 write 가능 서브에이전트 위임 차단(read-only만).
 - **Codex MCP (DR-002)** — 서버명에 underscore가 있으므로 정확 앵커 matcher는 `^mcp__plugin_harnie_codex__codex$` / `^mcp__plugin_harnie_codex__codex-reply$`(로컬 .mcp.json이면 `^mcp__codex__codex(-reply)?$`; 설치 시 실제 툴명 대조). 단계별:
   - **planning/awaiting-approval**: `codex`는 `sandbox=="read-only"`만; `codex-reply`는 `threadId ∈ active.json.readOnlyThreads`만(설계리뷰 스레드). workspace-write·미등록 스레드 차단.
@@ -68,6 +68,8 @@ matcher는 **앵커 정규식으로 확정**(설치 시 `Task`/`Agent`·MCP 정�
 
 ## 7. Resume (DR-006) — abort escape 제거 (DR-010)
 - **resume = durable review-state에서 재도출**: manifest·각 reviewUnit ledger·state·round·baseline·plan.md/design.md를 읽어 fresh producer/reviewer에 open issue·receipt·round 주입. live 세션은 세션 내 최적화일 뿐 보장 대상 아님.
+- **실제 진입점**: 활성 run의 흔한 재개는 인자 없는 `/harnie:dev`가 sentinel의 `base`를 다시 사용한다. 다른 미완료 run을 찾을 때는 `execution.mjs runs --root <repo>`로 후보와 블로커를 확인하고, 선택한 run은 `execution.mjs handoff --root <repo> --slug <slug>`로 활성화한다. `handoff`는 런타임 종속 상태를 정리하고 현재 트리 드리프트를 보고한다.
+- **S 디스크 phase**: S run은 완료되어도 `execution.json.phase`가 `planning`으로 남을 수 있다. 완료 판정은 이 advisory 필드가 아니라 manifest·review state·receipt에서 재도출하므로, 이 표시는 0.14에서 고치지 않는다.
 - **machine abort escape 없음(DR-010)**: 실제 사용자 interrupt엔 Stop 훅이 실행되지 않으므로 self-abort가 애초에 불필요하고, self-asserted `--user-cancelled`는 사용자 취소의 증거가 아니다. 종료는 "정직한 미완료 보고 → 제어권 반환"(§5.2 재호출 통과) 경로로만. execution.json에 `outcome=aborted` 필드/전이를 두지 않는다.
 
 ## 8. 상태 전이표 + 무효화 (DR-004 — 유지)
