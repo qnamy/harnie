@@ -789,7 +789,10 @@ function makeCompleteRun(root, slug) {
 function approveDesignUnit(root, slug) {
   const dd = join(root, ".harnie", "plan", slug, "review", "design")
   mkdirSync(dd, { recursive: true })
-  writeFileSync(join(dd, "ledger.json"), "{}")
+  // 빈 원장은 namespace 검사를 돌 대상이 없어 무조건 통과한다 — 실제 DR 엔트리를 넣어야 회귀를 잡는다.
+  writeFileSync(join(dd, "ledger.json"), JSON.stringify({
+    "DR-001": { id: "DR-001", blocking: true, status: "resolved", location: "design", text: "resolved design finding" },
+  }))
   writeFileSync(join(dd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: "dr:" + "a".repeat(64) }))
   return dd
 }

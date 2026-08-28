@@ -406,7 +406,9 @@ function buildSnapshot(root, track, slug, manifest, planHash, reservedUnits = []
     const ledger = readJSONOrNull(join(uDir, "ledger.json"))
     let openBlocking = null
     if (ledger !== null) {
-      const errs = validateLedger(ledger, { namespace: "CR" })
+      // 예약된 설계 유닛의 원장은 DR 네임스페이스다(review-loop-driver R4의 `--ns DR`). 여기서 CR로 고정하면
+      // 설계 리뷰가 지적을 하나라도 남긴 M run은 그 지적을 다 해소해도 원장이 무효로 판정돼 영원히 닫히지 않는다.
+      const errs = validateLedger(ledger, { namespace: name === DESIGN_UNIT ? "DR" : "CR" })
       openBlocking = errs.length ? null : openBlockingCount(ledger)
     }
     const state = readJSONOrNull(join(uDir, "state.json"))
