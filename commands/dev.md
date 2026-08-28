@@ -5,7 +5,7 @@ argument-hint: "<task description>"
 
 Task: $ARGUMENTS
 
-You are entering harnie's single development pipeline. The bootstrap hook has already created this run's worktree and state (`mode: "sizing"`); its context message names the **workroot** — use it as `--root` for every `execution.mjs`/`loop.mjs apply` call, and it is also the run's single git tree (and the builder cwd).
+You are entering harnie's single development pipeline. The bootstrap hook has already created this run's state (`mode: "sizing"`); its context message names the **run root** — the user's existing git repo root. Use it as `--root` for every `execution.mjs`/`loop.mjs apply` call; it is also the run's single git tree and the builder cwd.
 
 Do exactly two judgments, announce them in one line each, then invoke the `harnie:dev` skill with the task unchanged:
 

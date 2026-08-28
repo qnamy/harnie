@@ -65,7 +65,7 @@ If resolving an issue requires an out-of-run action (real external systems, cred
 ## Re-review scope and diff attribution
 
 - Re-review scope = open issues + the new fix delta + previously approved areas the delta touches. Later rounds must cost less than round 1 — a fresh full scan is out of contract.
-- The **orchestrator independently captures the fix delta** (whole working tree, baseline → post). One writer owns each capture window: concurrent producers need isolated worktrees; a shared tree serializes write-and-capture windows. Non-empty `outOfScope` → do not attribute to the producer; stop and coordinate.
+- The **orchestrator independently captures the fix delta** (whole working tree, baseline → post). Harnie does not create isolated trees, so the shared run tree has one supported path: serialize every producer write-and-capture window, with one writer from baseline through post capture. Non-empty `outOfScope` → do not attribute to the producer; stop and coordinate.
 - Keep the reviewer stateful (`codex-reply` / prior-ledger path); never re-run a stateless full review inside the loop.
 
 ## Invariants

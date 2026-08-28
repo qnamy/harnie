@@ -43,5 +43,5 @@ For clear specifications, bug fixes, and core logic, **write the test first**. V
 ## Failure recovery
 - **Every retry must bring new evidence or a materially different approach.** Merely rerunning a command does not count as a retry, except in limited cases supported by evidence of flakiness or an environmental problem.
 - **If the same failure symptom or hypothesis family remains unresolved three consecutive times, stop, recover, and report.**
-- **Recover only when attribution is safe:** Return changes to a known-good state only when you can safely identify them as changes made during the current run. If you cannot attribute them safely, such as in a shared or dirty worktree, do not perform a broad revert; report the exact files and state instead. **Never revert or overwrite changes made by the user or another agent.**
+- **Recover only when attribution is safe:** Return changes to a known-good state only when you can safely identify them as changes made during the current run. If you cannot attribute them safely, such as in a shared or dirty user-owned run tree, do not perform a broad revert; report the exact files and state instead. **Never revert or overwrite changes made by the user or another agent.**
 - Do not leave the code broken. Do not delete failing tests to make the suite green.
