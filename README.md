@@ -107,7 +107,9 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 
 ## 설치
 
-Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plugin.json`)이고 `codex` MCP 서버(`.mcp.json`)를 함께 선언한다. **Claude Code**(최신 stable)와 **`codex` CLI**(구독 로그인)가 필요하다.
+repo 루트가 플러그인(`.claude-plugin/plugin.json`)이고 `codex` MCP 서버(`.mcp.json`)를 함께 선언한다. **Claude Code**(최신 stable)와 **`codex` CLI**(구독 로그인)가 필요하다. `/harnie:dev`는 Claude Code에, `dev-solo`는 Codex에 설치된 사본을 쓰므로 **두 런타임을 오가려면 양쪽에 설치한다**.
+
+**Claude Code**
 
 ```bash
 /plugin marketplace add qnamy/harnie
@@ -118,6 +120,20 @@ Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plug
 ```
 
 업데이트는 `/plugin marketplace update harnie` 후 `/plugin update harnie@harnie`이고 적용에 재시작이 필요하다. 터미널에서는 `claude plugin ...`으로 같은 일을 한다. clone한 저장소는 `claude --plugin-dir ./harnie`로 바로 띄운다.
+
+**Codex**
+
+```bash
+codex plugin marketplace add qnamy/harnie --ref main
+```
+
+```bash
+codex plugin add harnie@harnie
+```
+
+업데이트는 `codex plugin marketplace upgrade` 한 줄이다. Git 마켓플레이스 스냅샷(`~/.codex/.tmp/marketplaces/harnie`)을 다시 받고 대화형 Codex가 그 경로를 실행 경로로 직접 쓰므로 재설치 단계가 없다. 반영은 `codex plugin list`의 `harnie@harnie` 버전으로 확인한다.
+
+두 런타임 모두 **`plugin.json`의 버전 문자열로 갱신 여부를 판단한다.** 저장소에 새 커밋이 올라가도 버전이 그대로면 갱신 명령이 조용히 아무 일도 하지 않는다 — 갱신했는데 동작이 그대로면 먼저 설치된 버전부터 확인한다.
 
 ## 구성
 
