@@ -5,7 +5,7 @@ import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { captureTree } from "./delta.mjs"
+import { captureTree, computeDelta } from "./delta.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers, ensureExcludeEntries } from "../hooks/lib.mjs"
 
@@ -390,11 +390,15 @@ function computeScopeHash(root, treeSHA, scopePaths) {
   return sha256(lsTree)
 }
 
-function buildSnapshot(root, track, slug, manifest, planHash) {
+// M의 설계 리뷰 유닛. manifest의 `reviewUnit` 어디에도 등재되지 않으므로 예약 유닛으로 넣지 않으면
+// 설계 리뷰를 한 번도 안 돌린 M이 complete:true가 된다(DEC-3). manifest 스키마·validateManifest는 불변이다.
+const DESIGN_UNIT = "design"
+
+function buildSnapshot(root, track, slug, manifest, planHash, reservedUnits = []) {
   const dir = planDir(root, track, slug)
   const reviewRoot = join(dir, "review")
   const units = {}
-  const unitNames = new Set([...manifest.tasks.map((t) => t.reviewUnit), ...manifest.gates.map((g) => g.reviewUnit)])
+  const unitNames = new Set([...manifest.tasks.map((t) => t.reviewUnit), ...manifest.gates.map((g) => g.reviewUnit), ...reservedUnits])
   const taskByUnit = new Map(manifest.tasks.map((t) => [t.reviewUnit, t]))
   const currentWholeTree = captureTree(root)
   for (const name of unitNames) {
@@ -477,7 +481,7 @@ export function loadContext(root) {
   if (!s || typeof s !== "object" || !s.track || !s.slug) return { active: true, failClosed: true, reason: "active.json 손상" }
   const dir = planDir(root, s.track, s.slug)
   const execPath = join(dir, "execution.json")
-  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, sessionIds: normalizeOwnerSessions(s), readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
+  const fc = (reason) => ({ active: true, failClosed: true, reason, root, track: s.track, slug: s.slug, readOnlyThreads: s.readOnlyThreads || [], builderThreads: [] })
   if (!existsSync(execPath)) return fc("sentinel 존재하나 execution.json 부재(§3 crash/손상)")
   let ex
   try { ex = readJSONStrict(execPath) } catch (e) { return fc(e.message) }
@@ -488,7 +492,6 @@ export function loadContext(root) {
   if (sMode !== exMode) return fc(`mode 불일치(sentinel=${sMode}, execution=${exMode})`)
   if (sMode != null && !isKnownMode(sMode)) return fc(unknownModeReason(sMode))
   const mode = sMode
-  const authority = typeof s.authority === "string" ? s.authority : "hook"
   const builderThreads = Object.values(ex.tasks || {}).map((t) => t && t.builderThreadId).filter(Boolean)
   const approved = authorityApproved(dir, s.planHash)
   const approvalEvidence = existsSync(join(dir, "manifest.json")) || !!s.planHash
@@ -500,7 +503,7 @@ export function loadContext(root) {
   for (const task of manifest?.tasks || []) taskRepoWorkroots[task.id] = root
   // S mode: manifest 없이 암묵 t1이 유일 태스크 — 빌더 cwd·워치독 매핑을 run root로 합성한다(DR-114).
   if (mode === "S" && ex.tasks && ex.tasks.t1) taskRepoWorkroots.t1 = root
-  return { active: true, root, track: s.track, slug: s.slug, mode, authority, sessionIds: normalizeOwnerSessions(s), phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
+  return { active: true, root, track: s.track, slug: s.slug, mode, phase: effectivePhase, rawPhase, approved, approvalEvidence, readOnlyThreads: s.readOnlyThreads || [], builderThreads, buildingUnboundTaskIds, pendingRunRootBootstrap: ex.pendingRunRootBootstrap || null, taskRepoWorkroots }
 }
 
 // "state.json 없음"만으로는 리뷰를 안 돌린 것과 다른 유닛 이름에 기록한 것이 구분되지 않는다 — 실제로
@@ -512,6 +515,27 @@ function describeReviewDir(dir) {
   try { units = readdirSync(reviewDir) } catch { return "review/ 디렉터리 읽기 실패" }
   if (!units.length) return "review/ 비어 있음 — 리뷰 라운드 미실행"
   return `review/ 하위: [${units.join(", ")}] — S의 유닛 이름은 code여야 한다`
+}
+
+// D6·DEC-4: 완료 리포트에 라운드별 리뷰 구성과 드리프트 수용 이력을 함께 낸다. 둘 다 판정에는
+// 쓰이지 않는다 — `loop.mjs apply`가 리뷰어를 스폰하지 않으므로 runtime·model은 기계가 확인할 수 없는
+// 오케스트레이터의 신고 값이고, 그 사실을 리포트 문구가 담는다(R3).
+function reviewRecord(root, track, slug) {
+  const dir = planDir(root, track, slug)
+  const reviewRoot = join(dir, "review")
+  const reviewers = {}
+  if (existsSync(reviewRoot)) {
+    for (const unit of readdirSync(reviewRoot).sort()) {
+      const state = readJSONOrNull(join(reviewRoot, unit, "state.json"))
+      if (state && Array.isArray(state.reviewers) && state.reviewers.length) reviewers[unit] = state.reviewers
+    }
+  }
+  const ex = readJSONOrNull(join(dir, "execution.json"))
+  return {
+    reviewers,
+    treeRebinds: ex && Array.isArray(ex.treeRebinds) ? ex.treeRebinds : [],
+    note: "리뷰 구성(runtime·model)은 오케스트레이터의 신고 값이며 기계 관측이 아니다. treeRebinds는 리뷰 범위 밖 편집을 수용한 이력이다.",
+  }
 }
 
 export function computeCompletion(root, track, slug) {
@@ -531,13 +555,23 @@ export function computeCompletion(root, track, slug) {
       if (current == null) blockers.push("S: 현재 tree 캡처 실패")
       else if (current !== state.reviewedPostSHA) blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
     }
-    return { complete: blockers.length === 0, blockers, mode: "S" }
+    return { complete: blockers.length === 0, blockers, mode: "S", review: reviewRecord(root, track, slug) }
   }
   const manifestPath = join(dir, "manifest.json")
   if (!existsSync(manifestPath)) return { complete: true, blockers: [], noManifest: true }
   const manifest = readJSONStrict(manifestPath)
-  const snap = buildSnapshot(root, track, slug, manifest, manifest.planHash)
+  const snap = buildSnapshot(root, track, slug, manifest, manifest.planHash, mode === "M" ? [DESIGN_UNIT] : [])
   const result = deriveCompletion(manifest, snap)
+  // M은 설계 리뷰가 완료 조건이다(DEC-3). 유닛이 manifest에 없으므로 여기서 별도로 판정한다 — DR 유닛이라
+  // 아티팩트가 `dr:` 해시이고, 그래서 게이트처럼 전체 tree에 바인딩하지 않는다.
+  if (mode === "M") {
+    const u = snap.units[DESIGN_UNIT] || {}
+    if (u.openBlocking == null) result.blockers.push(`설계 리뷰(${DESIGN_UNIT}): ledger 없음/손상 — M은 설계 리뷰 유닛이 필수다`)
+    else {
+      if (u.openBlocking > 0) result.blockers.push(`설계 리뷰(${DESIGN_UNIT}): open blocking ${u.openBlocking}`)
+      if (u.machineState !== "APPROVED") result.blockers.push(`설계 리뷰(${DESIGN_UNIT}): 미승인(machineState=${u.machineState})`)
+    }
+  }
   // 통합 검증(0.11): 선언된 run은 최종 트리에 바인딩된 성공 receipt 정확히 1개가 완료 조건이다(NFR-2).
   if (Array.isArray(manifest.integrationVerification) && manifest.integrationVerification.length) {
     const r = readJSONOrNull(join(dir, "review", "integration", "receipt.json"))
@@ -552,6 +586,7 @@ export function computeCompletion(root, track, slug) {
     }
   }
   result.complete = result.blockers.length === 0
+  result.review = reviewRecord(root, track, slug)
   return result
 }
 
@@ -600,54 +635,47 @@ function genuinelyComplete(root, track, slug) {
   return comp.complete === true && comp.noManifest !== true
 }
 
-function ownerSessionId(sessionId) { return typeof sessionId === "string" && sessionId !== "" ? sessionId : null }
-
-// Owner membership only grows while a run is active.
-export function normalizeOwnerSessions(s) {
-  if (!s || typeof s !== "object") return []
-  if (Array.isArray(s.sessionIds)) return s.sessionIds.filter((x) => typeof x === "string" && x !== "")
-  const one = ownerSessionId(s.sessionId)
-  return one ? [one] : []
+// 0.14 DEC-3: 완료 판정은 얼어붙지 않는다 — 사용자가 트리를 한 줄 고치는 순간 과거에 닫힌 run들이 전부
+// 소급으로 미완료가 된다(`computeCompletion`이 호출 시점의 트리와 비교하므로). run root가 사용자 작업
+// 트리인 0.14에서는 그것이 예외가 아니라 기본값이다. 그래서 이미 완료를 판정한 자리에서 닫힘을 못박는다.
+function markClosed(root, track, slug) {
+  const execPath = join(planDir(root, track, slug), "execution.json")
+  const ex = readJSONOrNull(execPath)
+  if (!ex || ex.closedAt) return
+  ex.closedAt = new Date().toISOString()
+  writeJSONAtomic(execPath, ex)
 }
 
-function createRun(root, track, base, sessionId, { authority = null } = {}) {
+function createRun(root, track, base) {
   const slug = collisionFreeSlug(root, track, base)
-  const owner = ownerSessionId(sessionId)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} })
-  const sentinel = { track, slug, base, planHash: null, mode: "sizing", readOnlyThreads: [], sessionIds: owner ? [owner] : [] }
-  if (authority) sentinel.authority = authority // "cli" = dev-solo(훅 부재) — approve CLI는 이 run에서만 유효
-  writeJSONAtomic(sentinelPath(root), sentinel)
+  writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, mode: "sizing", readOnlyThreads: [] })
   return { slug, reused: false }
 }
 
-// Resume preserves earlier owners and adds the current identifiable session.
-function resumeRun(root, s, sessionId) {
+// 재개는 sentinel과 execution.json의 정합만 확인한다 — 0.14 D4가 세션 소유 개념을 지웠으므로 기록할 소유자가 없다.
+function resumeRun(root, s) {
   const execPath = join(planDir(root, s.track, s.slug), "execution.json")
   if (!existsSync(execPath)) throw new FailClosed("sentinel 존재하나 execution.json 부재 — 손상, fail-closed")
   const ex = readJSONStrict(execPath) // JSON 손상이면 throw
   if (ex.track !== s.track || ex.slug !== s.slug) throw new FailClosed("execution.json이 sentinel과 불일치 — 손상, fail-closed")
-  const owner = ownerSessionId(sessionId)
-  const prev = normalizeOwnerSessions(s)
-  const next = owner ? (prev.includes(owner) ? prev : [...prev, owner]) : prev
-  if (stableStringify(next) !== stableStringify(prev) || s.sessionId !== undefined || !Array.isArray(s.sessionIds)) {
-    s.sessionIds = next
-    delete s.sessionId
-    writeJSONAtomic(sentinelPath(root), s)
-  }
   return { slug: s.slug, reused: true, resumed: true }
 }
 
-export function bootstrapRun(root, { base, track = "plan", sessionId = null, authority = null } = {}) {
+export function bootstrapRun(root, { base, track = "plan" } = {}) {
   if (track !== "plan") throw new FailClosed(`bootstrapRun: 현재 track=plan만 (${track})`) // quick 이연(§3.8)
   if (typeof base !== "string" || base === "") throw new FailClosed("bootstrap: 빈 작업 인자 — 진행 불가")
   validateSlug(base)
   return withStateLock(root, () => {
     const s = readJSONOrNull(sentinelPath(root))
     let result
-    if (!s) result = createRun(root, track, base, sessionId, { authority })
+    if (!s) result = createRun(root, track, base)
     else if (!s.track || !s.slug) throw new FailClosed("active.json 손상 — track/slug 누락, fail-closed")
-    else if (genuinelyComplete(root, s.track, s.slug)) result = createRun(root, track, base, sessionId, { authority }) // 완료 → 새 run(포인터 전환·old 보존)
-    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s, sessionId) // 같은 작업(구버전 sentinel은 slug=base) → resume
+    else if (genuinelyComplete(root, s.track, s.slug)) { // 완료 → 닫힘을 디스크에 못박고 새 run(포인터 전환·old 보존)
+      markClosed(root, s.track, s.slug)
+      result = createRun(root, track, base)
+    }
+    else if (s.track === track && (s.base || s.slug) === base) result = resumeRun(root, s) // 같은 작업(구버전 sentinel은 slug=base) → resume
     else throw new FailClosed(
       `미완료 run ${s.track}/${s.slug}가 이 트리에서 활성 상태입니다. 셋 중 하나를 고르세요 — ` +
       `다른 작업이면 별도 워크스페이스(orca worktree)를 만들어 거기서 시작, ` +
@@ -1075,23 +1103,22 @@ export function bindRebind(root, slug, toolUseId, toolInput, response) {
   })
 }
 
-// ── dev-solo(훅 부재 환경) CLI 권위 경로(0.11 §9) ─────────────────────────────
+// ── dev-solo(훅 부재 환경) CLI 진입 경로(0.11 §9) ─────────────────────────────
 // init --authority cli: 훅 부트스트랩이 하던 준비를 CLI로 수행한다. 0.14 D1 이후 그 준비는 훅과 같다 —
-// run root는 넘겨받은 git repo root 자신이고(worktree 생성 없음), `.harnie/`를 info/exclude에 등록한다.
-// authority:"cli" run에서만 approve 서브커맨드가 유효하다(훅 run의 자가승인 차단 불변).
+// run root는 넘겨받은 git repo root 자신이고(worktree 생성 없음), 상태 디렉터리를 info/exclude에 등록한다.
+// `--authority cli`는 이제 진입 경로의 이름일 뿐 run에 기록되는 라벨이 아니다(DEC-2) — 승인 경로를 정하는
+// 것은 run에 적힌 라벨이 아니라 실행 시점의 훅 유무이고, 그 판정은 CLI 밖 `guards.mjs`가 한다.
 export function initCliAuthority(root, slug) {
   validateSlug(slug)
   if (!existsSync(join(root, ".git"))) throw new FailClosed(`init --authority cli: root가 git repo가 아님(${root})`)
   ensureExcludeEntries(root, ".harnie/")
-  const result = bootstrapRun(root, { base: slug, track: "plan", sessionId: null, authority: "cli" })
-  return { ok: true, root, slug: result.slug, reused: result.reused === true, authority: "cli" }
+  const result = bootstrapRun(root, { base: slug, track: "plan" })
+  return { ok: true, root, slug: result.slug, reused: result.reused === true }
 }
 
 export function approveCli(root, slug, planHashArg) {
   if (typeof planHashArg !== "string" || !planHashArg) throw new FailClosed("approve: --plan-hash 필요(사용자에게 제시·확인한 plan의 해시)")
   const s = readJSONStrict(sentinelPath(root))
-  if (s.authority !== "cli")
-    throw new FailClosed("approve: authority=cli run 전용 — 훅 부트스트랩 run의 승인은 AskUserQuestion 원샷 바인딩만 유효(자가승인 차단)")
   if (s.slug !== slug || s.track !== "plan") throw new FailClosed("approve: 활성 run과 slug 불일치")
   const d = derivePlanHash(root, slug)
   if (!d.ok) throw new FailClosed(d.reason)
@@ -1122,6 +1149,9 @@ export function approveCli(root, slug, planHashArg) {
     if (s2.slug !== slug || s2.track !== "plan") throw new FailClosed("approve 중 active run 변경됨 — fail-closed")
     s2.planHash = d.planHash
     writeJSONAtomic(sentinelPath(root), s2)
+    // 승인 대기 중 중단된 세션이 남긴 원샷 arm/pending을 여기서 소비한다(§7.4) — 남으면 `otherArmPending`이
+    // 다음 arm을 거부해 run이 승인 질문 앞에서 굳는다.
+    for (const f of ONE_SHOT_ARM_FILES) rmSync(join(dir, f), { force: true })
     return { ok: true, planHash: d.planHash, phase: "executing" }
   })
 }
@@ -1137,6 +1167,139 @@ export function registerReadonlyThread(root, track, slug, threadId) {
     if (!s.readOnlyThreads.includes(threadId)) s.readOnlyThreads.push(threadId)
     writeJSONAtomic(sentinelPath(root), s)
     return { ok: true, threadId, readOnlyThreads: s.readOnlyThreads }
+  })
+}
+
+// ── 재개·인계 진입점(0.14 DEC-3) ─────────────────────────────────────────────
+// 셋 다 비활성 run을 대상으로 하므로 `guardActive`를 부르지 않는다. 부르면 되살릴 대상에 닿지 못한다.
+
+// 리뷰 tree 바인딩의 드리프트. 각 리뷰 유닛이 승인한 tree SHA와 현재 트리를 비교하고, 어긋난 유닛의 변경
+// 파일 목록을 낸다. DR 유닛(아티팩트가 `dr:<sha256>`)은 tree에 바인딩되지 않으므로 대상이 아니다.
+export function treeDrift(root, track, slug) {
+  const reviewRoot = join(planDir(root, track, slug), "review")
+  if (!existsSync(reviewRoot)) return []
+  let current
+  try { current = captureTree(root) } catch { return [] }
+  const drift = []
+  for (const unit of readdirSync(reviewRoot).sort()) {
+    const state = readJSONOrNull(join(reviewRoot, unit, "state.json"))
+    const sha = state && typeof state.reviewedPostSHA === "string" ? state.reviewedPostSHA : null
+    if (!sha || !/^[0-9a-f]{40}$/.test(sha) || sha === current) continue
+    let files = []
+    try { files = computeDelta(root, sha).changedPaths } catch { files = [] }
+    drift.push({ unit, reviewedPostSHA: sha, currentTree: current, files })
+  }
+  return drift
+}
+
+// `runs`: 재개 후보 열거. `closedAt`이 찍힌 run은 빼고, 폐기된 run(`.harnie/abandoned/`)은 스캔하지 않는다.
+export function listRuns(root) {
+  const planRoot = join(root, ".harnie", "plan")
+  const active = readJSONOrNull(sentinelPath(root))
+  const runs = []
+  if (!existsSync(planRoot)) return { runs }
+  for (const slug of readdirSync(planRoot).sort()) {
+    const isActive = !!active && active.track === "plan" && active.slug === slug
+    let ex
+    try { ex = readJSONOrNull(join(planRoot, slug, "execution.json")) }
+    catch (e) { runs.push({ slug, mode: null, active: isActive, blockers: [`execution.json 손상: ${e.message}`] }); continue }
+    if (!ex || typeof ex !== "object" || ex.closedAt) continue
+    let blockers
+    try { blockers = computeCompletion(root, "plan", slug).blockers }
+    catch (e) { blockers = [`완료 재도출 실패: ${e.message}`] }
+    runs.push({ slug, mode: typeof ex.mode === "string" ? ex.mode : null, active: isActive, blockers })
+  }
+  return { runs }
+}
+
+// `handoff`: 비활성 run을 활성으로 되돌리고 런타임에 종속된 상태만 정리한다(§6). 누적 카운터
+// (`codexCalls`·`watchdogExtensions`)는 손대지 않는다 — 인계로 리셋되면 상한 우회 경로가 된다(DR-107 계보).
+// 자기신고 `--runtime` 값은 두지 않는다(§9): 소비자가 없다.
+export function handoffRun(root, slug) {
+  validateSlug(slug)
+  const dir = planDir(root, "plan", slug)
+  const execPath = join(dir, "execution.json")
+  if (!existsSync(execPath)) throw new FailClosed(`handoff: 대상 run 없음(${execPath} 부재)`)
+  const result = withStateLock(root, () => {
+    const ex = readJSONStrict(execPath)
+    if (ex.slug !== slug || ex.track !== "plan") throw new FailClosed("handoff: execution.json이 대상 run과 불일치 — 손상, fail-closed")
+    // 워치독 기산점은 벽시계 예산의 출발점이다. 세션이 죽어 있는 동안에도 계속 흐르므로, 재기산하지 않으면
+    // 복귀 직후 첫 빌더 호출이 예산 초과로 거부된다.
+    const at = new Date().toISOString()
+    for (const t of Object.values(ex.tasks || {})) {
+      if (!t || typeof t !== "object") continue
+      t.builderThreadId = null // Codex MCP thread id는 그 세션 안에서만 유효하다
+      if (t.startedAt) t.startedAt = at
+      if (t.builderBoundAt) t.builderBoundAt = at
+    }
+    writeJSONAtomic(execPath, ex)
+    const prev = readJSONOrNull(sentinelPath(root))
+    const previousActive = prev && prev.slug !== slug ? prev.slug : null
+    // sentinel의 `base`는 인자 없는 `/harnie:dev` 재개가 읽는 값이다(D7). 대상 run의 sentinel이 아니면
+    // slug 자신을 쓴다 — `bootstrapRun`의 resume 판정이 `(base || slug)` 비교라 그대로 맞는다.
+    const base = prev && prev.slug === slug && typeof prev.base === "string" && prev.base ? prev.base : slug
+    writeJSONAtomic(sentinelPath(root), {
+      track: "plan", slug, base,
+      planHash: ex.planHash || null,
+      mode: typeof ex.mode === "string" ? ex.mode : "sizing",
+      readOnlyThreads: [],
+    })
+    const clearedArmFiles = ONE_SHOT_ARM_FILES.filter((f) => existsSync(join(dir, f)))
+    for (const f of clearedArmFiles) rmSync(join(dir, f), { force: true })
+    return { ok: true, slug, mode: typeof ex.mode === "string" ? ex.mode : null, previousActive, clearedArmFiles, watchdogRebasedAt: at }
+  })
+  return { ...result, drift: treeDrift(root, "plan", slug) }
+}
+
+// 리뷰 유닛의 "범위"(DEC-4 3번). M은 manifest task의 scope, S는 리뷰가 승인한 delta의 파일 집합이다.
+// M의 게이트 유닛에는 자기 task가 없으므로 그 run의 태스크 scope 전부를 범위로 본다 — 게이트가 리뷰한 것이
+// 곧 그 태스크들이 바꾼 코드다. 범위를 알 수 없으면 수용하지 않는다(fail-closed).
+function reviewScope(dir, unit) {
+  const manifest = readJSONOrNull(join(dir, "manifest.json"))
+  if (manifest) {
+    const task = (manifest.tasks || []).find((t) => t.reviewUnit === unit)
+    return task ? task.scope : (manifest.tasks || []).flatMap((t) => t.scope)
+  }
+  const sidecar = readJSONOrNull(join(dir, "review", unit, "delta.patch.json"))
+  if (!sidecar || !Array.isArray(sidecar.changedPaths))
+    throw new FailClosed(`rebind-tree: ${unit}의 리뷰 범위를 알 수 없음(review/${unit}/delta.patch.json 부재) — 범위 미상이면 수용하지 않는다`)
+  return sidecar.changedPaths
+}
+
+const inScope = (path, scope) => scope.some((sp) => path === sp || path.startsWith(String(sp).replace(/\/$/, "") + "/"))
+
+// `rebind-tree`: 리뷰 범위 **밖** 편집만 수용한다(DEC-4). 범위와 한 파일이라도 겹치면 실패하고 출구는
+// 재리뷰뿐이다 — 이것이 이 커맨드를 `--accept-drift` 류의 권위 구멍과 가르는 지점이다. `--files`가 막는
+// 것은 하나뿐이다: 사람이 판단한 시점과 재바인딩 시점 사이에 트리가 또 바뀌는 것.
+export function rebindTree(root, slug, unit, files) {
+  validateSlug(slug)
+  if (typeof unit !== "string" || !NAME_RE.test(unit)) throw new FailClosed(`rebind-tree: --unit 형식 오류(${JSON.stringify(unit)})`)
+  const dir = planDir(root, "plan", slug)
+  const statePath = join(dir, "review", unit, "state.json")
+  const state = readJSONOrNull(statePath)
+  if (!state) throw new FailClosed(`rebind-tree: 리뷰 유닛 ${unit}의 state.json 없음`)
+  const from = typeof state.reviewedPostSHA === "string" ? state.reviewedPostSHA : null
+  if (!from || !/^[0-9a-f]{40}$/.test(from))
+    throw new FailClosed(`rebind-tree: ${unit}의 reviewedPostSHA가 tree SHA가 아님(${JSON.stringify(from)}) — 전체 tree에 바인딩된 유닛에만 유효`)
+  const d = computeDelta(root, from)
+  const changed = [...new Set(d.changedPaths)].sort()
+  if (!changed.length) throw new FailClosed(`rebind-tree: ${unit}에 드리프트 없음 — 재바인딩할 것이 없다`)
+  const claimed = [...new Set(files)].sort()
+  if (stableStringify(changed) !== stableStringify(claimed))
+    throw new FailClosed(`rebind-tree: --files가 실제 delta와 불일치 — 실제 변경 [${changed.join(", ")}]`)
+  const overlap = changed.filter((f) => inScope(f, reviewScope(dir, unit)))
+  if (overlap.length)
+    throw new FailClosed(`rebind-tree: 변경이 ${unit}의 리뷰 범위와 겹침([${overlap.join(", ")}]) — 리뷰된 코드를 고친 뒤의 재바인딩은 불가, 출구는 재리뷰뿐`)
+  return withStateLock(root, () => {
+    const st = readJSONStrict(statePath)
+    st.reviewedPostSHA = d.postSHA
+    writeJSONAtomic(statePath, st)
+    const execPath = join(dir, "execution.json")
+    const ex = readJSONStrict(execPath)
+    ex.treeRebinds = Array.isArray(ex.treeRebinds) ? ex.treeRebinds : []
+    ex.treeRebinds.push({ unit, from, to: d.postSHA, files: changed, at: new Date().toISOString() })
+    writeJSONAtomic(execPath, ex)
+    return { ok: true, unit, from, to: d.postSHA, files: changed }
   })
 }
 
@@ -1178,6 +1341,22 @@ export function assertActiveRun(root, slug, track = "plan") {
 }
 function guardActive(flags, track = flags.track || "plan") {
   assertActiveRun(flags.root || die("--root 필요"), flags.slug || die("--slug 필요"), track)
+}
+
+function cmdRuns({ flags }) {
+  out(listRuns(flags.root || die("--root 필요")))
+}
+
+function cmdHandoff({ flags }) {
+  out(handoffRun(flags.root || die("--root 필요"), flags.slug || die("--slug 필요")))
+}
+
+function cmdRebindTree({ flags }) {
+  guardActive(flags, "plan")
+  const raw = flags.files
+  if (typeof raw !== "string" || !raw.trim()) die("--files <쉼표로 구분한 경로 목록> 필요(handoff·Stop 훅이 낸 목록 그대로)")
+  const files = raw.split(",").map((f) => f.trim()).filter(Boolean)
+  out(rebindTree(flags.root, flags.slug, flags.unit || die("--unit <리뷰 유닛> 필요"), files))
 }
 
 function cmdAbandon({ flags }) {
@@ -1444,6 +1623,9 @@ if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
       case "approve": cmdApprove(args); break
       case "set-phase": cmdSetPhase(args); break
       case "abandon": cmdAbandon(args); break
+      case "runs": cmdRuns(args); break
+      case "handoff": cmdHandoff(args); break
+      case "rebind-tree": cmdRebindTree(args); break
       default: die(`알 수 없는 서브커맨드: ${sub ?? "(none)"}`)
     }
   } catch (e) {

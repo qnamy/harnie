@@ -17,7 +17,7 @@ import {
   detectVacuous, loadContext, validateRepoBinding,
   rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
-  abandonRun,
+  abandonRun, listRuns, handoffRun, rebindTree, treeDrift,
 } from "./execution.mjs"
 import { captureTree } from "./delta.mjs"
 
@@ -785,6 +785,15 @@ function makeCompleteRun(root, slug) {
   return dir
 }
 
+// M의 예약 설계 리뷰 유닛을 APPROVED로 채운다. DR 유닛이라 아티팩트는 `dr:` 해시이고 tree에 바인딩되지 않는다.
+function approveDesignUnit(root, slug) {
+  const dd = join(root, ".harnie", "plan", slug, "review", "design")
+  mkdirSync(dd, { recursive: true })
+  writeFileSync(join(dd, "ledger.json"), "{}")
+  writeFileSync(join(dd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: "dr:" + "a".repeat(64) }))
+  return dd
+}
+
 test("completion: errata는 완료 입력이 아니다(0.13 삭제) — 잔존 errata.md도 M 완료를 막지 않는다", () => {
   const root = gitRepo()
   const dir = makeCompleteRun(root, "m-complete")
@@ -850,57 +859,22 @@ test("bootstrapRun: 같은 base·미완료 active → resume(reuse)", () => {
   assert.equal(r.slug, "feat-x")
 })
 
-test("bootstrapRun: 소유 세션을 sentinel에 기록(owner 스코프 권위)", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
-  assert.deepEqual(loadContext(root).sessionIds, ["sid-a"]) // 훅이 파일 재독 없이 쓰는 경로
-})
-
-test("bootstrapRun: resume은 소유자를 **추가**한다 — 이전 소유자를 교체하면 그 세션 보호가 풀림(리뷰 P1)", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
-  assert.equal(r.reused, true)
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" }) // 재진입은 중복 추가 안 함
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
-})
-
-test("bootstrapRun: 세션 식별자 없는 resume은 집합을 보존한다 — 비우면 다음 resume이 다시 좁힌다(리뷰 P1)", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  bootstrapRun(root, { base: "feat-x" }) // 식별자 없음 → 기록할 키가 없을 뿐, 기존 집합을 지울 이유는 없다
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a"])
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" }) // 비웠다면 여기서 ["sid-b"]가 되어 sid-a가 빠졌다
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b"])
-})
-
-test("bootstrapRun: 소유자 집합은 monotonic — 어떤 resume 순서에서도 참여 세션이 빠지지 않는다", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  for (const sessionId of [undefined, "sid-b", undefined, "sid-a", "sid-c", undefined])
-    bootstrapRun(root, { base: "feat-x", sessionId })
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-a", "sid-b", "sid-c"])
-})
-
-test("bootstrapRun: 레거시 스칼라 sessionId 센티넬은 resume에서 배열로 이관(기존 소유자 보존)", () => {
-  const root = gitRepo()
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-a" })
-  const f = join(root, ".harnie", "active.json")
-  const s = readSentinel(root); delete s.sessionIds; s.sessionId = "legacy-sid"; writeFileSync(f, JSON.stringify(s))
-  bootstrapRun(root, { base: "feat-x", sessionId: "sid-b" })
-  const after = readSentinel(root)
-  assert.deepEqual(after.sessionIds, ["legacy-sid", "sid-b"])
-  assert.equal(after.sessionId, undefined)
-})
-
-test("bootstrapRun: rollover(완료 run → 새 run)는 소유자 집합을 새 세션만으로 시작", () => {
+// 0.14 DEC-3: 완료 판정은 트리에 대해 얼어붙지 않는다. 완료를 판정한 그 자리에서 닫힘을 디스크에 못박지
+// 않으면, 사용자가 트리를 한 줄 고치는 순간 과거에 닫힌 run들이 전부 소급으로 재개 목록에 되살아난다.
+test("bootstrapRun: rollover(완료 run → 새 run)는 이전 run의 execution.json에 closedAt을 못박는다", () => {
   const root = gitRepo()
   makeCompleteRun(root, "feat-x")
-  const r = bootstrapRun(root, { base: "feat-x", sessionId: "sid-new" })
+  const oldExec = join(root, ".harnie", "plan", "feat-x", "execution.json")
+  assert.equal(JSON.parse(readFileSync(oldExec, "utf8")).closedAt, undefined)
+  const r = bootstrapRun(root, { base: "feat-y" })
   assert.equal(r.reused, false)
-  assert.deepEqual(readSentinel(root).sessionIds, ["sid-new"])
+  assert.equal(readSentinel(root).slug, "feat-y")
+  const closedAt = JSON.parse(readFileSync(oldExec, "utf8")).closedAt
+  assert.match(String(closedAt), /^\d{4}-\d{2}-\d{2}T/)
+  // 트리를 고쳐 옛 run이 소급 미완료가 돼도 닫힘 기록은 남는다 — 그것이 `runs`가 읽는 값이다.
+  writeFileSync(join(root, "drift.txt"), "무관한 편집\n")
+  assert.equal(computeCompletion(root, "plan", "feat-x").complete, false)
+  assert.equal(JSON.parse(readFileSync(oldExec, "utf8")).closedAt, closedAt)
 })
 
 test("bootstrapRun: 다른 base·미완료 active → block(fail-closed)", () => {
@@ -1310,7 +1284,51 @@ test("M e2e: 승인 → task receipt(verify) → 통합 receipt → completion c
   writeFileSync(join(unitDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
   assert.equal(run(["verify", "--root", root, "--slug", "feat-x", "--task", "t1"]).ok, true)
   assert.equal(run(["verify", "--root", root, "--slug", "feat-x", "--integration"]).ok, true)
+  // 설계 리뷰 유닛은 manifest에 등재되지 않는 예약 유닛이다(카드 5) — 없으면 M은 완료가 아니다.
+  approveDesignUnit(root, "feat-x")
   const c = computeCompletion(root, "plan", "feat-x")
+  assert.equal(c.complete, true, c.blockers.join("; "))
+})
+
+// DEC-3의 스키마 결함 ①: `design`은 manifest의 reviewUnit 어디에도 없어 완료 도출에 보이지 않았고, 설계
+// 리뷰를 한 번도 안 돌린 M이 complete:true가 됐다.
+test("completion(M): 설계 리뷰 유닛 없으면 complete:false — 승인 후 유닛을 채우면 complete:true", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, "src"), { recursive: true })
+  writeFileSync(join(root, "src", "a.js"), "x\n")
+  writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  approveFlow(root, "feat-x")
+  const unitDir = join(root, ".harnie", "plan", "feat-x", "review", "code")
+  mkdirSync(unitDir, { recursive: true })
+  writeFileSync(join(unitDir, "ledger.json"), "{}")
+  writeFileSync(join(unitDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  run(["verify", "--root", root, "--slug", "feat-x", "--task", "t1"])
+  run(["verify", "--root", root, "--slug", "feat-x", "--integration"])
+  const before = computeCompletion(root, "plan", "feat-x")
+  assert.equal(before.complete, false)
+  assert.ok(before.blockers.some((b) => /설계 리뷰\(design\)/.test(b)), before.blockers.join("; "))
+  // REVISING 상태의 설계 유닛도 완료가 아니다 — 존재만으로는 통과하지 않는다.
+  const dd = join(root, ".harnie", "plan", "feat-x", "review", "design")
+  mkdirSync(dd, { recursive: true })
+  writeFileSync(join(dd, "ledger.json"), "{}")
+  writeFileSync(join(dd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "REVISING" }))
+  assert.ok(computeCompletion(root, "plan", "feat-x").blockers.some((b) => /설계 리뷰\(design\): 미승인/.test(b)))
+  approveDesignUnit(root, "feat-x")
+  assert.equal(computeCompletion(root, "plan", "feat-x").complete, true)
+})
+
+// S에는 설계 리뷰 예약이 없다 — 승인 게이트도 manifest도 없는 모드에 M의 조건을 얹지 않는다.
+test("completion(S): 설계 리뷰 유닛은 요구되지 않는다", () => {
+  const root = gitRepo()
+  writePlan(root, "feat-s")
+  run(["init", "--root", root, "--slug", "feat-s"])
+  setMode(root, "feat-s", "S")
+  const cd = join(root, ".harnie", "plan", "feat-s", "review", "code")
+  mkdirSync(cd, { recursive: true })
+  writeFileSync(join(cd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  const c = computeCompletion(root, "plan", "feat-s")
   assert.equal(c.complete, true, c.blockers.join("; "))
 })
 
@@ -1391,15 +1409,11 @@ test("rebind-arm: terminal 증거·old-thread 대조·질문 본문 대조·승�
   assert.ok(ex.tasks.T1.builderBoundAt) // 기산점 불리셋(DR-107)
 })
 
-test("approve(CLI): authority=cli run 전용 — hook run에서는 fail-closed", () => {
+test("approve(CLI): 훅 부트스트랩 run도 그대로 승인한다(authority 라벨 폐기 — DEC-2)", () => {
   const root = gitRepo()
   writePlan(root, "feat-x", M_MANIFEST)
-  run(["init", "--root", root, "--slug", "feat-x"]) // hook-authority run(기본)
+  run(["init", "--root", root, "--slug", "feat-x"]) // 훅 부트스트랩과 같은 run(라벨 없음)
   setMode(root, "feat-x", "M")
-  assert.throws(() => approveCli(root, "feat-x", "whatever"), /authority=cli run 전용/)
-  // cli-authority run: sentinel에 authority 기록 후 planHash 일치 시 승인 — manifest·phase·sentinel 갱신
-  const sPath = join(root, ".harnie", "active.json")
-  const s = JSON.parse(readFileSync(sPath, "utf8")); s.authority = "cli"; writeFileSync(sPath, JSON.stringify(s))
   assert.throws(() => approveCli(root, "feat-x", "wrong-hash"), /plan-hash가 현재 plan.md와 불일치/)
   const planMd = readFileSync(join(root, ".harnie", "plan", "feat-x", "plan.md"), "utf8")
   const ph = computePlanHash(planMd, canonicalManifest(extractManifestBlock(planMd)))
@@ -1408,6 +1422,224 @@ test("approve(CLI): authority=cli run 전용 — hook run에서는 fail-closed",
   assert.equal(r.phase, "executing")
   const ex = JSON.parse(readFileSync(join(root, ".harnie", "plan", "feat-x", "execution.json"), "utf8"))
   assert.equal(ex.cliApprovals.length, 1) // 감사 기록
+  // 승인 권위가 CLI 안에 없다는 것이 DEC-2의 핵심이다 — 이 CLI가 막지 않는 대신 guards.decideBash가
+  // 훅 있는 세션의 Bash 호출을 먼저 deny한다(guards.test.mjs).
+  assert.equal(JSON.parse(readFileSync(join(root, ".harnie", "active.json"), "utf8")).authority, undefined)
+})
+
+// §7.4의 데드엔드: 승인 질문 앞에서 세션이 죽으면 원샷 arm/pending이 디스크에 남고, `otherArmPending`이
+// 다음 arm을 거부해 run이 굳는다. 카드 3이 approve 성공 시 그것을 소비해 닫는다.
+test("approve(CLI): 성공 시 남은 원샷 arm/pending 파일을 정리한다(§7.4)", () => {
+  const root = gitRepo()
+  const dir = writePlan(root, "feat-x", M_MANIFEST)
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "M")
+  assert.equal(armApproval(root, "feat-x", { approveOption: "승인" }).ok, true) // 중단된 Claude 세션의 잔재
+  assert.ok(existsSync(join(dir, ".arm-approval.json")))
+  const planMd = readFileSync(join(dir, "plan.md"), "utf8")
+  approveCli(root, "feat-x", computePlanHash(planMd, canonicalManifest(extractManifestBlock(planMd))))
+  for (const f of [".arm-approval.json", ".pending-approval.json", ".arm-rebind.json", ".pending-rebind.json"])
+    assert.equal(existsSync(join(dir, f)), false, f)
+  // 정리됐으므로 후속 arm이 다시 열린다(데드엔드 해소).
+  assert.equal(armApproval(root, "feat-x", { approveOption: "승인" }).ok, true)
+})
+
+// ── 재개·인계 진입점(0.14 DEC-3) ─────────────────────────────────────────────
+// S run 하나를 리뷰 승인까지 채우고 현재 트리에 바인딩한다(완료 상태).
+function makeInactiveRun(root, slug, mode = "S") {
+  const dir = writePlan(root, slug)
+  writeFileSync(join(dir, "execution.json"), JSON.stringify({ track: "plan", slug, planHash: null, phase: "planning", mode, tasks: {} }))
+  return dir
+}
+
+function makeCompleteSRun(root, slug) {
+  writePlan(root, slug)
+  run(["init", "--root", root, "--slug", slug])
+  setMode(root, slug, "S")
+  const cd = join(root, ".harnie", "plan", slug, "review", "code")
+  mkdirSync(cd, { recursive: true })
+  writeFileSync(join(cd, "ledger.json"), "{}")
+  writeFileSync(join(cd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: captureTree(root) }))
+  return cd
+}
+
+test("runs: closedAt이 찍힌 run은 목록에 없고, 활성 run과 blockers를 그대로 낸다", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  makeCompleteSRun(root, "done-run")
+  bootstrapRun(root, { base: "next-run" }) // rollover → done-run에 closedAt
+  writePlan(root, "next-run")
+  setMode(root, "next-run", "S")
+  const { runs } = run(["runs", "--root", root]) // CLI 배선까지 함께 확인
+  assert.deepEqual(runs, listRuns(root).runs)
+  assert.deepEqual(runs.map((r) => r.slug), ["next-run"])
+  assert.equal(runs[0].active, true)
+  assert.equal(runs[0].mode, "S")
+  assert.ok(runs[0].blockers.length > 0) // 리뷰 미승인
+  // 폐기된 run은 `.harnie/abandoned/` 아래로 옮겨져 plan 스캔 대상이 아니다.
+  makeInactiveRun(root, "junk")
+  assert.ok(listRuns(root).runs.some((r) => r.slug === "junk"))
+  run(["abandon", "--root", root, "--slug", "junk", "--confirm", "junk"])
+  assert.equal(listRuns(root).runs.some((r) => r.slug === "junk"), false)
+})
+
+test("runs: 비활성 미완료 run도 열거된다 — 소급 미완료된 과거 run을 되살릴 유일한 입력", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  makeCompleteSRun(root, "old-run")
+  bootstrapRun(root, { base: "cur-run" })
+  writePlan(root, "cur-run")
+  // old-run은 closedAt이 찍혔지만, closedAt 없는 다른 비활성 run은 남아야 한다.
+  makeInactiveRun(root, "stalled-run")
+  const slugs = listRuns(root).runs.map((r) => r.slug)
+  assert.ok(slugs.includes("stalled-run"))
+  assert.ok(slugs.includes("cur-run"))
+  assert.equal(slugs.includes("old-run"), false)
+  assert.equal(listRuns(root).runs.find((r) => r.slug === "stalled-run").active, false)
+})
+
+test("handoff: 비활성 run을 활성으로 되돌리고 런타임 종속 상태만 정리한다(누적 카운터 불변)", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "other" }) // 다른 run이 활성 포인터를 잡고 있다
+  const dir = makeInactiveRun(root, "hand-off", "M")
+  // 인계 전: 빌더 스레드 바인딩·누적 카운터·오래된 워치독 기산점·중단된 승인 arm
+  const execPath = join(dir, "execution.json")
+  const ex = JSON.parse(readFileSync(execPath, "utf8"))
+  ex.tasks = { t1: { runStatus: "building", builderThreadId: "th-dead", codexCalls: 7, startedAt: "2020-01-01T00:00:00.000Z", builderBoundAt: "2020-01-01T00:00:00.000Z", watchdogExtensions: [{ at: "2020-01-01T00:00:00.000Z", reason: "user" }] } }
+  writeFileSync(execPath, JSON.stringify(ex))
+  writeFileSync(join(dir, ".arm-approval.json"), "{}")
+  writeFileSync(join(dir, ".pending-rebind.json"), "{}")
+  assert.equal(readSentinel(root).slug, "other")
+
+  const r = run(["handoff", "--root", root, "--slug", "hand-off"]) // CLI 배선까지 함께 확인
+  assert.equal(r.ok, true)
+  assert.equal(r.previousActive, "other")
+  assert.deepEqual(r.clearedArmFiles.sort(), [".arm-approval.json", ".pending-rebind.json"])
+  const s = readSentinel(root)
+  assert.equal(s.slug, "hand-off")
+  assert.equal(s.base, "hand-off")
+  assert.equal(s.mode, "M") // sentinel↔execution mode mirror 유지
+  assert.deepEqual(s.readOnlyThreads, [])
+  const after = JSON.parse(readFileSync(execPath, "utf8"))
+  assert.equal(after.tasks.t1.builderThreadId, null)
+  assert.equal(after.tasks.t1.codexCalls, 7)                       // 누적 — 인계로 리셋되면 상한 우회다
+  assert.equal(after.tasks.t1.watchdogExtensions.length, 1)        // 누적
+  assert.notEqual(after.tasks.t1.builderBoundAt, "2020-01-01T00:00:00.000Z") // 기산점만 재기산
+  assert.equal(after.tasks.t1.builderBoundAt, r.watchdogRebasedAt)
+  assert.equal(after.tasks.t1.startedAt, r.watchdogRebasedAt)
+  for (const f of [".arm-approval.json", ".pending-rebind.json"]) assert.equal(existsSync(join(dir, f)), false)
+  assert.doesNotThrow(() => loadContext(root)) // mode mirror 정합
+})
+
+test("handoff: 드리프트가 있으면 유닛별 변경 파일 목록을 보고한다", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  makeCompleteSRun(root, "drifted")
+  assert.deepEqual(handoffRun(root, "drifted").drift, [])
+  writeFileSync(join(root, "unrelated.md"), "run과 무관한 편집\n")
+  const d = handoffRun(root, "drifted").drift
+  assert.equal(d.length, 1)
+  assert.equal(d[0].unit, "code")
+  assert.deepEqual(d[0].files, ["unrelated.md"])
+  assert.notEqual(d[0].reviewedPostSHA, d[0].currentTree)
+})
+
+test("handoff: 없는 run은 fail-closed", () => {
+  const root = gitRepo()
+  assert.throws(() => handoffRun(root, "nope"), (e) => e instanceof FailClosed && /대상 run 없음/.test(e.message))
+})
+
+// ── rebind-tree: 리뷰 범위 밖 드리프트만 수용(0.14 DEC-4) ─────────────────────
+// 3번 규칙(범위 겹침 거부)이 이 장치를 `--accept-drift` 류의 권위 구멍과 가르는 지점이다.
+test("rebind-tree(S): 범위 밖 편집을 수용하고 treeRebinds에 이력을 남긴다", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, "src"), { recursive: true })
+  writeFileSync(join(root, "src", "a.js"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  // S의 리뷰 범위 = 리뷰가 승인한 delta의 파일 집합(loop.mjs delta의 사이드카)
+  writeFileSync(join(cd, "delta.patch.json"), JSON.stringify({ changedPaths: ["src/a.js"] }))
+  assert.equal(computeCompletion(root, "plan", "s-run").complete, true)
+  writeFileSync(join(root, "NOTES.md"), "무관한 편집\n")
+  const c1 = computeCompletion(root, "plan", "s-run")
+  assert.equal(c1.complete, false)
+  assert.ok(c1.blockers.some((b) => /리뷰 후 변경됨/.test(b)))
+
+  const r = rebindTree(root, "s-run", "code", ["NOTES.md"])
+  assert.equal(r.ok, true)
+  assert.deepEqual(r.files, ["NOTES.md"])
+  assert.notEqual(r.from, r.to)
+  const c2 = computeCompletion(root, "plan", "s-run")
+  assert.equal(c2.complete, true, c2.blockers.join("; "))
+  assert.equal(c2.review.treeRebinds.length, 1)
+  assert.equal(c2.review.treeRebinds[0].unit, "code")
+  assert.deepEqual(c2.review.treeRebinds[0].files, ["NOTES.md"])
+})
+
+test("rebind-tree: 리뷰 범위와 겹치면 거부 — 출구는 재리뷰뿐", () => {
+  const root = gitRepo()
+  mkdirSync(join(root, "src"), { recursive: true })
+  writeFileSync(join(root, "src", "a.js"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  writeFileSync(join(cd, "delta.patch.json"), JSON.stringify({ changedPaths: ["src/a.js"] }))
+  writeFileSync(join(root, "src", "a.js"), "리뷰된 코드를 고침\n")
+  assert.throws(() => rebindTree(root, "s-run", "code", ["src/a.js"]),
+    (e) => e instanceof FailClosed && /리뷰 범위와 겹침/.test(e.message))
+  assert.equal(computeCompletion(root, "plan", "s-run").complete, false) // 상태 불변
+})
+
+test("rebind-tree: --files가 실제 delta와 다르면 거부(판단 시점과 재바인딩 시점 사이의 변경 차단)", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  writeFileSync(join(cd, "delta.patch.json"), JSON.stringify({ changedPaths: ["src.txt"] }))
+  writeFileSync(join(root, "a.md"), "1\n")
+  writeFileSync(join(root, "b.md"), "2\n") // 사용자가 a.md만 보고 판단한 뒤 b.md가 더 생겼다
+  assert.throws(() => rebindTree(root, "s-run", "code", ["a.md"]),
+    (e) => e instanceof FailClosed && /--files가 실제 delta와 불일치/.test(e.message))
+  assert.deepEqual(rebindTree(root, "s-run", "code", ["b.md", "a.md"]).files, ["a.md", "b.md"]) // 순서 무관
+})
+
+test("rebind-tree: 드리프트 없음·DR 아티팩트·미상 범위는 모두 거부", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  assert.throws(() => rebindTree(root, "s-run", "code", []), (e) => e instanceof FailClosed && /드리프트 없음/.test(e.message))
+  writeFileSync(join(root, "x.md"), "1\n")
+  // 범위를 알 수 없으면(사이드카 부재) 수용하지 않는다 — fail-closed
+  assert.throws(() => rebindTree(root, "s-run", "code", ["x.md"]), (e) => e instanceof FailClosed && /리뷰 범위를 알 수 없음/.test(e.message))
+  writeFileSync(join(cd, "delta.patch.json"), JSON.stringify({ changedPaths: ["src.txt"] }))
+  // DR 유닛(dr: 아티팩트)은 전체 tree에 바인딩되지 않으므로 대상이 아니다
+  const dd = join(root, ".harnie", "plan", "s-run", "review", "design")
+  mkdirSync(dd, { recursive: true })
+  writeFileSync(join(dd, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA: "dr:" + "a".repeat(64) }))
+  assert.throws(() => rebindTree(root, "s-run", "design", ["x.md"]), (e) => e instanceof FailClosed && /tree SHA가 아님/.test(e.message))
+  assert.deepEqual(treeDrift(root, "plan", "s-run").map((d) => d.unit), ["code"]) // design은 드리프트 대상 아님
+})
+
+test("rebind-tree(CLI): guardActive를 부른다 — 활성 run이 아니면 거부", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  writeFileSync(join(cd, "delta.patch.json"), JSON.stringify({ changedPaths: ["src.txt"] }))
+  bootstrapRun(root, { base: "other" }) // 완료 run → rollover로 활성 포인터가 다른 run으로
+  writeFileSync(join(root, "x.md"), "1\n")
+  assert.ok(runFail(["rebind-tree", "--root", root, "--slug", "s-run", "--unit", "code", "--files", "x.md"]))
+  handoffRun(root, "s-run")
+  assert.equal(run(["rebind-tree", "--root", root, "--slug", "s-run", "--unit", "code", "--files", "x.md"]).ok, true)
+})
+
+// ── 완료 리포트의 리뷰 구성(0.14 D6) ─────────────────────────────────────────
+test("completion: 라운드별 리뷰 구성과 재바인딩 이력을 신고 값임을 밝혀 함께 낸다", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  const cd = makeCompleteSRun(root, "s-run")
+  const st = JSON.parse(readFileSync(join(cd, "state.json"), "utf8"))
+  st.reviewers = [{ round: 1, runtime: "claude", model: "opus" }]
+  writeFileSync(join(cd, "state.json"), JSON.stringify(st))
+  const c = computeCompletion(root, "plan", "s-run")
+  assert.deepEqual(c.review.reviewers.code, [{ round: 1, runtime: "claude", model: "opus" }])
+  assert.deepEqual(c.review.treeRebinds, [])
+  assert.match(c.review.note, /신고 값/)
 })
 
 // ── abandon: 잠긴 트리의 출구(0.14 DEC-1) ─────────────────────────────────

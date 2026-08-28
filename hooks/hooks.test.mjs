@@ -525,7 +525,13 @@ test("Stop: 완료 후에도 트리가 바뀌면 같은 run이 다시 미완료�
 
   assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "HARNIE_STATUS: COMPLETE" }), null)
   writeFileSync(join(wt, "src", "a", "x.js"), "changed after complete")
-  assert.equal(hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "HARNIE_STATUS: COMPLETE" }).decision, "block")
+  const blocked = hook(STOP, { cwd: root, session_id: sid, stop_hook_active: false, last_assistant_message: "HARNIE_STATUS: COMPLETE" })
+  assert.equal(blocked.decision, "block")
+  // 0.14 DEC-4: 차단만으로는 모델이 무엇을 재시도해야 할지 모른다. 문구가 변경 파일 목록, 판단 주체가
+  // 사용자라는 사실, 그리고 판단 뒤의 유일한 진행 경로(rebind-tree)를 함께 담는다.
+  assert.match(blocked.reason, /src\/a\/x\.js/)
+  assert.match(blocked.reason, /사용자에게 물어라/)
+  assert.match(blocked.reason, /rebind-tree/)
 })
 
 // 0.14: resume은 run을 이어갈 뿐 게이트 범위를 바꾸지 않는다(세션 소유 개념 삭제).

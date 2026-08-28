@@ -114,6 +114,28 @@ test("apply CLI: 2라운드 — blocker 해소 후 APPROVE로 승인", () => {
   assert.equal(r.openBlocking, 0)
 })
 
+// 0.14 D6: 리뷰 구성은 기록만 된다. 어떤 전이·판정에도 들어가지 않으므로 loop.mjs는 포터블 코어로 남는다.
+test("apply CLI: --reviewer-runtime·--reviewer-model은 라운드별로 누적 기록되고 판정에 영향이 없다", () => {
+  const dir = tmpUnit()
+  writeFileSync(R(dir, 1), ["VERDICT: REJECT", "ISSUES:", "- [CR-001] (blocking) (open) [a.ts:1] x → y → z"].join("\n"))
+  const r1 = run(["apply", "--ledger", L(dir), "--review", R(dir, 1), "--ns", "CR", "--state", S(dir), "--reviewer-runtime", "claude", "--reviewer-model", "opus"])
+  assert.equal(r1.machineState, "REVISING") // 전이는 그대로
+  writeFileSync(R(dir, 2), ["VERDICT: APPROVE", "ISSUES:", "- [CR-001] (blocking) (resolved) [a.ts:1] 반영됨"].join("\n"))
+  const r2 = run(["apply", "--ledger", L(dir), "--review", R(dir, 2), "--ns", "CR", "--state", S(dir), "--reviewer-runtime", "codex", "--reviewer-model", "gpt-5.6-sol"])
+  assert.equal(r2.machineState, "APPROVED")
+  assert.deepEqual(JSON.parse(readFileSync(S(dir), "utf8")).reviewers, [
+    { round: 1, runtime: "claude", model: "opus" },
+    { round: 2, runtime: "codex", model: "gpt-5.6-sol" },
+  ])
+})
+
+test("apply CLI: 리뷰어 인자를 안 주면 reviewers 필드 자체가 없다(기존 계약 불변)", () => {
+  const dir = tmpUnit()
+  writeFileSync(R(dir), ["VERDICT: APPROVE", "ISSUES: []"].join("\n"))
+  run(["apply", "--ledger", L(dir), "--review", R(dir), "--ns", "CR", "--state", S(dir)])
+  assert.equal(JSON.parse(readFileSync(S(dir), "utf8")).reviewers, undefined)
+})
+
 // ── 컨텍스트 예산 advisory: APPROVED 시 완료 유닛 카운트·세션 분할 권장 ──
 test("apply CLI: APPROVED면 completedUnits 포함, 4의 배수째 유닛에서 sessionSplitRecommended", () => {
   const base = tmpBase()

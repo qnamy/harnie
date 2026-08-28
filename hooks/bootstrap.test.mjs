@@ -207,9 +207,42 @@ test("Skill harnie:dev → run 생성", () => {
   assert.ok(active(root))
 })
 
-test("UserPromptSubmit /harnie:dev(빈 인자) → exit 2", () => {
+test("UserPromptSubmit /harnie:dev(빈 인자) → 활성 run 없으면 exit 2", () => {
   const root = gitRepo()
-  assert.equal(run(ups("/harnie:dev", root)).code, 2)
+  const r = run(ups("/harnie:dev", root))
+  assert.equal(r.code, 2)
+  assert.match(r.stderr, /재개할 활성 run도 없습니다/)
+})
+
+// 0.14 D7: 인자 없는 진입은 재개다. `resumeRun`이 요구하는 정확 일치를 사람이 원 프롬프트를 글자 그대로
+// 재현해 충족할 필요가 없도록, sentinel의 base를 그대로 되쓴다.
+test("UserPromptSubmit /harnie:dev(빈 인자) → 활성 run이 있으면 그 run으로 재개", () => {
+  const root = gitRepo()
+  run(ups("/harnie:dev add a subtract function", root))
+  const slug = active(root).slug
+  const r = run(ups("/harnie:dev", root))
+  assert.equal(r.code, 0)
+  assert.equal(active(root).slug, slug) // 새 run을 만들지 않는다
+  assert.match(r.stdout, new RegExp(slug))
+})
+
+// U1c 카나리아가 관측한 것: Skill 도구 경로는 빈 args에서 sentinel을 보기도 전에 실패했다. 슬래시 커맨드만
+// 고치면 재개 동선이 절반만 열린다 — 두 진입 경로 모두에 같은 규칙이 걸려야 한다.
+test("PreToolUse(Skill) harnie:dev(빈 args) → 활성 run이 있으면 재개, 없으면 exit 2", () => {
+  const empty = gitRepo()
+  const noRun = run(skill("harnie:dev", "", empty))
+  assert.equal(noRun.code, 2)
+  assert.match(noRun.stderr, /재개할 활성 run도 없습니다/)
+
+  const root = gitRepo()
+  run(ups("/harnie:dev add a subtract function", root))
+  const slug = active(root).slug
+  for (const args of ["", "   ", undefined]) {
+    const r = run(skill("harnie:dev", args, root))
+    assert.equal(r.code, 0, JSON.stringify(args))
+    assert.equal(active(root).slug, slug)
+    assert.match(r.stdout, new RegExp(slug))
+  }
 })
 
 test("Skill 채널에서도 미완료 run 충돌은 exit 2", () => {

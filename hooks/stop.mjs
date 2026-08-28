@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Stop re-derives completion from authority files instead of trusting narration or phase.
 import { readStdin, findRoot, blockStop, allow } from "./lib.mjs"
-import { loadContext, computeCompletion, parseStatusFooter } from "../scripts/execution.mjs"
+import { loadContext, computeCompletion, parseStatusFooter, treeDrift } from "../scripts/execution.mjs"
 import { decideStop } from "../scripts/guards.mjs"
 
 const p = await readStdin()
@@ -11,6 +11,19 @@ const failClosed = (blockers) => {
   const d = decideStop({ complete: false, blockers, footer, stopHookActive })
   return d.block ? blockStop(d.reason) : allow()
 }
+
+// 0.14 DEC-4: 드리프트로 막을 때 사람이 판단할 재료를 함께 준다 — 리뷰 후 무엇이 바뀌었는지, 그리고 그
+// 판단이 오케스트레이터가 아니라 사용자의 것이라는 사실. 판단 뒤의 진행 경로는 rebind-tree 하나다.
+function driftHint(root, track, slug) {
+  let drift = []
+  try { drift = treeDrift(root, track, slug) } catch { return "" }
+  if (!drift.length) return ""
+  const lines = drift.map((d) => `  - ${d.unit}: ${d.files.length ? d.files.join(", ") : "(변경 목록 산출 실패)"}`)
+  return `\n리뷰 후 변경된 파일:\n${lines.join("\n")}\n이 편집이 이 run과 무관한지 **사용자에게 물어라**(스스로 판정하지 마라). ` +
+    `무관하다는 답을 받으면 \`execution.mjs rebind-tree --root ${root} --slug ${slug} --unit <위 유닛> --files <위 목록, 쉼표 구분>\`으로 수용하고, ` +
+    `리뷰 범위와 겹치면 그 커맨드가 거부한다 — 그때 출구는 재리뷰뿐이다.`
+}
+const blockWithDrift = (reason, root, track, slug) => blockStop(reason + driftHint(root, track, slug))
 
 try {
   const root = findRoot(p.cwd)
@@ -25,13 +38,13 @@ try {
     if (comp.complete && !(footer.present && footer.status === "COMPLETE"))
       blockStop("S run 완료 판정인데 HARNIE_STATUS 푸터 부재/불일치 — 최종 응답을 `HARNIE_STATUS: COMPLETE`로 끝내라(미완료면 INCOMPLETE — <blocker>)")
     const d = decideStop({ complete: comp.complete, blockers: comp.blockers, footer, stopHookActive })
-    d.block ? blockStop(d.reason) : allow()
+    d.block ? blockWithDrift(d.reason, root, ctx.track, ctx.slug) : allow()
   }
   // Approved runs are checked regardless of their advisory phase.
   else if (ctx.approved) {
     const comp = computeCompletion(root, ctx.track, ctx.slug)
     const d = decideStop({ complete: comp.complete, blockers: comp.blockers, footer, stopHookActive })
-    if (d.block) blockStop(d.reason)
+    if (d.block) blockWithDrift(d.reason, root, ctx.track, ctx.slug)
     allow()
   }
   else if (ctx.approvalEvidence)
