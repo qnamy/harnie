@@ -45,11 +45,11 @@
 
 `/harnie:dev "결제 실패 재시도 큐 도입"` 한 줄로 시작한다. 크기(S/M)가 스테이지 스킵의 유일한 축이다. S는 국소 수정(설계·승인 게이트 없음), M은 설계 판단이 필요한 단일 리뷰 유닛이다. 판정은 잠정으로 시작해 그라운딩 후 확정하고, 상향 승격만 있다.
 
-M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가 있거나 독립 리뷰 가치가 있는 태스크가 2개 이상이면 크기 판정에서 멈추고 사람 + [orca](https://github.com/stablyai/orca)로 인계한다. 이 경계는 `execution.mjs`의 `set-mode`가 `S|M` 외의 값을 fail-closed로 거부해 닫는다. 분해·디스패치·워크트리 수명주기·통합은 orca가 소유하고, 품질·증거·강제화는 harnie가 소유한다.
+M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가 있거나 독립 리뷰 가치가 있는 태스크가 2개 이상이면 크기 판정에서 멈추고 사람 + [orca](https://github.com/stablyai/orca)로 인계한다. 이 경계는 `execution.mjs`의 `set-mode`가 `S|M` 외의 값을 fail-closed로 거부해 닫는다. 분해·디스패치·워크트리 수명주기·통합은 S/M을 포함한 모든 run에서 orca가 소유하고, 품질·증거·강제화는 harnie가 소유한다.
 
 | 시점 | 일어나는 일 (M 기준; S는 해당 스테이지 스킵) | 남는 것 |
 |---|---|---|
-| **진입** | bootstrap 훅이 전용 git worktree를 만들고 sentinel과 `execution.json`을 심는다. 크기·난이도를 판정하고, 그라운딩 직후·승인 직전 두 체크포인트에서 재판정한다 | 격리된 워크루트 |
+| **진입** | bootstrap 훅이 sentinel과 `execution.json`을 심는다. run root는 사용자 git repo root다. 크기·난이도를 판정하고, 그라운딩 직후·승인 직전 두 체크포인트에서 재판정한다 | 사용자 작업 트리에 놓인 run 상태 |
 | **승인 게이트(1회)** | `plan.md`의 manifest 블록 → `arm-approval` → 실제 `AskUserQuestion` one-shot 바인딩. 여기까지 소스 쓰기는 훅이 막는다 | planHash 고정 manifest |
 | **상세설계 + 설계리뷰** | `harnie-designer`가 설계를 쓰고 Codex 설계 리뷰 루프를 돈다 | `review/design/design.md` |
 | **빌드 + 코드리뷰** | 빌더 스레드 바인딩·워치독을 켜고 baseline/seal 후 Codex 빌드(스코프 테스트만) → 인라인 Claude 코드리뷰 루프 | 리뷰 ledger + delta |
@@ -57,6 +57,8 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 | **완료** | `completion`이 완료를 재도출하고 Stop 훅이 독립 검증한다 | `HARNIE_STATUS` 보고 |
 
 `dev-solo`는 Codex 단독 완주 경로다. 생산도 리뷰도 Codex이고, 리뷰는 fresh `codex exec --sandbox read-only` 셀프리뷰 서브프로세스가 맡는다. 크로스모델 리뷰어가 없다는 것을 감수한 설계이며, Claude 사용량이 소진된 상황을 위해 존재한다.
+
+중단된 run의 흔한 재개는 인자 없는 `/harnie:dev`다 — 활성 run의 원 프롬프트를 그대로 이어 쓴다. 소급으로 미완료 처리된 과거 run을 되살리거나 런타임을 바꿔 이어받을 때는 `/harnie:dev-resume`이 트리의 재개 가능한 run 목록과 각 run의 다음 블로커를 보여준 뒤 선택한 run으로 넘어간다.
 
 ### 권위와 강제
 
@@ -123,11 +125,11 @@ Claude Code 플러그인이다. repo 루트가 플러그인(`.claude-plugin/plug
 harnie/
 ├── .claude-plugin/   # plugin.json + marketplace.json
 ├── .mcp.json         # codex MCP 서버 선언
-├── commands/         # /harnie:dev 단일 진입점
+├── commands/         # /harnie:dev 단일 진입점 + /harnie:dev-resume(재개)
 ├── agents/           # scout · designer · builder · reviewer
 ├── skills/           # dev · dev-solo · cross-review + 방법론 스킬
 ├── instructions/     # canonical 런타임 계약
-├── scripts/          # loop / ledger / delta / execution / worktree / guards
+├── scripts/          # loop / ledger / delta / execution / guards
 ├── hooks/            # 실행 상태 강제 훅 (PreToolUse · Stop · PostToolUse)
 └── docs/             # 현행 계약의 설계 근거
 ```
@@ -142,7 +144,7 @@ harnie/
 - [docs/design-0.13-L-dismantle.md](docs/design-0.13-L-dismantle.md) — L 파이프라인 완전 삭제 설계
 - [docs/m-pipeline-kill-criteria.md](docs/m-pipeline-kill-criteria.md) — M 파이프라인 존폐 기준
 - [docs/codex-mechanisms.md](docs/codex-mechanisms.md) — codex MCP·플러그인 메커니즘과 재현 방법
-- [docs/bootstrap-adherence.md](docs/bootstrap-adherence.md) — ADR: 부트스트랩 강제 · run 수명주기
+- [docs/bootstrap-adherence.md](docs/bootstrap-adherence.md) — ADR: 부트스트랩 강제 · run 수명주기 · 언제 self-init이 정당한가(훅 없는 런타임의 `init`, 재개의 `handoff`)
 - [docs/permission-prompt-reduction.md](docs/permission-prompt-reduction.md) — ADR: 좁은 훅 auto-allow
 
 실행 규칙의 정본은 [`instructions/`](instructions/)다. 설계 문서는 이를 재서술하지 않는다.
