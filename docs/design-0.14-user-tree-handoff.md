@@ -511,7 +511,7 @@ graph LR
 - **선행**: U1·U3·U4·U5·U6 머지와 `origin/main` push. 카나리아 세션은 harnie를 워크트리가 아니라 **설치된 플러그인**에서 로드하고 플러그인은 마켓플레이스(= `origin/main`)에서 오므로, U1만 올리면 엔진은 0.14인데 `skills/dev/SKILL.md`는 워크트리를 말하는 모순된 번들을 시험하게 된다. U2만 이 시점에 미머지다
 - **prompt**: `read /Users/bakgyunam/Tradlinx/harnie/docs/design-0.14-user-tree-handoff.md, then execute the §U1c card.`
 - **카드 본문(자족)**: DEC-5가 이 유닛을 요구한다. U1은 성격이 다른 것 셋(root 해석, 트리 SHA 판정, 세션 잠금)을 사용자 트리에서 처음 발화시키므로, U2를 얹기 전에 그 셋을 분리해 관측한다.
-  0. **플러그인 설치본을 먼저 갱신한다** — `/plugin marketplace update harnie` + `/plugin update harnie@harnie`. Claude Code의 harnie 훅은 설치본을 로드하므로, 이 단계를 건너뛰면 이어지는 실런이 0.13.1을 돌린다. **갱신 반영의 육안 증거는 부트스트랩 emit이다** — workroot 대신 run root와 slug가 나오면 새 코드다(U1 카드 6이 바꾸는 문구).
+  0. **버전을 먼저 올리고 push한 뒤 플러그인 설치본을 갱신한다** — 플러그인 관리자는 `plugin.json`의 버전 문자열로 갱신 여부를 판단하므로, 머지만 push하고 버전을 그대로 두면 갱신 명령이 조용히 no-op이 된다(2026-08-28 실측). 1단계 카나리아용 번호는 `0.14.0-rc.1`이고 U7이 `0.14.0`으로 올린다. 그 다음 `/plugin marketplace update harnie` + `/plugin update harnie@harnie`. Claude Code의 harnie 훅은 설치본을 로드하므로, 이 단계를 건너뛰면 이어지는 실런이 0.13.1을 돌린다. **갱신 반영의 육안 증거는 부트스트랩 emit이다** — workroot 대신 run root와 slug가 나오면 새 코드다(U1 카드 6이 바꾸는 문구).
   1. 임의 repo를 **스크래치 클론**한다. 실 작업 트리를 첫 무대로 쓰지 않는다 — 이 릴리스의 완료 바인딩·`.harnie/` 잔류·세션 잠금이 전부 여기서 처음 발화한다.
   2. 그 클론에서 S 규모 작업 1건을 `/harnie:dev`로 완주한다. 세 가지를 관측해 보고한다 — `.harnie/`가 `git status`에 안 뜨는가(info/exclude 등록), main 브랜치 경고가 뜨는가, run과 무관한 파일 한 줄을 고쳤을 때 완료 판정이 어떻게 되는가.
   3. 두 번째 세션을 같은 클론에 붙여 소스 쓰기가 막히는지, `abandon`으로 풀리는지 확인한다.
@@ -663,7 +663,7 @@ graph LR
 
 ### U7 — 통합 카나리아와 릴리스
 
-- **소유 파일**: 없음(머지 후 버전 파일과 `docs/m-pipeline-kill-criteria.md` 한 줄)
+- **소유 파일**: 없음(머지 후 버전 파일과 `docs/m-pipeline-kill-criteria.md` 한 줄). 버전은 U1c가 단 `0.14.0-rc.1`에서 `0.14.0`으로 올린다
 - **실행 project**: 스크래치 클론 + harnie 메인 체크아웃
 - **AI**: claude
 - **model**: sonnet (T2)
