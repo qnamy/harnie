@@ -1,6 +1,6 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie, decideActiveRunDeletion, isActiveTaskWorktree, taskIdFromActiveTaskWorktree } from "./guards.mjs"
+import { isControlPath, decideWriteEdit, decideBash, decideTask, decideCodex, decideStop, decideWatchdog, referencesHarnie } from "./guards.mjs"
 
 test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용", () => {
   for (const p of [
@@ -12,29 +12,16 @@ test("isControlPath: 권위 파일·세션·lock 보호, 일반 산출물 허용
     assert.equal(isControlPath(p), false, p)
 })
 
-test("isControlPath: 세션 바인딩 디렉터리도 control(T2)", () => {
-  assert.equal(isControlPath(".harnie/sessions/abc-123.json"), true)
-})
-
-// CR-001/CR-004 회귀: worktree-per-run(T2)의 컨테이너 `.harnie-wt`가 `.harnie` 매칭에 걸려 그 안의 평범한 파일까지
-// Bash로 접근 불가능해지던 버그(라운드1), 그리고 trailing slash·glob 형태가 그 컨테이너 보호를 빠져나가던 버그(라운드2).
-test("referencesHarnie: .harnie-wt 컨테이너 안의 평범한 파일은 매치 안 됨, 컨테이너 자체(슬래시·glob 포함)·nested .harnie는 매치", () => {
-  assert.equal(referencesHarnie("git -C .harnie-wt/harnie-foo status"), false)
-  assert.equal(referencesHarnie("node --test .harnie-wt/harnie-foo/x.test.mjs"), false)
-  assert.equal(referencesHarnie("npm --prefix .harnie-wt/harnie-foo test"), false)
-  assert.equal(referencesHarnie("cat .harnie-wt/harnie-foo/README.md"), false)
-  assert.equal(referencesHarnie("rm -rf .harnie-wt"), true)                          // 컨테이너 자체(모든 run 삭제)
-  assert.equal(referencesHarnie("ls .harnie-wt/harnie-foo/.harnie/active.json"), true) // nested 권위 상태
-  assert.equal(referencesHarnie("rm -rf .harnie"), true)                             // 기존 단일 .harnie 보호 유지
-  assert.equal(referencesHarnie("cat .harnie/sessions/x.json"), true)
-  // trailing slash·glob도 "컨테이너 전체"를 뜻하므로 매치돼야 한다(셸 탭완성·정리 명령의 흔한 형태).
-  assert.equal(referencesHarnie("rm -rf .harnie-wt/"), true)
-  assert.equal(referencesHarnie("rm -rf .harnie-wt/*"), true)
-  assert.equal(referencesHarnie("rm -rf .harnie-wt/harnie-*"), true)
-  assert.equal(referencesHarnie("rm -rf .harnie-wt/harnie-foo"), false) // 한 worktree만 정확히 지목
-  assert.equal(referencesHarnie("rm -rf .harnie-wt/harnie-foo/*"), true) // 특정 worktree라도 glob subtree는 차단
-  assert.equal(referencesHarnie("rm -rf ./.harnie-wt/"), true)
-  assert.equal(referencesHarnie("find .harnie-wt/ -name active.json -delete"), true)
+// 0.14: `.harnie-wt` 컨테이너가 사라져 판정은 `.harnie` 하나다. `(?![\w-])` 경계는 남는다 —
+// `.harnie`로 시작하는 다른 이름까지 blanket deny로 끌어들이지 않기 위해서다.
+test("referencesHarnie: 상태 디렉터리만 매치하고 이름이 이어지는 형태는 매치 안 됨", () => {
+  assert.equal(referencesHarnie("rm -rf .harnie"), true)
+  assert.equal(referencesHarnie("cat .harnie/active.json"), true)
+  assert.equal(referencesHarnie("cat .harnie/abandoned/x/execution.json"), true)
+  assert.equal(referencesHarnie("cat ./.harnie/active.json"), true)
+  assert.equal(referencesHarnie("cat .HARNIE/active.json"), false)
+  assert.equal(referencesHarnie("cat .harnie-notes/x.md"), false)
+  assert.equal(referencesHarnie("git status"), false)
 })
 
 test("decideWriteEdit: control 직접 쓰기는 phase 무관 deny", () => {
@@ -54,7 +41,7 @@ test("decideWriteEdit: repo 밖 절대경로는 phase gate 제외, control은 �
   assert.equal(decideWriteEdit({ relPath: ".harnie/active.json", outside: true, phase: "planning", track: "plan", slug: "x" }).deny, true)
 })
 
-const T = new Set(["/plugin/scripts/loop.mjs", "/plugin/scripts/execution.mjs", "/plugin/scripts/worktree.mjs"])
+const T = new Set(["/plugin/scripts/loop.mjs", "/plugin/scripts/execution.mjs"])
 const ctx = { trustedClis: T, activeRoot: "/repo", activeSlug: "x", activeTrack: "plan" }
 
 test("decideBash: non-sanctioned .harnie 접근은 읽기 포함 전면 deny", () => {
@@ -80,71 +67,23 @@ test("decideBash: sanctioned CLI는 bare node + 신뢰 절대 script + 활성 re
   assert.equal(decideBash({ command: "node /plugin/scripts/execution.mjs completion --root /repo --root /other", ...ctx }).autoAllow, false)
 })
 
-test("decideBash: worktree CLI는 --repo가 활성 repo일 때만 sanctioned, auto-allow는 아님", () => {
-  const good = "node /plugin/scripts/worktree.mjs create --repo /repo --branch x"
-  assert.deepEqual(decideBash({ command: good, ...ctx }), { deny: false, autoAllow: false })
-  assert.equal(decideBash({ command: good.replace("--repo /repo", "--repo /other"), ...ctx }).autoAllow, false)
-  assert.equal(decideBash({ command: `${good} && rm -rf /`, ...ctx }).autoAllow, false)
-
-  // `.harnie` 토큰을 넣으면 sanctioned 여부가 관찰 가능하다: 올바른 repo 바인딩만 Bash guard를 통과한다.
-  const probe = "node /plugin/scripts/worktree.mjs create --repo /repo --branch .harnie/probe"
-  assert.equal(decideBash({ command: probe, ...ctx }).deny, false)
-  assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /other"), ...ctx }).deny, true)
-  assert.equal(decideBash({ command: probe.replace("--repo /repo", "--repo /repo/.harnie-wt/harnie-x-t1"), ...ctx }).deny, true)
-  assert.equal(decideBash({ command: `${probe} && rm -rf /`, ...ctx }).deny, true)
+// DEC-1의 성립 조건: 출구가 실제로 열려 있어야 한다. `isSanctionedCli`의 execution.mjs 분기는 `--root`만
+// 보므로 활성 slug 대상이든 이미 비활성인 slug 대상이든 둘 다 통과해야 한다 — 후자가 막히면 소급 미완료된
+// 과거 run을 폐기할 방법이 없다.
+test("decideBash: abandon은 활성 slug·비활성 slug 대상 모두 통과(잠긴 트리의 출구)", () => {
+  const cmd = (slug) => `node /plugin/scripts/execution.mjs abandon --root /repo --slug ${slug} --confirm ${slug}`
+  assert.equal(decideBash({ command: cmd("x"), ...ctx }).deny, false)        // 활성 slug
+  assert.equal(decideBash({ command: cmd("stale-run"), ...ctx }).deny, false) // 비활성 slug
+  assert.equal(decideBash({ command: cmd("x"), ...ctx }).autoAllow, false)   // 자동 허용은 아님 — 사용자 프롬프트를 거친다
 })
 
-// 0.13 T8(2026-08-26 사고 대응): referencesHarnie는 "정확히 한 worktree를 지목"하면 일부러 허용한다
-// (guards.test.mjs 위 "referencesHarnie" 테스트 참조) — 그 안에서 build/test/git을 자유롭게 쓰게 하려는 의도인데,
-// `git worktree remove`/`rm -rf`가 그 허용 분기에 함께 떨어져 사고의 직접 원인이었다. decideActiveRunDeletion은
-// activeRuns(새 상태 파일 없이 각 run의 `.harnie/active.json`에서 파생)로 그 삭제 시도만 별도로 잡는다.
-test("decideActiveRunDeletion: 활성 run의 워크트리 삭제(git worktree remove·rm -rf)만 deny, 하위 경로·무관 run은 allow", () => {
-  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-foo", slug: "foo", branch: "harnie/foo" }]
-  for (const cmd of [
-    "git worktree remove /repo/.harnie-wt/harnie-foo",
-    "git -C /repo worktree remove .harnie-wt/harnie-foo",
-    "rm -rf .harnie-wt/harnie-foo",
-    "rm -rf .harnie-wt/harnie-foo/",
-    "rm -fr /repo/.harnie-wt/harnie-foo",
-    "rm -r -f .harnie-wt/harnie-foo",
-  ]) assert.equal(decideActiveRunDeletion(cmd, runs).deny, true, cmd)
-  for (const cmd of [
-    "git -C .harnie-wt/harnie-foo status",                  // 삭제 의도 아님 — referencesHarnie가 이미 허용
-    "rm -rf .harnie-wt/harnie-foo/tmp",                      // worktree "안"의 하위 경로 삭제는 정상 작업
-    "rm -r .harnie-wt/harnie-foo",                           // force 없음 — rm -rf만 대상
-    "rm -rf .harnie-wt/harnie-foo2",                         // 접두만 겹치는 다른 이름
-    "git worktree remove .harnie-wt/harnie-bar",             // 등록되지 않은(비활성) run — 명시 열거 정리 대상
-    "rm -rf /tmp/unrelated",
-  ]) assert.equal(decideActiveRunDeletion(cmd, runs).deny, false, cmd)
-})
-
-test("decideActiveRunDeletion: 활성 run 브랜치 삭제(git branch -d/-D·git push --delete)만 deny", () => {
-  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-foo", slug: "foo", branch: "harnie/foo" }]
-  for (const cmd of ["git branch -D harnie/foo", "git branch -d harnie/foo", "git push origin --delete harnie/foo"])
-    assert.equal(decideActiveRunDeletion(cmd, runs).deny, true, cmd)
-  for (const cmd of ["git branch -D harnie/foo2", "git branch -D other-branch", "git branch --list harnie/foo", "git push origin harnie/foo"])
-    assert.equal(decideActiveRunDeletion(cmd, runs).deny, false, cmd)
-})
-
-test("decideBash: 활성 run 삭제는 sanctioned CLI(worktree.mjs remove)로는 여전히 허용, 원문 git/rm은 deny", () => {
-  const runs = [{ worktreePath: "/repo/.harnie-wt/harnie-x", slug: "x", branch: "harnie/x" }]
-  const sanctioned = "node /plugin/scripts/worktree.mjs remove --repo /repo --branch harnie/x --delete-branch"
-  assert.equal(decideBash({ command: sanctioned, ...ctx, activeRuns: runs }).deny, false)
-  assert.equal(decideBash({ command: "git worktree remove /repo/.harnie-wt/harnie-x", ...ctx, activeRuns: runs }).deny, true)
-  assert.equal(decideBash({ command: "git branch -D harnie/x", ...ctx, activeRuns: runs }).deny, true)
-  // activeRuns를 안 넘기면(기본값 []) 새 predicate가 무해하게 no-op — 기존 호출부 하위호환.
-  assert.equal(decideBash({ command: "git worktree remove /repo/.harnie-wt/harnie-x", ...ctx }).deny, false)
-})
-
-test("decideBash: loop CLI는 활성 task worktree를 repo로 허용", () => {
-  const wt = "/repo/.harnie-wt/harnie-x-t1"
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${wt}`, ...ctx }).deny, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${wt} a --out ${wt}/.harnie/review/code/delta.patch`, ...ctx }).deny, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${wt} --ledger ${wt}/.harnie/review/code/ledger.json --review ${wt}/.harnie/review/code/round-1.txt --ns CR --state ${wt}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, false)
-  const other = wt.replace("harnie-x-t1", "harnie-other-t1")
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${other}`, ...ctx }).autoAllow, false)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${other} a --out ${other}/.harnie/review/code/delta.patch`, ...ctx }).deny, true)
-  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${other} --ledger ${other}/.harnie/review/code/ledger.json --review ${other}/.harnie/review/code/round-1.txt --ns CR --state ${other}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, true)
+// 0.14: run root 하나뿐 — loop CLI도 run root 인자만 받는다(태스크별 worktree 소멸).
+test("decideBash: loop CLI는 run root 인자만 sanctioned", () => {
+  assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs capture /repo", ...ctx }).deny, false)
+  const wt = "/repo/sub"
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs capture ${wt}`, ...ctx }).autoAllow, false)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs delta ${wt} a --out ${wt}/.harnie/review/code/delta.patch`, ...ctx }).deny, true)
+  assert.equal(decideBash({ command: `node /plugin/scripts/loop.mjs apply --root ${wt} --ledger ${wt}/.harnie/review/code/ledger.json --review ${wt}/.harnie/review/code/round-1.txt --ns CR --state ${wt}/.harnie/review/code/state.json --artifact a`, ...ctx }).deny, true)
 })
 
 test("decideBash: sanctioned auto-allow 집합", () => {
@@ -179,24 +118,12 @@ test("decideCodex: 승인 전 read-only만", () => {
   assert.equal(decideCodex({ isReply: true, threadId: "r", readOnlyThreads: ["r"], phase: "planning" }).deny, false)
 })
 
-test("isActiveTaskWorktree: 활성 slug의 직접 task worktree만 허용", () => {
-  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-t1"), true)
-  assert.equal(isActiveTaskWorktree("/repo", "x.y", "/repo/.harnie-wt/harnie-x.y-tA_2"), true)
-  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-other-t1"), false)
-  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-t1/nested"), false)
-  assert.equal(isActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt-evil/harnie-x-t1"), false)
-  assert.equal(taskIdFromActiveTaskWorktree("/repo", "x", "/repo/.harnie-wt/harnie-x-tA_2"), "A_2")
-})
-
 test("decideCodex: 승인 후 builder는 workspace-write + 활성 cwd + building task", () => {
   const base = { isReply: false, sandbox: "workspace-write", root: "/repo", slug: "x", cwd: "/repo", phase: "executing", buildingUnboundTasks: ["1"], pendingRunRootBootstrap: "1", taskRepoWorkroots: { "1": "/repo" } }
   assert.equal(decideCodex(base).deny, false)
-  // 0.13: 태스크별 worktree cwd는 더 이상 허용되지 않는다 — PostToolUse가 귀속할 수 없는 호출을 열지 않는다
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-other-t1" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt/harnie-x-t1/nested" }).deny, true)
-  assert.equal(decideCodex({ ...base, cwd: "/repo/.harnie-wt-evil/harnie-x-t1" }).deny, true)
+  // 빌더 cwd는 run root 정확히 하나다 — 하위 디렉터리도 PostToolUse가 귀속할 수 없으므로 막는다
+  assert.equal(decideCodex({ ...base, cwd: "/repo/src" }).deny, true)
+  assert.equal(decideCodex({ ...base, cwd: "/repo/" }).deny, true)
   assert.equal(decideCodex({ ...base, sandbox: "danger-full-access" }).deny, true)
   assert.equal(decideCodex({ ...base, cwd: "/other" }).deny, true)
   assert.equal(decideCodex({ ...base, buildingUnboundTasks: [] }).deny, true)
@@ -301,4 +228,14 @@ test("decideBash: 신뢰 CLI 형태의 승인 실패는 원인 진단이 deny �
   const generic = decideBash({ command: "cat .harnie/active.json", ...ctx })
   assert.equal(generic.deny, true)
   assert.doesNotMatch(generic.reason, /승인 실패/)
+})
+
+// U1 카드 9: D4 이후 이 deny를 받는 세션은 대개 run과 무관한 방관자다. 그 세션에 닿는 문구가 R2 완화의
+// 유일한 접점이므로, 어느 run이 잠갔는지(slug)와 두 출구가 반드시 들어 있어야 한다.
+test("decideWriteEdit: 승인 前 deny 문구에 활성 slug와 두 출구(재개·abandon)가 들어간다", () => {
+  const d = decideWriteEdit({ relPath: "src/x.ts", phase: "planning", track: "plan", slug: "feat-x", root: "/repo", execCli: "/plugin/scripts/execution.mjs" })
+  assert.equal(d.deny, true)
+  assert.match(d.reason, /feat-x/)
+  assert.match(d.reason, /\/harnie:dev/)
+  assert.match(d.reason, /abandon --root \/repo --slug feat-x --confirm feat-x/)
 })
