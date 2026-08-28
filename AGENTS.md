@@ -23,6 +23,13 @@
 - **실행 대상 제한**: `agents/`·`commands/`의 `*-ko.md`가 별도 플러그인 컴포넌트로 자동 등록되지 않도록 `.claude-plugin/plugin.json`의 `agents`·`commands` 목록에는 영문 정본만 명시한다.
 - **CLAUDE.md ↔ AGENTS.md 미러**: 두 파일은 **동일 내용 미러**다(한쪽 수정 시 다른 쪽도 반드시 같이 갱신) — 이 규칙은 ko 미러 예외와 무관하게 유지된다.
 
-## 릴리스 후속 — Codex 플러그인 동기화 (필수)
+## 릴리스 후속 — 플러그인 동기화 (필수)
 
-플러그인 버전을 올려 `main`에 push한 뒤에는 **`codex plugin marketplace upgrade`를 1회 실행**한다. Codex(데스크톱/CLI)의 harnie 플러그인은 마켓플레이스 스냅샷(`~/.codex/.tmp/marketplaces/harnie`)을 실행 경로로 직접 사용하므로, 이 한 명령으로 대화형 Codex의 pr-review 등 스킬이 최신 버전으로 반영된다. (헤드리스 루틴은 `~/Tradlinx/harnie` 절대경로를 읽으므로 무관. Claude Code 쪽은 기존대로 `/plugin marketplace update harnie` + `/plugin update harnie@harnie`.)
+**계약 문서만 고쳐도 패치 범프가 필요하다.** Claude Code와 대화형 Codex 둘 다 실행 사본을 `plugin.json` 버전 키로 갱신한다. 버전이 그대로면 마켓플레이스 클론에 새 내용이 들어와도 실행 캐시(`~/.claude/plugins/cache/harnie/harnie/<version>`)로 복사되지 않고 `claude plugin update`가 "already at the latest version"으로 끝난다(force 플래그 없음). 2026-08-28 0.13.2 릴리스에서 실측했다.
+
+버전을 올려 `main`에 push한 뒤 각 플랫폼에서 1회씩 실행한다.
+
+- **Claude Code**: `claude plugin marketplace update harnie` + `claude plugin update harnie@harnie`. 적용은 재시작 후다. 대화형 세션에서는 `/plugin marketplace update harnie` + `/plugin update harnie@harnie`.
+- **Codex**: `codex plugin marketplace upgrade`. 대화형 Codex는 스냅샷(`~/.codex/.tmp/marketplaces/harnie`)을 실행 경로로 직접 쓴다.
+
+헤드리스 루틴은 `~/Tradlinx/harnie` 절대경로를 읽으므로 `main` 머지 시점에 반영된다.
