@@ -10,7 +10,6 @@
 
 0.14가 run root를 사용자 git 작업 트리로 옮겼다. 이 레포에서 작업을 시작하는 세션은 이 절을 읽었으므로, **해당 상황이 오면 사용자에게 한 줄로 상기시킨다** — 별도 루틴이나 알림 장치를 만들지 않는다.
 
-- **Codex에서 harnie 훅이 `exit 1`로 죽는다 — 원인 미조사(2026-08-31 관측 4회).** `PreToolUse hook (failed) error: hook exited with code 1`, `Stop hook (failed)`가 대화형 Codex 세션에서 반복해 찍혔다. 훅은 정상 경로에서 exit 0(허용)이나 exit 2(차단)로 끝나므로 어딘가에서 예외가 던져지는 것이다. **왜 중요한가**: Codex가 훅 실패를 무시한다면 승인 前 소스 쓰기 차단·control 파일 보호·Stop 완료 강제가 그 세션에서 조용히 꺼진다. `approve` 차단이 발화한 것은 확인했으니 전부 죽은 것은 아니지만 어느 경로가 죽는지 모른다. 훅을 손으로 한 번 실행해 stderr를 보는 것이 첫 단계다(Codex 페이로드에만 있는 필드 처리에서 나는 것일 수 있다). 해소하면 이 항목을 지운다.
 - **M 파이프라인 킬 기준 — 표본 0/3, 마감 2026-11-27.** 비교축은 디스패치된 유닛 중 `/harnie:dev`(`dev`/`dev-solo`)로 돈 것과 plain 세션으로 돈 것이다(`docs/design-0.14-user-tree-handoff.md` U4가 재정의). run을 돌릴 때마다 총 토큰·벽시계·사용자 개입 횟수·재작업 라운드 수를 `docs/m-pipeline-kill-criteria.md`에 한 줄 기록한다. 3건이 모이거나 마감이 지나면 판정하고, 판정 후 이 항목을 지운다. **표본이 안 모인 채 마감을 넘기면 그 자체가 해체 근거다** — 마감일 이후 이 문서를 읽는 세션은 그 사실을 사용자에게 알린다.
 
 ## 언어 정책 — 영문 정본 + 한국어 미러는 요청 시에만 (2026-08-27 확정)
@@ -30,6 +29,8 @@
 버전을 올려 `main`에 push한 뒤 각 플랫폼에서 1회씩 실행한다.
 
 - **Claude Code**: `claude plugin marketplace update harnie` + `claude plugin update harnie@harnie`. 적용은 재시작 후다. 대화형 세션에서는 `/plugin marketplace update harnie` + `/plugin update harnie@harnie`.
-- **Codex**: `codex plugin marketplace upgrade`. 대화형 Codex는 스냅샷(`~/.codex/.tmp/marketplaces/harnie`)을 실행 경로로 직접 쓴다.
+- **Codex**: `codex plugin marketplace upgrade`. 실행 사본은 `~/.codex/plugins/cache/harnie/harnie/<version>`이다(`~/.codex/.tmp/marketplaces/harnie`는 마켓플레이스 클론이지 실행 경로가 아니다).
 
 헤드리스 루틴은 `~/Tradlinx/harnie` 절대경로를 읽으므로 `main` 머지 시점에 반영된다.
+
+**업그레이드는 열려 있던 Codex 세션의 훅을 죽인다.** Codex 세션은 시작 시점의 버전 디렉터리를 절대경로로 고정하고(훅 커맨드도 skill roots도), 업그레이드는 이전 버전 디렉터리를 지운다. 그 시점부터 그 세션의 harnie 훅은 전부 `MODULE_NOT_FOUND`로 exit 1이 되고, 승인 前 소스 쓰기 차단·control 파일 보호·Stop 완료 강제가 함께 꺼진다. Codex는 `PreToolUse hook (failed)` 배너를 띄우되 도구 호출은 그대로 진행하므로, 실패는 보이지만 막지는 못한다. **버전을 올렸으면 열려 있던 Codex 세션을 재시작하라.** Claude Code는 옛 버전 디렉터리를 지우지 않으므로(캐시에 0.3.1부터 남아 있다) 같은 문제가 없다. 2026-08-31 확인: 세션 `01a05645`가 0.14.5에 고정된 채 15:44의 0.14.7 설치를 넘겨 16:14까지 살아 있었고, 그 고정 경로로 훅을 손실행하면 지금도 exit 1이 난다.
