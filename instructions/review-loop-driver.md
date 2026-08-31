@@ -2,7 +2,7 @@
 
 `loop.md` owns the contract (ledger, transitions, progress, contest); this file owns how to run it deterministically. Never merge ledgers or judge state transitions by hand — `scripts/loop.mjs` prevents false approval.
 
-**Reviewer = producer's opposite provider, in `harnie:dev`.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent). **dev-solo is the exception**: both producer and reviewer are Codex — the reviewer is a fresh, context-isolated `codex exec --sandbox read-only` self-review subprocess, not a subagent (see `skills/dev-solo/SKILL.md`).
+**Reviewer = producer's opposite provider, in `harnie:dev`.** Design loops (`DR`): producer Claude designer → reviewer Codex (`sandbox:"read-only"`). Code loops (`CR`): producer Codex builder → reviewer Claude (`harnie-reviewer` subagent). **dev-solo is the exception**: both producer and reviewer are Codex — the reviewer is a native Codex subagent spawned with `fork_turns: "none"`, which is what makes it context-isolated (see `skills/dev-solo/SKILL.md`).
 
 `<ROOT>` = `${CLAUDE_PLUGIN_ROOT}`. `<dir>` = the review-unit directory (`.harnie/plan/<slug>/review/<unit>/`). `<repo>` = the run root (the user's existing git repo root).
 
@@ -47,6 +47,6 @@ node <ROOT>/scripts/loop.mjs apply --root <repo> --ledger <dir>/ledger.json \
 
 ## R5. Optional final sign-off
 
-For substantial changes: one fresh cross-model sign-off (code → fresh Claude review of the uncommitted diff; design → fresh Codex review). Never stateless re-review inside the loop. **dev-solo has no separate sign-off step**: its per-round self-review (fresh `codex exec` subprocess) already is the sign-off — there is no cross-model reviewer to add on top of it.
+For substantial changes: one fresh cross-model sign-off (code → fresh Claude review of the uncommitted diff; design → fresh Codex review). Never stateless re-review inside the loop. **dev-solo has no separate sign-off step**: its per-round self-review (a `fork_turns: "none"` subagent) already is the sign-off — there is no cross-model reviewer to add on top of it.
 
 > Invariant: every modification is reviewed; keep receipts (verdict, ledger, progress rationale, contest sidecars, fix summary). Not done while any blocking issue is open.

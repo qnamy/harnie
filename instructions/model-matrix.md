@@ -60,6 +60,6 @@ Difficulty tiers producer models and, conservatively, the Claude code reviewer; 
 
 **Effort override:** available on Codex call sites only (`config: {model_reasoning_effort: "high"}`); Claude subagents have no effort field, so a Claude very-hard tier is expressed as a model upgrade. Measurement and the silent-typo caveat: `docs/codex-mechanisms.md`.
 
-**dev-solo (Codex-standalone):** producer and reviewer are both Codex — a fresh `codex exec --sandbox read-only -m gpt-5.6-sol` self-review subprocess (effort high only at `very-hard`) is the entire review path at every altitude. Rationale for having no cross-model reviewer: `skills/dev-solo/SKILL.md`.
+**dev-solo (Codex-standalone):** producer and reviewer are both Codex — a native subagent spawned with `fork_turns: "none"` and `model: gpt-5.6-sol` (`reasoning_effort: "high"` only at `very-hard`) is the entire review path at every altitude. Rationale for having no cross-model reviewer, and why the subagent replaced the former `codex exec --sandbox read-only` subprocess: `skills/dev-solo/SKILL.md`.
 
 **Mechanics:** Codex models via the `codex` call's `model` param (`codex-reply` keeps the thread's); Claude subagent tiers via the Task model override where supported (frontmatter `opus` is the fallback). The orchestrator/session model is not assigned here — every quality-bearing role is pinned independently, so **sonnet is sufficient and recommended as the session model**.
