@@ -1574,17 +1574,18 @@ test("handoff: 없는 run은 fail-closed", () => {
   assert.throws(() => handoffRun(root, "nope"), (e) => e instanceof FailClosed && /대상 run 없음/.test(e.message))
 })
 
-test("handoff: object store 유실은 권위 상태를 바꾸지 않고 원인을 보존한다", () => {
+// object store 부재 자체는 치명이 아니다 — 리다이렉트를 쓴 적 없는 run(0.14.6 이전 run 전부, 그리고 모든
+// 대화형 run)에는 그 디렉터리가 애초에 없다. 부재를 치명으로 보면 그런 run의 handoff·completion이 통째로
+// 막히면서 "복구하라"고 안내하는데 복구할 대상이 없다. 실제 유실은 아래 "redirect SHA 유실" 테스트가 잡는다.
+test("handoff: 리다이렉트를 쓴 적 없는 run은 object store가 없어도 인계된다", () => {
   const root = gitRepo()
   bootstrapRun(root, { base: "other" })
   const dir = makeInactiveRun(root, "hand-off", "M")
   writeFileSync(join(dir, ".arm-approval.json"), "arm\n")
   writeFileSync(join(dir, ".pending-rebind.json"), "pending\n")
-  const before = handoffAuthorityBytes(root, dir)
   rmSync(captureObjectStore(root), { recursive: true, force: true })
-  assert.throws(() => handoffRun(root, "hand-off"), (e) =>
-    e instanceof CaptureObjectUnavailable && e.message.includes(captureObjectStore(root)))
-  assert.deepEqual(handoffAuthorityBytes(root, dir), before)
+  assert.doesNotThrow(() => handoffRun(root, "hand-off"))
+  assert.equal(existsSync(join(dir, ".arm-approval.json")), false) // 인계가 실제로 수행됐다
 })
 
 test("handoff: redirect SHA 유실은 권위 상태를 바꾸지 않는다", () => {
@@ -1612,14 +1613,27 @@ test("handoff: info/exclude 재등록 EIO는 권위 상태를 바꾸지 않는�
   assert.deepEqual(handoffAuthorityBytes(root, dir), before)
 })
 
-test("completion(S): object store 유실 원인이 blocker에 남는다", () => {
+// 정상 경로로 캡처한 run은 그 SHA가 git store에 있으므로 harnie store가 없어도 완료 판정이 된다.
+test("completion(S): 정상 경로로 캡처한 run은 object store가 없어도 완료된다", () => {
   const root = gitRepo()
   writeFileSync(join(root, "src.txt"), "v1\n")
   makeCompleteSRun(root, "s-run")
   rmSync(captureObjectStore(root), { recursive: true, force: true })
+  assert.equal(computeCompletion(root, "plan", "s-run").complete, true)
+})
+
+// 반대쪽: 기록된 SHA를 두 저장소 어디에서도 못 찾으면 원인이 blocker에 남는다. 리다이렉트로 캡처한 baseline이
+// 있는데 harnie store가 지워진 경우가 이 모양이다 — 조용히 빈 결과로 넘어가지 않는다.
+test("completion(S): 해석 불가 SHA의 원인이 blocker에 남는다", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  makeCompleteSRun(root, "s-run")
+  const statePath = join(root, ".harnie", "plan", "s-run", "review", "code", "state.json")
+  const state = JSON.parse(readFileSync(statePath, "utf8"))
+  writeFileSync(statePath, JSON.stringify({ ...state, reviewedPostSHA: "a".repeat(40) }))
   const completion = computeCompletion(root, "plan", "s-run")
   assert.equal(completion.complete, false)
-  assert.ok(completion.blockers.some((b) => b.includes("harnie capture object unavailable") && b.includes(captureObjectStore(root))))
+  assert.ok(completion.blockers.some((b) => b.includes("harnie capture object unavailable")), completion.blockers.join("; "))
 })
 
 // ── rebind-tree: 리뷰 범위 밖 드리프트만 수용(0.14 DEC-4) ─────────────────────

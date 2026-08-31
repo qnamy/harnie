@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
-  CaptureObjectUnavailable, assertTreeReadable, captureReadEnv, captureTree, computeDelta, prepareCaptureObjectStore,
+  CaptureObjectUnavailable, assertTreeReadable, captureTree, computeDelta, prepareCaptureObjectStore,
 } from "./delta.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers, ensureExcludeEntries } from "../hooks/lib.mjs"
@@ -576,7 +576,14 @@ export function computeCompletion(root, track, slug) {
       }
       if (current == null) {
         if (!blockers.some((b) => b.startsWith("S: harnie capture object unavailable"))) blockers.push("S: 현재 tree 캡처 실패")
-      } else if (current !== state.reviewedPostSHA) blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
+      } else if (current !== state.reviewedPostSHA) {
+        // 불일치의 원인이 둘이라 구분해서 알린다. 기록된 tree를 어느 저장소에서도 못 읽으면 코드가 바뀐 것이
+        // 아니라 캡처 오브젝트가 사라진 것이고, 사용자가 할 일이 완전히 다르다(재리뷰 대 저장소 복구).
+        try { assertTreeReadable(root, state.reviewedPostSHA) }
+        catch (e) { if (isCaptureObjectUnavailable(e)) blockers.push(`S: ${e.message}`) }
+        if (!blockers.some((b) => b.startsWith("S: harnie capture object unavailable")))
+          blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
+      }
     }
     return { complete: blockers.length === 0, blockers, mode: "S", review: reviewRecord(root, track, slug) }
   }
@@ -1254,7 +1261,6 @@ export function handoffRun(root, slug, { ensureExcluded = ensureExcludeEntries }
   const result = withStateLock(root, () => {
     const ex = readJSONStrict(execPath)
     if (ex.slug !== slug || ex.track !== "plan") throw new FailClosed("handoff: execution.json이 대상 run과 불일치 — 손상, fail-closed")
-    captureReadEnv(root)
     const drift = treeDrift(root, "plan", slug)
     ensureExcluded(root, ".harnie/")
     // 워치독 기산점은 벽시계 예산의 출발점이다. 세션이 죽어 있는 동안에도 계속 흐르므로, 재기산하지 않으면

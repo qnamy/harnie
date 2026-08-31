@@ -39,33 +39,31 @@ export function prepareCaptureObjectStore(repo) {
   return store
 }
 
-function requireCaptureObjectStore(repo, sha = null) {
+// 있으면 alternate로 얹고, 없으면 그냥 얹지 않는다. 부재를 여기서 던지면 리다이렉트를 쓴 적 없는 run
+// (0.14.6 이전 run 포함)이 전부 막힌다 — 판정은 아래 assertTreeReadable이 SHA 단위로 한다.
+export function captureReadEnv(repo) {
   const store = captureObjectStore(repo)
-  if (!existsSync(store)) throw unavailable(repo, sha, "harnie object store가 없음")
-  try {
-    if (!statSync(store).isDirectory()) throw unavailable(repo, sha, "harnie object store가 디렉터리가 아님")
-  } catch (e) {
-    if (e instanceof CaptureObjectUnavailable) throw e
-    throw unavailable(repo, sha, `harnie object store를 읽을 수 없음: ${e.message}`)
-  }
-  return store
-}
-
-export function captureReadEnv(repo, sha = null) {
-  const store = requireCaptureObjectStore(repo, sha)
-  return { GIT_ALTERNATE_OBJECT_DIRECTORIES: alternateList(store, process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES) }
+  const usable = existsSync(store) && statSync(store).isDirectory()
+  const alts = alternateList(usable ? store : "", process.env.GIT_ALTERNATE_OBJECT_DIRECTORIES)
+  return alts ? { GIT_ALTERNATE_OBJECT_DIRECTORIES: alts } : {}
 }
 
 export function assertTreeReadable(repo, sha) {
-  const env = captureReadEnv(repo, sha)
+  const env = captureReadEnv(repo)
   try { git(repo, ["cat-file", "-e", `${sha}^{tree}`], env) }
-  catch { throw unavailable(repo, sha, "tree가 git store와 harnie store 어디에도 없음") }
+  catch {
+    const store = captureObjectStore(repo)
+    const hint = existsSync(store) ? "" : " (harnie object store 자체가 없다 — 리다이렉트로 캡처한 tree라면 그 저장소가 지워진 것이다)"
+    throw unavailable(repo, sha, `tree가 git store와 harnie store 어디에도 없음${hint}`)
+  }
   return env
 }
 
+// 저장소 부재 자체는 치명이 아니다. 0.14.6 이전에 만들어진 run에는 이 저장소가 애초에 없고, 리다이렉트를
+// 한 번도 쓰지 않은 run도 마찬가지다 — 그런 run에서 존재를 요구하면 runs·completion이 통째로 실패하면서
+// "복구하라"고 안내하는데 복구할 대상이 없다. 지워진 저장소에 대한 보호는 읽기 쪽 assertTreeReadable이
+// 맡는다: 그 SHA를 두 저장소 어디에서도 못 찾을 때만 fail-closed다.
 function prepareCaptureStore(repo) {
-  const active = existsSync(join(repo, ".harnie", "active.json"))
-  if (active) return requireCaptureObjectStore(repo)
   return prepareCaptureObjectStore(repo)
 }
 
