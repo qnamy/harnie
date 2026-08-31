@@ -18,6 +18,20 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 - control·review-state 직접 Edit/Write/Bash-write는 항상 금지(§5.1); 기록은 `execution.mjs` 검증 전이(atomic)로만.
 - **빌더 격리 = lean (DR-013 영구 미채택)**: 빌더(Codex workspace-write)는 **사용자가 이미 열어 둔 git repo root(cwd=repo)** 에서 작업한다. 권위 상태(`.harnie/`)는 repo 안이라 빌더가 물리적으론 닿을 수 있지만, **실수-안전 가드**로 충분하다: ① **authority-state seal(DR-003)** — execution.mjs가 **빌더 호출 직전 권위 집합 전체의 canonical hash를 seal로 기록**한다. seal 입력 = `plan.md + manifest.json + 모든 review-unit의 ledger.json·state.json + 모든 verification/evidence receipt`(빌더 라운드 중 합법적으로 변하는 **advisory `active.json`·`execution.json`은 제외**). 빌더 산출 후 delta 귀속·ledger 적용 **전에 재해시 비교** → mismatch(빌더가 manifest·ledger·evidence 등 권위 파일을 건드림)면 **fail-closed**(그 라운드 무효·보고). delta 제외는 "숨기기"가 아니라 이 seal이 **독립 탐지**를 담당. ② loop.mjs가 ledger를 **fail-closed 구조 검증** ③ 빌더 프롬프트에 `.harnie/` 미접근 명시. **근거(§0.1)**: fallible 빌더가 *유효한 APPROVED ledger*를 실수로 위조할 확률은 무시가능 — 적대적 빌더 봉쇄는 비목표. 작업 트리 생성·dirty seed·delta 승격·정리는 harnie 범위 밖이며 orca와 사용자가 소유한다.
 
+### 2.1 캡처 오브젝트 저장소
+
+`captureTree`는 run root의 `.harnie/objects`를 harnie 전용 Git 오브젝트 저장소로 준비한다. 먼저 원 Git 오브젝트 DB로 캡처하고, 오브젝트 임시 파일 생성이 `EPERM`·`EACCES`로 거부된 경우에만 `GIT_OBJECT_DIRECTORY=.harnie/objects`와 원 Git 오브젝트 DB의 alternate를 사용해 다시 캡처한다. 다른 Git 실패는 fallback으로 바꾸지 않는다.
+
+캡처가 어느 경로에서 성공했는지는 읽기 규칙을 바꾸지 않는다. `computeDelta`의 `git diff`와 `execution.mjs`의 `git ls-tree`·완료·drift 판정은 `.harnie/objects`를 항상 `GIT_ALTERNATE_OBJECT_DIRECTORIES`에 포함하고, 호출자가 이미 지정한 alternate도 보존한다. 저장소가 없거나 요청한 tree SHA가 원 Git DB와 harnie 저장소 어디에도 없으면 SHA와 두 저장소 경로를 포함한 원인으로 fail-closed한다. 이 규칙 때문에 리다이렉트 캡처 뒤 Claude나 대화형 Codex가 run을 이어받아도 같은 SHA를 읽는다.
+
+`.harnie/objects`는 개별 run이 아니라 run root 수명주기에 속한다. `handoff`·`abandon`·run 교체는 이를 지우지 않는다. `.harnie/` 전체를 제거하면 보관된 캡처 SHA도 함께 유실되며, 그 SHA를 참조하는 run은 복구 전까지 진행할 수 없다. 사람이 리다이렉트된 tree를 조사할 때도 같은 alternate를 명시한다.
+
+```sh
+GIT_ALTERNATE_OBJECT_DIRECTORIES=<run-root>/.harnie/objects git -C <run-root> diff <baseline-tree> <post-tree>
+```
+
+무인 `init --authority cli`에서는 `.git/info/exclude`에 `.harnie/`를 쓰는 정확한 권한 거부만 허용한다. 캡처는 임시 index에서 `.harnie`가 비어 있다는 불변식을 별도로 검사한다. `handoff`는 저장소·tree·drift와 `info/exclude` 재등록을 같은 state lock에서 권위 파일 쓰기 전에 확인하므로, 어느 preflight가 실패해도 활성 run과 one-shot 승인 상태를 바꾸지 않는다.
+
 ## 3. Bootstrap·Active sentinel (DR-009 경계)
 
 > **교차참조:** 이 sentinel을 **누가/어떻게 생성**하는가(진입점 해석·자동 bootstrap 훅·run 수명주기·동시성·A0 계약)는 [`bootstrap-adherence.md`](bootstrap-adherence.md)가 **확장·우선**한다. 아래 sentinel-first·스키마는 유효하되, 최종 설계에서는 **스킬 A0의 자체 init 대신 bootstrap 훅이 sentinel을 결정적으로 생성**하고 `active.json`에 `base`/collision-free `slug`를 담는다.

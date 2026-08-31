@@ -17,9 +17,9 @@ import {
   detectVacuous, loadContext, validateRepoBinding,
   rebindTask,
   setMode, setDifficulty, readMode, computeCompletion, rebindArm, recordPendingRebind, bindRebind, approveCli,
-  abandonRun, listRuns, handoffRun, rebindTree, treeDrift,
+  abandonRun, listRuns, handoffRun, initCliAuthority, rebindTree, treeDrift,
 } from "./execution.mjs"
-import { captureTree } from "./delta.mjs"
+import { CaptureObjectUnavailable, captureObjectStore, captureTree } from "./delta.mjs"
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 const CLI = join(HERE, "execution.mjs")
@@ -318,6 +318,19 @@ test("init: sentinel-first 부트스트랩", () => {
   assert.equal(r.phase, "planning")
   assert.ok(existsSync(join(root, ".harnie", "active.json")))
   assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x", "execution.json")))
+  assert.ok(existsSync(captureObjectStore(root)))
+})
+
+test("init --authority cli: info/exclude EPERM만 허용하고 다른 등록 오류는 fail-closed", () => {
+  const allowed = gitRepo()
+  const permission = Object.assign(new Error("blocked"), { code: "EPERM", path: join(allowed, ".git", "info", "exclude") })
+  assert.equal(initCliAuthority(allowed, "headless", { ensureExcluded: () => { throw permission } }).ok, true)
+  assert.ok(existsSync(captureObjectStore(allowed)))
+
+  const denied = gitRepo()
+  const io = Object.assign(new Error("disk error"), { code: "EIO", path: join(denied, ".git", "info", "exclude") })
+  assert.throws(() => initCliAuthority(denied, "headless", { ensureExcluded: () => { throw io } }), (e) => e === io)
+  assert.equal(existsSync(join(denied, ".harnie", "active.json")), false)
 })
 
 test("init: sentinel 있는데 execution.json 부재 → fail-closed", () => {
@@ -1466,6 +1479,15 @@ function makeCompleteSRun(root, slug) {
   return cd
 }
 
+function handoffAuthorityBytes(root, dir) {
+  return [
+    join(root, ".harnie", "active.json"),
+    join(dir, "execution.json"),
+    join(dir, ".arm-approval.json"),
+    join(dir, ".pending-rebind.json"),
+  ].map((path) => [path, existsSync(path) ? readFileSync(path, "utf8") : null])
+}
+
 test("runs: closedAt이 찍힌 run은 목록에 없고, 활성 run과 blockers를 그대로 낸다", () => {
   const root = gitRepo()
   writeFileSync(join(root, "src.txt"), "v1\n")
@@ -1550,6 +1572,54 @@ test("handoff: 드리프트가 있으면 유닛별 변경 파일 목록을 보�
 test("handoff: 없는 run은 fail-closed", () => {
   const root = gitRepo()
   assert.throws(() => handoffRun(root, "nope"), (e) => e instanceof FailClosed && /대상 run 없음/.test(e.message))
+})
+
+test("handoff: object store 유실은 권위 상태를 바꾸지 않고 원인을 보존한다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "other" })
+  const dir = makeInactiveRun(root, "hand-off", "M")
+  writeFileSync(join(dir, ".arm-approval.json"), "arm\n")
+  writeFileSync(join(dir, ".pending-rebind.json"), "pending\n")
+  const before = handoffAuthorityBytes(root, dir)
+  rmSync(captureObjectStore(root), { recursive: true, force: true })
+  assert.throws(() => handoffRun(root, "hand-off"), (e) =>
+    e instanceof CaptureObjectUnavailable && e.message.includes(captureObjectStore(root)))
+  assert.deepEqual(handoffAuthorityBytes(root, dir), before)
+})
+
+test("handoff: redirect SHA 유실은 권위 상태를 바꾸지 않는다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "other" })
+  const dir = makeInactiveRun(root, "hand-off", "M")
+  const review = join(dir, "review", "code")
+  mkdirSync(review, { recursive: true })
+  writeFileSync(join(review, "state.json"), JSON.stringify({ reviewedPostSHA: "a".repeat(40) }))
+  writeFileSync(join(dir, ".arm-approval.json"), "arm\n")
+  const before = handoffAuthorityBytes(root, dir)
+  assert.throws(() => handoffRun(root, "hand-off"), CaptureObjectUnavailable)
+  assert.deepEqual(handoffAuthorityBytes(root, dir), before)
+})
+
+test("handoff: info/exclude 재등록 EIO는 권위 상태를 바꾸지 않는다", () => {
+  const root = gitRepo()
+  bootstrapRun(root, { base: "other" })
+  const dir = makeInactiveRun(root, "hand-off", "M")
+  writeFileSync(join(dir, ".arm-approval.json"), "arm\n")
+  writeFileSync(join(dir, ".pending-rebind.json"), "pending\n")
+  const before = handoffAuthorityBytes(root, dir)
+  const io = Object.assign(new Error("disk error"), { code: "EIO" })
+  assert.throws(() => handoffRun(root, "hand-off", { ensureExcluded: () => { throw io } }), (e) => e === io)
+  assert.deepEqual(handoffAuthorityBytes(root, dir), before)
+})
+
+test("completion(S): object store 유실 원인이 blocker에 남는다", () => {
+  const root = gitRepo()
+  writeFileSync(join(root, "src.txt"), "v1\n")
+  makeCompleteSRun(root, "s-run")
+  rmSync(captureObjectStore(root), { recursive: true, force: true })
+  const completion = computeCompletion(root, "plan", "s-run")
+  assert.equal(completion.complete, false)
+  assert.ok(completion.blockers.some((b) => b.includes("harnie capture object unavailable") && b.includes(captureObjectStore(root))))
 })
 
 // ── rebind-tree: 리뷰 범위 밖 드리프트만 수용(0.14 DEC-4) ─────────────────────

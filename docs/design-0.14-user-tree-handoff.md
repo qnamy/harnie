@@ -683,7 +683,7 @@ graph LR
 - **검증**: 인계 왕복 2회와 재개 2회가 모두 `complete:true`로 닫히고, 완료 리포트에 리뷰 구성과 `treeRebinds`가 드러난다.
 - **결과 — 정방향(Claude → Codex) 통과, 그 과정에서 차단 결함 1건 발견(2026-08-28)**: Claude `/harnie:dev`가 M run을 승인·설계까지 진행하고 중단한 뒤, 대화형 Codex가 `runs`로 블로커를 읽고 `handoff`(`drift: []`)로 이어받아 설계 리뷰(2건 차단 후 APPROVED)·빌드·코드 리뷰 4라운드·통합 검증까지 완주해 `complete:true`로 닫혔다. 완료 리포트의 `reviewers`가 유닛별·라운드별로 남았고, 이 run은 인계가 리뷰 라운드 이전에 일어나 전부 `codex`였다 — 크로스 모델로 시작한 run이 실제로는 동일 프로바이더 리뷰만 받았다는 사실이 리포트로 드러난다는 것이 D6의 값어치다. **발견한 결함**: `buildSnapshot`이 모든 유닛의 원장을 `CR`로 검증해 DR 원장을 쓰는 설계 유닛이 항상 무효 판정을 받았고, 그래서 0.14.0에서는 설계 리뷰가 지적을 남긴 M run이 완주할 수 없었다. 테스트 270개가 전부 통과하는데도 남아 있었던 이유는 픽스처가 빈 원장이라 namespace 검사를 돌 대상이 없었기 때문이다. 0.14.1에서 유닛별 네임스페이스로 고치고 픽스처를 실제 `DR-001` 엔트리로 교체했다.
 - **결과 — 역방향(Codex → Claude) 통과, 결함 1건 추가 발견(2026-08-28)**: Codex `dev-solo`가 `init`으로 M run을 만들어 계획까지 쓰고 멈춘 뒤(이때 완료된 이전 run이 `closedAt`으로 교체되어 `runs`에서 제외되는 것도 확인됐다), Claude가 `/harnie:dev-resume`으로 이어받아(`drift: []`) 승인까지 진행했다. **D5의 실증 지점**: 그 세션이 Bash로 `execution.mjs approve`를 직접 호출한 시도가 arm 전과 arm 후(유효 `--plan-hash` 지참) 두 경우 모두 차단됐고, 승인은 `arm-approval` + AskUserQuestion 원샷 바인딩으로만 성립했다. 0.13이라면 Codex가 만든 run에 `cli` 라벨이 붙어 이 호출이 통과했을 자리다. 완주는 Claude 주간 한도로 중단했다 — 남은 스테이지는 정방향에서 이미 확인된 경로다. **추가 발견**: 인자 없는 `/harnie:dev` 재개가 엔진에서는 동작하는데(중복 run 없음, 기존 run 활성 유지) `commands/dev.md`에 재개 분기가 없어 오케스트레이터가 작업 설명을 되묻고 멈췄다 — 메커니즘이 문서화된 입구로 도달 불가능한 상태였고 0.14.2로 고쳐 재확인했다.
-- **결과 — 기록만 하고 고치지 않은 것**: ① Codex 무인 모드(`-a never`)에서는 `init`·`runs`가 실패한다 — harnie run을 Codex에서 무인으로 돌릴 수 없다. **원인은 2026-08-31 프로브로 정정됐다**: `os.tmpdir()` 쓰기는 허용되고 인덱스를 run root로 옮겨도 실패가 그대로다. codex의 `workspace-write`가 워크스페이스 안이라도 `.git/` 하위 쓰기를 정책으로 막아, `git add -A`가 `objects/`에 임시 오브젝트를 쓰는 지점에서 걸린다(에러 문구의 "temporary file"은 인덱스가 아니라 오브젝트 파일이다). 검증된 우회는 `GIT_OBJECT_DIRECTORY`를 run root로 돌리고 원 저장소를 `GIT_ALTERNATE_OBJECT_DIRECTORIES`로 붙이는 것이며, 채택 시 `delta.mjs`의 `rm --cached`에 `-f`가 필요하고(오브젝트 디렉터리가 `add -A`에 잡힌다) env를 `captureTree`·`computeDelta`의 `diff`·`execution.mjs`의 `ls-tree` 세 곳에 태워야 한다. 대가는 캡처한 트리 SHA를 사람이 맨손 `git diff`로 읽지 못하게 되는 것이다. 대화형 Codex는 정상이므로 이 변경은 무인 실행이라는 새 능력을 여는 것이지 고장을 고치는 것이 아니다 — 수요가 생길 때 판단한다(0.14 범위 밖). ② 승인 전 M run은 manifest가 없어 `completion`이 `complete:true, noManifest:true`를 내고 Stop 훅도 통과시킨다 — 초기 커밋부터의 동작이며 0.14의 회귀가 아니다. ③ 두 M run 모두 승인 질문 직전에 `Invalid tool parameters`가 한 번씩 떴다(재현 조건 미확인, 결과적으로 재시도 후 정상 바인딩).
+- **결과 — 후속 판정**: ① Codex 무인 모드(`-a never`)에서 `.git/objects` 쓰기가 `EPERM`으로 막히는 경로에는 run root의 `.harnie/objects`를 `GIT_OBJECT_DIRECTORY`로 쓰고 원 Git DB를 alternate로 읽는 fallback을 채택했다. 기본 캡처는 먼저 유지하고 오브젝트 쓰기 권한 오류에만 fallback하며, 캡처 경로와 무관하게 `computeDelta`의 `diff`와 `execution.mjs`의 `ls-tree`·완료·drift 읽기는 harnie 저장소를 항상 alternate에 포함한다. 저장소나 tree SHA 유실은 경로와 SHA를 밝히며 fail-closed한다. `.harnie/` 전체 ignore에서는 과거 exclude pathspec 버그를 피하려고 `add -A` 뒤 임시 index 불변식을 검사한다. 소스 테스트와 fail-capability는 통과했지만 설치본 훅의 `TRUSTED_CLIS`가 자기 설치 루트만 인정해 미출시 로컬 runtime의 `capture --record …/.harnie/…`를 막으므로, 무인 카나리아는 릴리스 뒤 설치본으로 수행한다. 첫 로컬 카나리아에서 내부 Codex가 `.har""nie`로 문자열을 분할해 blanket 가드를 통과한 실행은 무효 처리했다. 이 관측은 문자열 가드가 적대적 우회를 막는 보안 경계가 아니라 §0.1의 실수-안전 장치라는 실측 근거다. ② 승인 전 M run은 manifest가 없어 `completion`이 `complete:true, noManifest:true`를 내고 Stop 훅도 통과시킨다 — 초기 커밋부터의 동작이며 0.14의 회귀가 아니다. ③ 두 M run 모두 승인 질문 직전에 `Invalid tool parameters`가 한 번씩 떴다(재현 조건 미확인, 결과적으로 재시도 후 정상 바인딩).
 - **결과 — 부수 관측**: Stop 훅이 백그라운드 리뷰 대기 중의 조기 종료를 막고 블로커를 정확히 열거했다. §13-4의 읽기 마찰이 dev-solo에서 발화했다 — 리뷰어를 부르는 명령줄에 상태 경로를 적을 수 없어 설계·코드 delta·원장이 전부 run 밖(`/private/tmp/…-handoff/`)으로 복사돼 전달됐다. **재검토 결과(아래 §13-4 후속)는 마찰을 완화하지 않는 것이고, 실제 결함은 다른 곳에 있었다.**
 - **디스패치**: orca 터미널로 띄워도 된다(2026-08-28 정정). 원래 문구는 "사람이 직접 시작한다"였고 근거는 관측 오염 방지였는데, U1c를 orca 터미널로 돌린 결과 관측이 깨끗하게 나왔다 — 관측 대상이 런타임 간 인계라 세션을 무엇으로 띄웠는지와 무관하다. 다만 인계 상대는 **대화형 Codex**여야 한다(R7: 헤드리스 `codex exec`의 스킬 로딩이 미검증).
 
@@ -700,19 +700,11 @@ graph LR
 | M 킬 기준 | 비교축을 디스패치된 유닛 기준(`dev`로 돈 것 vs plain으로 돈 것)으로 재정의한다. 판정 규칙·마감은 유지 | U4 카드 7, U5 카드 3, U7 카드 7 |
 | 이전 run 마이그레이션 | 만들지 않는다. 0.14 이전 run은 `abandon`으로 정리한다 | §11 R5 |
 
-### 13-4 후속 — 읽기 마찰 재검토 (2026-08-31, 판단 유지)
+### 13-4 후속 — dev-solo 읽기 마찰 해소와 blanket 한계 (2026-08-31)
 
-U7 카나리아에서 dev-solo가 리뷰 산출물을 run 밖으로 복사해 리뷰어에게 넘기는 것이 관측됐고, 그것을 근거로 "감내한다"는 판단을 다시 봤다. **판단은 유지한다.** 근거는 셋이다.
+0.14.5에서 dev-solo 리뷰어를 중첩 `codex exec`에서 `fork_turns: "none"` 네이티브 Codex 서브에이전트로 바꿨다. 서브에이전트는 run 안의 delta·원장 경로를 직접 읽으므로 리뷰 산출물을 `/private/tmp`로 복사하지 않는다. `run-capped.mjs`와 리뷰 subprocess도 삭제됐다. 읽기 전용은 OS sandbox가 아니라 리뷰 프롬프트의 계약이며, 리뷰어가 파일을 쓰면 프로토콜 실패로 처리한다.
 
-첫째, **산출물을 밖으로 내보내는 것 자체가 설계된 경로다.** `loop.mjs export <repo> <rel> --out <path>`가 정확히 그 용도로 존재하고(`scripts/loop.mjs:166-169`), `--out`이 `.harnie` 안이면 거부해 상태 쓰기 프리미티브가 되지 않게 막는다. 관측된 것은 우회가 아니라 그 경로의 즉흥적 재구현이었다.
-
-둘째, **막히는 곳은 dev-solo 하나뿐이다.** `harnie:dev`의 Codex 리뷰어는 MCP `codex` 툴로 도착하므로 경로가 툴 인자이지 명령줄이 아니고, Claude 서브에이전트 리뷰어는 Read로 직접 읽는다. Bash 명령줄에 경로를 넣어야 하는 것은 `run-capped.mjs codex exec …`로 리뷰어를 띄우는 dev-solo뿐이다.
-
-셋째, **완화 방법이 없다.** 읽기 전용 셸 명령을 문자열로 분류할 수 없다는 것이 blanket deny의 근거이고, 카나리아는 그 전제를 반증하지 않았다.
-
-**실제 결함은 문서였다.** dev-solo의 리뷰어 절은 "delta.patch/design 경로를 프롬프트에 적으라"고 지시하는데, 그대로 하면 가드에 반드시 걸린다 — 문서를 따를 수 없어서 즉흥 우회가 나온 것이다. 0.14.3에서 dev-solo와 `cross-review`에 `export` 사용을 명시했다. 초안이 이 절에 "계약의 약화"라고 적었던 것은 과한 서술이라 함께 정정했다: 원장이 묶이는 대상은 CR이면 tree SHA, DR이면 오케스트레이터가 신고하는 `dr:` 해시이고, 사본 경유가 그 바인딩을 새로 약화시키지는 않는다.
-
-남는 비용은 **단순 언급에 대한 오탐**이다. 명령이 상태 디렉터리에 접근하지 않고 문자열로 언급만 해도 막힌다(이 릴리스 중 커밋 메시지와 터미널 프롬프트에서 두 번 발화). 문구를 바꾸면 되는 수준이라 감수하고, 접근 위반으로 오해하지 않도록 이 사실만 남긴다.
+Bash의 `.harnie` blanket deny는 유지한다. 읽기와 쓰기를 셸 문자열만으로 안전하게 분류할 수 없고, 공인 상태 접근은 신뢰 CLI가 소유한다. 다만 U7 후속 카나리아에서 내부 Codex가 `.har""nie`로 문자열을 분할해 deny를 통과한 것이 관측됐다. 해당 실행은 무효 처리했다. 이 가드는 의도적 적대자를 막는 보안 경계가 아니라 §0.1의 실수-안전 장치이며, 단순 문자열 변형으로 우회할 수 있다는 한계를 전제로 운영한다.
 
 ## Revision Notes — rev-1 (팀 검토 반영)
 
