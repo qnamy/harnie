@@ -5,7 +5,9 @@ import { dirname, join, isAbsolute, normalize, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
-import { captureTree, computeDelta } from "./delta.mjs"
+import {
+  CaptureObjectUnavailable, assertTreeReadable, captureReadEnv, captureTree, computeDelta, prepareCaptureObjectStore,
+} from "./delta.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers, ensureExcludeEntries } from "../hooks/lib.mjs"
 
@@ -386,8 +388,20 @@ function resolveTaskGitRoot(root, task) {
 }
 
 function computeScopeHash(root, treeSHA, scopePaths) {
-  const lsTree = execFileSync("git", ["-C", root, "ls-tree", "-r", treeSHA, "--", ...scopePaths], { encoding: "utf8" })
+  let env
+  try { env = assertTreeReadable(root, treeSHA) }
+  catch (e) {
+    if (e instanceof CaptureObjectUnavailable) throw new FailClosed(e.message, { cause: e })
+    throw e
+  }
+  const lsTree = execFileSync("git", ["-C", root, "ls-tree", "-r", treeSHA, "--", ...scopePaths], {
+    encoding: "utf8", env: { ...process.env, ...env },
+  })
   return sha256(lsTree)
+}
+
+function isCaptureObjectUnavailable(error) {
+  return error instanceof CaptureObjectUnavailable || error && error.cause instanceof CaptureObjectUnavailable
 }
 
 // M의 설계 리뷰 유닛. manifest의 `reviewUnit` 어디에도 등재되지 않으므로 예약 유닛으로 넣지 않으면
@@ -421,10 +435,12 @@ function buildSnapshot(root, track, slug, manifest, planHash, reservedUnits = []
       const { gitRoot, reason } = resolveTaskGitRoot(root, task)
       repoUnresolved = reason
       if (gitRoot && reviewedPostSHA) {
-        try { expectedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope) } catch { expectedScopeHash = null }
+        try { expectedScopeHash = computeScopeHash(gitRoot, reviewedPostSHA, task.scope) }
+        catch (e) { if (isCaptureObjectUnavailable(e)) throw e; expectedScopeHash = null }
       }
       if (gitRoot) {
-        try { currentScopeHash = computeScopeHash(gitRoot, currentWholeTree, task.scope) } catch { currentScopeHash = null }
+        try { currentScopeHash = computeScopeHash(gitRoot, currentWholeTree, task.scope) }
+        catch (e) { if (isCaptureObjectUnavailable(e)) throw e; currentScopeHash = null }
       }
     }
     units[name] = {
@@ -553,9 +569,14 @@ export function computeCompletion(root, track, slug) {
     else if (!state.reviewedPostSHA) blockers.push("S: reviewedPostSHA 없음 — 리뷰 tree 바인딩 불가")
     else {
       let current = null
-      try { current = captureTree(root) } catch { current = null }
-      if (current == null) blockers.push("S: 현재 tree 캡처 실패")
-      else if (current !== state.reviewedPostSHA) blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
+      try { current = captureTree(root) }
+      catch (e) {
+        if (isCaptureObjectUnavailable(e)) blockers.push(`S: ${e.message}`)
+        else blockers.push("S: 현재 tree 캡처 실패")
+      }
+      if (current == null) {
+        if (!blockers.some((b) => b.startsWith("S: harnie capture object unavailable"))) blockers.push("S: 현재 tree 캡처 실패")
+      } else if (current !== state.reviewedPostSHA) blockers.push("S: 코드가 리뷰 후 변경됨(현재 tree ≠ 리뷰 tree) — 재리뷰 필요")
     }
     return { complete: blockers.length === 0, blockers, mode: "S", review: reviewRecord(root, track, slug) }
   }
@@ -650,6 +671,7 @@ function markClosed(root, track, slug) {
 
 function createRun(root, track, base) {
   const slug = collisionFreeSlug(root, track, base)
+  prepareCaptureObjectStore(root)
   writeJSONAtomic(join(planDir(root, track, slug), "execution.json"), { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} })
   writeJSONAtomic(sentinelPath(root), { track, slug, base, planHash: null, mode: "sizing", readOnlyThreads: [] })
   return { slug, reused: false }
@@ -722,6 +744,7 @@ function cmdInit({ flags }) {
       }
       throw new FailClosed(`다른 활성 단위 존재(active=${s.track}/${s.slug}) — 동시 활성 금지, fail-closed`)
     }
+    prepareCaptureObjectStore(root)
     writeJSONAtomic(execPath, { track, slug, planHash: null, phase: "planning", mode: "sizing", tasks: {} }) // execution 먼저
     writeJSONAtomic(sentinel, { track, slug, planHash: null, mode: "sizing", readOnlyThreads: [] })          // active 포인터 마지막(§3.5 정렬, P2-4)
     return { ok: true, reused: false, phase: "planning" }
@@ -1110,10 +1133,14 @@ export function bindRebind(root, slug, toolUseId, toolInput, response) {
 // run root는 넘겨받은 git repo root 자신이고(worktree 생성 없음), 상태 디렉터리를 info/exclude에 등록한다.
 // `--authority cli`는 이제 진입 경로의 이름일 뿐 run에 기록되는 라벨이 아니다(DEC-2) — 승인 경로를 정하는
 // 것은 run에 적힌 라벨이 아니라 실행 시점의 훅 유무이고, 그 판정은 CLI 밖 `guards.mjs`가 한다.
-export function initCliAuthority(root, slug) {
+export function initCliAuthority(root, slug, { ensureExcluded = ensureExcludeEntries } = {}) {
   validateSlug(slug)
   if (!existsSync(join(root, ".git"))) throw new FailClosed(`init --authority cli: root가 git repo가 아님(${root})`)
-  ensureExcludeEntries(root, ".harnie/")
+  try { ensureExcluded(root, ".harnie/") }
+  catch (e) {
+    const path = String(e && e.path || "").replace(/\\/g, "/")
+    if (!(["EPERM", "EACCES"].includes(e && e.code) && path.endsWith("/info/exclude"))) throw e
+  }
   const result = bootstrapRun(root, { base: slug, track: "plan" })
   return { ok: true, root, slug: result.slug, reused: result.reused === true }
 }
@@ -1181,14 +1208,16 @@ export function treeDrift(root, track, slug) {
   const reviewRoot = join(planDir(root, track, slug), "review")
   if (!existsSync(reviewRoot)) return []
   let current
-  try { current = captureTree(root) } catch { return [] }
+  try { current = captureTree(root) }
+  catch (e) { if (isCaptureObjectUnavailable(e)) throw e; return [] }
   const drift = []
   for (const unit of readdirSync(reviewRoot).sort()) {
     const state = readJSONOrNull(join(reviewRoot, unit, "state.json"))
     const sha = state && typeof state.reviewedPostSHA === "string" ? state.reviewedPostSHA : null
     if (!sha || !/^[0-9a-f]{40}$/.test(sha) || sha === current) continue
     let files = []
-    try { files = computeDelta(root, sha).changedPaths } catch { files = [] }
+    try { files = computeDelta(root, sha).changedPaths }
+    catch (e) { if (isCaptureObjectUnavailable(e)) throw e; files = [] }
     drift.push({ unit, reviewedPostSHA: sha, currentTree: current, files })
   }
   return drift
@@ -1217,7 +1246,7 @@ export function listRuns(root) {
 // `handoff`: 비활성 run을 활성으로 되돌리고 런타임에 종속된 상태만 정리한다(§6). 누적 카운터
 // (`codexCalls`·`watchdogExtensions`)는 손대지 않는다 — 인계로 리셋되면 상한 우회 경로가 된다(DR-107 계보).
 // 자기신고 `--runtime` 값은 두지 않는다(§9): 소비자가 없다.
-export function handoffRun(root, slug) {
+export function handoffRun(root, slug, { ensureExcluded = ensureExcludeEntries } = {}) {
   validateSlug(slug)
   const dir = planDir(root, "plan", slug)
   const execPath = join(dir, "execution.json")
@@ -1225,6 +1254,9 @@ export function handoffRun(root, slug) {
   const result = withStateLock(root, () => {
     const ex = readJSONStrict(execPath)
     if (ex.slug !== slug || ex.track !== "plan") throw new FailClosed("handoff: execution.json이 대상 run과 불일치 — 손상, fail-closed")
+    captureReadEnv(root)
+    const drift = treeDrift(root, "plan", slug)
+    ensureExcluded(root, ".harnie/")
     // 워치독 기산점은 벽시계 예산의 출발점이다. 세션이 죽어 있는 동안에도 계속 흐르므로, 재기산하지 않으면
     // 복귀 직후 첫 빌더 호출이 예산 초과로 거부된다.
     const at = new Date().toISOString()
@@ -1248,9 +1280,9 @@ export function handoffRun(root, slug) {
     })
     const clearedArmFiles = ONE_SHOT_ARM_FILES.filter((f) => existsSync(join(dir, f)))
     for (const f of clearedArmFiles) rmSync(join(dir, f), { force: true })
-    return { ok: true, slug, mode: typeof ex.mode === "string" ? ex.mode : null, previousActive, clearedArmFiles, watchdogRebasedAt: at }
+    return { ok: true, slug, mode: typeof ex.mode === "string" ? ex.mode : null, previousActive, clearedArmFiles, watchdogRebasedAt: at, drift }
   })
-  return { ...result, drift: treeDrift(root, "plan", slug) }
+  return result
 }
 
 // 리뷰 유닛의 "범위"(DEC-4 3번). M은 manifest task의 scope, S는 리뷰가 승인한 delta의 파일 집합이다.

@@ -1,13 +1,25 @@
 import assert from "node:assert"
 import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, rmSync, renameSync, mkdirSync } from "node:fs"
+import { chmodSync, mkdtempSync, writeFileSync, rmSync, renameSync, mkdirSync, readdirSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { captureTree, computeDelta } from "./delta.mjs"
+import { CaptureObjectUnavailable, captureObjectStore, captureTree, computeDelta } from "./delta.mjs"
 
 const sh = (repo, ...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" })
 let pass = 0, fail = 0
 const t = (n, f) => { try { f(); pass++; console.log("✓ " + n) } catch (e) { fail++; console.log("✗ " + n + " — " + e.message) } }
+const setDirsMode = (dir, mode) => {
+  for (const name of readdirSync(dir)) {
+    const path = join(dir, name)
+    if (statSync(path).isDirectory()) setDirsMode(path, mode)
+  }
+  chmodSync(dir, mode)
+}
+const redirectCapture = (root) => {
+  const objects = join(root, ".git", "objects")
+  setDirsMode(objects, 0o555)
+  try { return captureTree(root) } finally { setDirsMode(objects, 0o755) }
+}
 
 // ── fixture repo ──
 const repo = mkdtempSync(join(tmpdir(), "harnie-fx-"))
@@ -68,7 +80,64 @@ t(".harnie가 gitignore된 상태에서도 캡처된 tree에 .harnie 항목 없�
   assert.ok(!lsTree.split("\n").some((p) => p === ".harnie" || p.startsWith(".harnie/")))
 })
 
+// ── object DB redirect + cross-runtime read ──
+const repoR = mkdtempSync(join(tmpdir(), "harnie-fx-redirect-"))
+sh(repoR, "init", "-q"); sh(repoR, "config", "user.email", "t@t"); sh(repoR, "config", "user.name", "t")
+writeFileSync(join(repoR, "source.txt"), "baseline\n")
+sh(repoR, "add", "-A"); sh(repoR, "commit", "-qm", "init")
+captureTree(repoR) // standalone capture가 harnie object store를 준비한다.
+writeFileSync(join(repoR, "source.txt"), "redirected baseline\n")
+const redirectedBaseline = redirectCapture(repoR)
+
+t("기본 object DB 쓰기 권한이 없으면 harnie object store로 캡처한다", () => {
+  assert.ok(statSync(captureObjectStore(repoR)).isDirectory())
+  assert.throws(() => sh(repoR, "cat-file", "-e", `${redirectedBaseline}^{tree}`))
+})
+
+writeFileSync(join(repoR, "source.txt"), "interactive post\n")
+const crossRuntime = computeDelta(repoR, redirectedBaseline)
+t("정상 런타임의 computeDelta도 redirect baseline을 alternate로 읽는다", () => {
+  assert.deepEqual(crossRuntime.changedPaths, ["source.txt"])
+})
+
+rmSync(captureObjectStore(repoR), { recursive: true, force: true })
+t("harnie object store 유실은 SHA와 경로를 밝히며 fail-closed한다", () => {
+  assert.throws(() => computeDelta(repoR, redirectedBaseline), (e) =>
+    e instanceof CaptureObjectUnavailable && e.message.includes(redirectedBaseline) && e.message.includes(captureObjectStore(repoR)))
+})
+
+const redirectStateFixture = (name, ignore, tracked = false) => {
+  const root = mkdtempSync(join(tmpdir(), `harnie-fx-${name}-`))
+  sh(root, "init", "-q"); sh(root, "config", "user.email", "t@t"); sh(root, "config", "user.name", "t")
+  if (ignore) writeFileSync(join(root, ".gitignore"), ignore)
+  mkdirSync(join(root, ".harnie"), { recursive: true })
+  if (tracked) writeFileSync(join(root, ".harnie", "tracked.txt"), "tracked control\n")
+  writeFileSync(join(root, "source.txt"), "v1\n")
+  sh(root, "add", "-f", "--", ".")
+  sh(root, "commit", "-qm", "fixture")
+  captureTree(root)
+  writeFileSync(join(root, "source.txt"), "v2\n")
+  const tree = redirectCapture(root)
+  return { name, root, tree }
+}
+
+const redirectStateFixtures = [
+  redirectStateFixture("whole-ignore", ".harnie/\n"),
+  redirectStateFixture("partial-ignore", ".harnie/objects/\n"),
+  redirectStateFixture("tracked-state", "", true),
+]
+for (const fixture of redirectStateFixtures) {
+  t(`redirect 캡처가 상태 경로를 제외한다(${fixture.name})`, () => {
+    const names = execFileSync("git", ["-C", fixture.root, "ls-tree", "-r", "--name-only", fixture.tree], {
+      encoding: "utf8", env: { ...process.env, GIT_ALTERNATE_OBJECT_DIRECTORIES: captureObjectStore(fixture.root) },
+    })
+    assert.ok(!names.split("\n").some((p) => p === ".harnie" || p.startsWith(".harnie/")))
+  })
+}
+
 rmSync(repo, { recursive: true, force: true })
 rmSync(repoC, { recursive: true, force: true })
+rmSync(repoR, { recursive: true, force: true })
+for (const fixture of redirectStateFixtures) rmSync(fixture.root, { recursive: true, force: true })
 console.log(`\n${pass} pass, ${fail} fail`)
 process.exit(fail ? 1 : 0)
