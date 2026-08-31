@@ -27,6 +27,29 @@ harnie 구현이 의존하는 외부 메커니즘의 **확정 사실**. codex �
 - **canonical 내용 주입(spike #2)**: **파일 내용 치환 변수는 없음.** 스킬/에이전트 마크다운의 `` !`cat "${CLAUDE_PLUGIN_ROOT}/instructions/loop.md"` `` dynamic injection으로 실행 전 **내용을 프롬프트 본문에 인라인**. (경로 참조 아님.)
 - **커맨드 인자**: `$ARGUMENTS` / `$0`,`$1`.
 
+## Codex 훅 — 실측 (2026-08-31)
+
+플러그인의 `hooks/hooks.json`은 Codex도 로드한다. 실행 사본은 `~/.codex/plugins/cache/harnie/harnie/<version>`이며, 버전 고정과 업그레이드가 그 사본을 지우는 문제는 `CLAUDE.md` §릴리스 후속이 다룬다.
+
+**재현**: 실행 사본 `hooks/lib.mjs`의 `readStdin` end 핸들러에 stdin 원문을 파일로 append하는 한 줄을 임시로 넣고 `codex -a never exec --sandbox read-only --skip-git-repo-check -m gpt-5.6-terra -C <dir> "echo probe-a && echo probe-b 하나만 실행하라"`를 돌린 뒤 원본으로 복원한다. `hooks.json`의 커맨드 문자열을 건드리지 않으므로 훅 신뢰 해시 재승인이 필요 없다.
+
+**PreToolUse 페이로드**(셸 명령 1건):
+
+```json
+{ "session_id": "…", "turn_id": "…", "transcript_path": "…/rollout-….jsonl",
+  "cwd": "<workdir>", "hook_event_name": "PreToolUse",
+  "model": "gpt-5.6-terra", "permission_mode": "bypassPermissions",
+  "tool_name": "Bash", "tool_input": { "command": "echo probe-a && echo probe-b" },
+  "tool_use_id": "exec-…" }
+```
+
+**Stop 페이로드**: 위 공통 필드에 `stop_hook_active`(bool)와 `last_assistant_message`(string)가 붙는다.
+
+- **셸 도구의 `tool_name`은 `Bash`이고 `tool_input.command`는 문자열이다**(`shell`도 배열도 아니다). Claude와 같은 형태이므로 `toolName === "Bash"` 분기와 문자열 파싱 가드가 Codex에서 그대로 발화한다.
+- **`permission_mode`는 `-a never`에서 `bypassPermissions`로 온다.** 승인 정책이 페이로드에 실려 오지만, 런타임 판별에는 쓰지 않는다 — 판별자는 `turn_id`와 `PLUGIN_ROOT`다(`hooks/pretooluse.mjs`의 `isCodex`).
+- **deny가 실제로 명령을 막는다.** 전역 bash-guard의 복합 명령 deny에 Codex가 `error=Command blocked by PreToolUse hook: …` + `hook: PreToolUse Blocked`로 반응하고 명령을 실행하지 않았다. 훅 출력 계약(`permissionDecision: "deny"`)이 Codex에서 유효하다.
+- **헤드리스에서도 돈다.** 같은 실행에서 PreToolUse 훅 3개(bash-guard · orca · harnie)가 모두 발화했다. `claude -p`가 MCP를 로드하지 않는 제약과 달리, `codex exec`의 훅에는 그런 제약이 없다.
+
 ## 라이브 codex review E2E — 검증됨 (2026-07-29)
 `scripts/loop.mjs`(capture/delta/apply) + codex MCP로 REJECT→fix→APPROVE 1사이클을 실제 모델 호출로 완주:
 1. `capture` baseline → 버그 함수(`average` 빈 배열 `0/0=NaN`) 추가 → `delta`(outOfScope `[]`, single-writer 확인).
