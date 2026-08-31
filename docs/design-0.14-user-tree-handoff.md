@@ -18,7 +18,7 @@
 
 가장 큰 위험 셋:
 
-1. **훅 없는 구간에서 계약이 문서로만 남는다.** Codex에는 harnie 훅이 없다(`~/workspace/agent-ops/claude/codex-hooks.json`에 harnie 배선 없음). 승인 前 소스 쓰기 금지·control 파일 직접 쓰기 금지·Stop 완료 강제가 그 구간에서 발화하지 않는다. 0.14는 이 공백을 줄이지 않고 명시한다.
+1. ~~**훅 없는 구간에서 계약이 문서로만 남는다.** Codex에는 harnie 훅이 없다.~~ **이 전제는 틀렸다(2026-08-31 실측, 0.14.4에서 정정).** harnie 훅은 플러그인의 `hooks/hooks.json`으로 선언되고 Codex도 그것을 로드한다 — Codex 세션 화면의 `Running 3 PreToolUse hooks`가 그 증거이고, 실제로 harnie의 deny 문구가 Codex에서 발화했다. 조사 단계에서 `agent-ops`의 `codex-hooks.json`에 harnie 배선이 없다는 것만 보고 "훅 없음"으로 결론지은 것이 오류다(플러그인 훅은 그 파일과 무관하게 등록된다). 방향이 반대인 서술이라 위험했다 — Codex 구간은 강제가 **없는** 것이 아니라 오히려 **더** 걸린다.
 2. **run root가 사용자 실작업 트리라 완료 판정이 무관한 편집에 노출된다.** DEC-4가 데드엔드는 없애지만 승인 축이 하나 늘어난다.
 3. **0.13.1은 실런 0회이고 0.14도 0회로 출발한다.** 첫 run의 무대가 버려도 되는 워크트리에서 사용자의 실작업 트리로 바뀌므로, 완료 바인딩·`.harnie/` 잔류·세션 잠금이 첫 run에서 동시에 처음 발화한다. DEC-5와 §12 U7의 스크래치 클론 절차가 이에 대한 대응이다.
 
@@ -120,7 +120,9 @@ if (isExecutionSubcommand(cmd, "approve"))
 
 - 훅이 미설치·비활성인 Claude 세션. 훅이 없으면 훅이 막을 수 없다.
 - Claude 세션이 spawn한 codex 서브프로세스. `decideCodex`는 `cwd`와 sandbox를 검사하지만(`guards.mjs:253`) 그 안에서 실행되는 셸까지 보지 않는다. workspace-write 빌더가 `node …/execution.mjs approve`를 실행하면 통과한다.
-- **Codex 세션 자체.** Claude가 승인 없이 M을 넘기고 Codex가 `approve`를 부르면, 사람 확인을 거치지 않은 M run이 성립한다. 이것이 D5가 여는 가장 비싼 공백이고 §8이 규율 항목으로 기록한다.
+- **Codex 세션 자체.** Claude가 승인 없이 M을 넘기고 Codex가 `approve`를 부르면, 사람 확인을 거치지 않은 M run이 성립한다. Codex에는 AskUserQuestion 바인딩이 없어 `approve` 호출 자체가 유일한 감사 기록이고, dev-solo 계약의 "plan을 제시하고 명시적 승인을 받은 뒤 부른다"가 그 자리를 규율로 메운다. 0.13과 같은 상태이며 이 릴리스가 좁히지 않는다.
+  - **0.14.0~0.14.3은 이 항목을 반대로 구현했다(0.14.4에서 수정).** 훅이 Claude에서만 돈다는 위 §1의 틀린 전제 위에서 `decideBash`의 deny를 런타임 구분 없이 걸었고, 훅이 Codex에서도 도는 탓에 **dev-solo가 M run을 승인하는 경로가 통째로 막혔다** — 0.13에서는 되던 것이다. 안내 문구가 가리키는 대체 경로(arm-approval + AskUserQuestion)는 Codex에 그 도구가 없어 따를 수도 없었다. 0.14.4는 사람 확인 바인딩이 있는 런타임에서만 deny하고, 판별은 공식 훅 계약이 Codex 전용 확장으로 명시한 페이로드 `turn_id`와 환경변수 `PLUGIN_ROOT`로 한다(`CLAUDE_PLUGIN_ROOT`는 Codex도 호환용으로 설정하므로 판별자가 아니다). 모르면 deny 쪽으로 떨어뜨린다 — 오분류의 두 방향 중 자가승인이 열리는 쪽이 더 나쁘다.
+  - **왜 U7 카나리아가 못 잡았나**: 정방향은 Claude가 이미 승인한 run을 Codex가 이어받았고, 역방향은 Codex에게 `approve`를 부르지 말라고 명시했다. Codex가 승인하는 경로를 한 번도 밟지 않은 것이 카나리아 설계의 구멍이다. U2의 회귀 테스트도 deny가 나는 것만 단정해 런타임 차이를 볼 수 없었다.
 
 따라서 `docs/enforcement-map.md`에서 이 항목은 "강제"가 아니라 **"강제 — 오케스트레이터 Bash 한정"**으로 적는다. 그럼에도 B는 오늘보다 표면이 좁다. 오늘은 cli run을 이어받은 Claude 오케스트레이터가 직접 Bash로 승인할 수 있고, B는 그 경로를 닫는다(NFR-3 충족).
 

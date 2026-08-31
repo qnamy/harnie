@@ -12,6 +12,13 @@ const TRUSTED_CLIS = new Set([join(SCRIPTS, "loop.mjs"), EXEC_CLI])
 const p = await readStdin()
 const toolName = p.tool_name || ""
 const input = p.tool_input || {}
+// 이 런타임에 arm-approval + AskUserQuestion 원샷 바인딩이 있는가. harnie 훅은 Claude와 Codex **양쪽에서**
+// 돈다(0.14.0의 반대 전제는 틀렸다 — 그래서 approve 차단이 Codex에서도 발화해 dev-solo의 M 승인이 막혔다).
+// Codex 판별은 공식 훅 계약이 "Codex-specific extension"으로 명시한 둘로 한다: 페이로드의 `turn_id`,
+// 플러그인 훅 환경변수 `PLUGIN_ROOT`. `CLAUDE_PLUGIN_ROOT`는 Codex도 호환용으로 설정하므로 판별에 못 쓴다.
+// 모르면 바인딩이 있는 쪽으로 본다 — 오분류의 두 방향 중 자가승인이 열리는 쪽이 더 나쁘다.
+const isCodex = p.turn_id != null || process.env.PLUGIN_ROOT != null
+const hookBoundApproval = !isCodex
 
 try {
   // 0.14 D1: run root = 세션 cwd의 git repo root. harnie가 worktree를 만들지 않으므로 해석은 findRoot 하나다.
@@ -33,7 +40,7 @@ try {
   if (!ctx.active) {
     if (toolName === "Bash") {
       // 비활성 트리에서도 slug를 넘긴다 — 권위 부여가 아니라 신뢰 CLI **분류 입력**이다(autoAllow는 track 미전달로 꺼짐).
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: ctx.slug ?? null, hookBoundApproval })
       if (d.deny) denyPreTool(d.reason)
     }
     allow()
@@ -51,7 +58,7 @@ try {
       const d = decideWriteEdit({ relPath: rel, phase, track, slug, outside, root, execCli: EXEC_CLI })
       d.deny ? denyPreTool(d.reason) : allow()
     } else if (toolName === "Bash") {
-      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track })
+      const d = decideBash({ command: input.command, trustedClis: TRUSTED_CLIS, activeRoot: root, activeSlug: slug, activeTrack: track, hookBoundApproval })
       if (d.deny) denyPreTool(d.reason)
       else if (d.autoAllow && !ctx.failClosed) allowPreTool("harnie sanctioned 상태 CLI(capture·delta·completion·seal·seal-verify) — active repo 바인딩·경로 containment 검증됨")
       else allow()

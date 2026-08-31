@@ -100,6 +100,22 @@ test("decideBash: execution.mjs approve의 Bash 호출은 신뢰 CLI 형태여�
   assert.equal(isExecutionSubcommand("node /p/loop.mjs approve", "approve"), false)
 })
 
+// 0.14.4: harnie 훅은 Claude와 Codex 양쪽에서 돈다. 위 차단을 런타임 구분 없이 걸면 Codex에서도 발화해
+// dev-solo의 M 승인이 통째로 막힌다(0.13에서는 되던 것). Codex에는 AskUserQuestion 바인딩이 없어
+// approve 호출 자체가 유일한 감사 기록이므로, 막으면 대체 경로가 없다.
+// **양방향을 다 못박는다** — deny만 단정한 0.14.0의 테스트가 이 회귀를 통과시켰다.
+test("decideBash: approve 차단은 사람 확인 바인딩이 있는 런타임에서만 발화한다", () => {
+  const approve = `node /plugin/scripts/execution.mjs approve --root /repo --slug x --plan-hash ${"a".repeat(64)}`
+  // 바인딩 있는 런타임(Claude): 차단
+  assert.equal(decideBash({ command: approve, ...ctx, hookBoundApproval: true }).deny, true)
+  // 바인딩 없는 런타임(Codex): 통과해야 한다 — 막으면 승인 자체가 불가능해진다
+  assert.equal(decideBash({ command: approve, ...ctx, hookBoundApproval: false }).deny, false)
+  // 기본값은 차단 쪽 — 오분류의 두 방향 중 자가승인이 열리는 쪽이 더 나쁘다
+  assert.equal(decideBash({ command: approve, ...ctx }).deny, true)
+  // 런타임과 무관하게 다른 차단은 그대로다
+  assert.equal(decideBash({ command: "cat /repo/.harnie/active.json", ...ctx, hookBoundApproval: false }).deny, true)
+})
+
 // 0.14: run root 하나뿐 — loop CLI도 run root 인자만 받는다(태스크별 worktree 소멸).
 test("decideBash: loop CLI는 run root 인자만 sanctioned", () => {
   assert.equal(decideBash({ command: "node /plugin/scripts/loop.mjs capture /repo", ...ctx }).deny, false)
