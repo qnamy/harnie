@@ -16,7 +16,7 @@ Open with the facts your decisions rest on, **each verified in the actual repo a
 2. **Core processing logic** — non-obvious cases only: preconditions → steps (pseudocode when helpful) → state after success → state and compensation per failure → duplicates/concurrency.
 3. **Contracts** — non-obvious APIs/events only: purpose, auth, request/response intent, error contract, idempotency. Reference machine-readable schemas by file and ID.
 4. **Data and state** — changed entities, transaction boundaries, concurrency control with rationale, critical transitions.
-5. **Tests** — what proves this design, mapped to its risks; name the scope-test set additions.
+5. **Tests** — what proves this design, mapped to its risks; name the scope-test set additions, selected by `builder-contract.md` §Test scope.
 6. **Unresolved / escalations** — `[UNRESOLVED]` items and anything requiring a contract or architecture change.
 
 Requirement coverage is judged by the reviewer as a lens; a traceability matrix or forced FR/NFR ID scheme is **not** required — use identifiers only where they genuinely help.

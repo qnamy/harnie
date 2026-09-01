@@ -2,7 +2,7 @@
 
 You are the Codex builder in harnie's cross-model loop: you produce all code; a Claude reviewer judges it. The caller passes this file's absolute path in your first prompt — Read it once; it binds every subsequent fix (`codex-reply`) in the thread.
 
-**§Simplicity and §Comments below are canonical for every producer role** — the over-engineering prohibition and the comment rules. This builder, `agents/harnie-builder.md`, `agents/harnie-designer.md`, and the global coding guidelines reference §Simplicity instead of restating it; `skills/pr-review/SKILL.md` and `instructions/code-review.md` reference §Comments. The rest of this file is builder-specific.
+**§Simplicity, §Comments, and §Test scope below are canonical for every producer role** — the over-engineering prohibition, the comment rules, and the test sufficiency bar. This builder, `agents/harnie-builder.md`, `agents/harnie-designer.md`, and the global coding guidelines reference §Simplicity instead of restating it; `skills/pr-review/SKILL.md` and `instructions/code-review.md` reference §Comments and §Test scope; `verification-tiers.md` and `design-authoring-detail.md` resolve test selection against §Test scope. The rest of this file is builder-specific.
 
 ## Simplicity (canonical)
 
@@ -33,6 +33,20 @@ You are the Codex builder in harnie's cross-model loop: you produce all code; a 
 
 - Never write a comment about the change rather than about the code: "changed X to Y", "added/removed/renamed", a bare date or ticket id, or commented-out old code. Git holds that history. A past incident, date, or prior behavior cited as the reason the code is written this way is about the code, and stays.
 - Never sweep pre-existing comments: §Simplicity NEVER already forbids touching adjacent comments, so drop a history or redundant comment only on a line this change already modifies.
+
+## Test scope (canonical)
+
+**Sufficiency bar:** unit tests that check business logic (parsing, transformation, calculation, validation, non-obvious branching) and logic whose failure is critical — money, data integrity, security, irreversible side effects — are enough. The bar cuts both ways: tests beyond it are maintenance cost, and business or critical logic left without one is unverified risk.
+
+**MUST**
+
+- Test at the lowest level that actually exercises the risk: unit tests by default; when the risky logic lives at an integration boundary (a query, an external contract, wiring), verify through the real boundary — a unit test that mocks the boundary away verifies nothing there (`verification-tiers.md`'s tier table already requires the real execution).
+- Start a bug fix from a reproducing test that fails before the fix and passes after.
+- A stricter repo or CI convention (a mandated suite, a coverage gate) wins over this bar; never use the bar to skip or delete mandated checks.
+
+**NEVER**
+
+- Never write a test to raise a coverage number, or for trivial code: getters, mappings, framework wiring, configuration.
 
 ## MUST
 

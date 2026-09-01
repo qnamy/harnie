@@ -24,6 +24,7 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 - **Missing exception/error handling:** swallowed exceptions, unrecoverable states after failure.
 - **Security:** missing authentication/authorization, injection, secret exposure, untrusted input.
 - **Breaking changes:** API signatures, compatibility-breaking configuration, risky DB schema changes (migrations, indexes, NULL constraints).
+- **Untested critical logic:** new or changed business or critical logic with no test at the sufficiency bar of `instructions/builder-contract.md` §Test scope.
 
 ### Priority 2 — Flag as Tradeoffs (Design and Future Cost)
 
@@ -35,7 +36,7 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 
 ### Do Not Flag
 
-Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**. Code comment content is judged separately (§Comment Classification).
+Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**. Code comment content is judged separately (§Comment Classification). Test breadth beyond the sufficiency bar of `instructions/builder-contract.md` §Test scope — coverage-number demands, tests for trivial code or framework wiring.
 
 ## How to Write Findings
 

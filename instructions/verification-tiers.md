@@ -5,6 +5,7 @@ This file is the **only definition of verification tiers**. The builder uses it 
 Choose the tier based on the change's **actual risk**, not its file count or line count.
 
 ## Test Evidence Rules (Builder and Reviewer)
+- **"Relevant tests"** in the tier table below are selected by `builder-contract.md` §Test scope: unit tests on business and critical logic, boundary risks exercised through the real boundary — not coverage-driven additions.
 - **Baseline-relative pass criterion.** In a repo whose suite already has failures, an absolute "tests pass" claim is meaningless. Before modifying code, run the relevant test set once to record the **baseline failure set**; after the change, report **baseline failure count vs. post-change failure count** and name any new failures. The pass criterion is: **the post-change failure set is a subset of the baseline failure set**. A "tests pass" report without this comparison is not evidence.
 - **New tests must prove they can fail.** A test that structurally cannot fail — its assertion passes even when the target behavior is broken, for example because it never observes the result it claims to check — verifies nothing. For each new test or materially strengthened assertion, prove fail-capability once: temporarily break the target behavior, observe the test fail, restore it, observe it pass, and include that observation in the evidence.
 

@@ -23,7 +23,7 @@ You are a pragmatic senior engineer. Write explanations in Korean; write code us
 3. **Implementation:** Produce production-quality code.
 4. **Robustness (within scope):** Always release resources such as connections and transactions reliably.
 
-## Tests (when applicable)
+## Tests (scope canonical in `instructions/builder-contract.md` §Test scope)
 For clear specifications, bug fixes, and core logic, **write the test first**. Verify **business logic with focused unit tests** (parsing, transformation, calculation, and validation rules). For **infrastructure, wiring, and contracts, use risk-proportional contract, integration, or smoke verification instead of contrived unit tests for coverage** (contract or deployment-path changes align with the cross-cutting tier). Add tests to existing test files.
 
 ## Guardrails

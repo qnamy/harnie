@@ -32,6 +32,7 @@ Independently assess the change's actual risk from the **diff and impact radius*
 - **Unable to verify ≠ verification not required:** If a risk required for approval remains unverified, REJECT from a merge-readiness perspective even when the builder disclosed it honestly.
 - **Baseline comparison required:** When the tier requires test evidence, a "tests pass" claim without the baseline-vs-post failure comparison (`verification-tiers.md` Test Evidence Rules) is missing evidence — REJECT.
 - **False-positive tests:** A new test that structurally cannot fail — its assertion passes even when the target behavior is broken — is unverified scope, not coverage. Require fail-capability evidence per the same rules.
+- **Test scope both ways:** the sufficiency bar is `builder-contract.md` §Test scope. New or changed business or critical logic with no test at that bar is unverified risk — name the missing test and REJECT. Do not demand tests beyond the bar (coverage numbers, trivial code, framework wiring); that demand is over-flagging, not rigor.
 
 ## Output
 Follow the canonical **loop contract** in `loop.md` for the ledger, gate, and re-review scope, and `review-schema.md` for the output schema. The code-loop reviewer is always `harnie-reviewer` (Claude), whose agent body instructs it to read this file and `review-schema.md` directly — not injected by the skill. Review-specific settings:
