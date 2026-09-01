@@ -11,6 +11,10 @@ Review the design **before implementation** — design mistakes are cheap now, e
 
 Do not reopen an approved higher-altitude decision at a lower altitude. An out-of-altitude demand raised as blocking will be **contested** (`CONTEST … reason=altitude`, `loop.md`); on a contest, concede (`resolved`, optionally a new non-blocking ID) unless you can show the finding truly belongs to this altitude.
 
+## Scope — optional, stated by the caller
+
+When the caller narrows the finding scope to named categories (e.g. "overengineering only"), the MUST-find obligations below bind only inside that scope; a finding outside it is at most a one-line non-blocking mention, never a demand. No stated scope means the full criteria apply — the DR loop states none, so in-loop review is unaffected.
+
 ## MUST find (blocking when violated)
 
 - **Implementability**: a competent developer can begin without additional core decisions — name any remaining `[UNRESOLVED]`.
