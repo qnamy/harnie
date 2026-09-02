@@ -56,7 +56,7 @@ M보다 큰 작업은 이 파이프라인이 받지 않는다. ARCH 트리거가
 | **검증** | `verify --task` 후 `verify --integration`. 전체 스위트는 여기서 1회, 최종 트리에 바인딩된 성공 receipt 하나만 남는다 | task/integration receipt |
 | **완료** | `completion`이 완료를 재도출하고 Stop 훅이 독립 검증한다 | `HARNIE_STATUS` 보고 |
 
-`dev-solo`는 Codex 단독 완주 경로다. 생산도 리뷰도 Codex이고, 리뷰는 fresh `codex exec --sandbox read-only` 셀프리뷰 서브프로세스가 맡는다. 크로스모델 리뷰어가 없다는 것을 감수한 설계이며, Claude 사용량이 소진된 상황을 위해 존재한다.
+`dev-solo`는 Codex 단독 완주 경로다. 생산도 리뷰도 Codex이고, 리뷰는 fresh native Codex sub-agent가 맡는다. `fork_turns: "none"`으로 부모 대화와 격리하지만, 읽기 전용은 지시 계약이다. 크로스모델 리뷰어가 없다는 것을 감수한 설계이며, Claude 사용량이 소진된 상황을 위해 존재한다.
 
 중단된 run의 흔한 재개는 인자 없는 `/harnie:dev`다 — 활성 run의 원 프롬프트를 그대로 이어 쓴다. 소급으로 미완료 처리된 과거 run을 되살리거나 런타임을 바꿔 이어받을 때는 `/harnie:dev-resume`이 트리의 재개 가능한 run 목록과 각 run의 다음 블로커를 보여준 뒤 선택한 run으로 넘어간다.
 

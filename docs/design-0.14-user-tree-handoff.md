@@ -704,7 +704,7 @@ graph LR
 
 ### 13-4 후속 — dev-solo 읽기 마찰 해소와 blanket 한계 (2026-08-31)
 
-0.14.5에서 dev-solo 리뷰어를 중첩 `codex exec`에서 `fork_turns: "none"` 네이티브 Codex 서브에이전트로 바꿨다. 서브에이전트는 run 안의 delta·원장 경로를 직접 읽으므로 리뷰 산출물을 `/private/tmp`로 복사하지 않는다. `run-capped.mjs`와 리뷰 subprocess도 삭제됐다. 읽기 전용은 OS sandbox가 아니라 리뷰 프롬프트의 계약이며, 리뷰어가 파일을 쓰면 프로토콜 실패로 처리한다.
+0.14.5에서 dev-solo 리뷰어를 중첩 `codex exec`에서 `fork_turns: "none"` 네이티브 Codex 서브에이전트로 바꿨다. 서브에이전트에는 별도 Read 도구가 없으므로 run 안의 delta·원장은 `loop.mjs export <repo> <rel>`의 stdout으로 읽고, 리뷰 산출물을 `/private/tmp`에 복사하지 않는다. `run-capped.mjs`와 리뷰 subprocess도 삭제됐다. 읽기 전용은 OS sandbox가 아니라 리뷰 프롬프트의 계약이며, 리뷰어가 파일을 쓰면 프로토콜 실패로 처리한다.
 
 Bash의 `.harnie` blanket deny는 유지한다. 읽기와 쓰기를 셸 문자열만으로 안전하게 분류할 수 없고, 공인 상태 접근은 신뢰 CLI가 소유한다. 다만 U7 후속 카나리아에서 내부 Codex가 `.har""nie`로 문자열을 분할해 deny를 통과한 것이 관측됐다. 해당 실행은 무효 처리했다. 이 가드는 의도적 적대자를 막는 보안 경계가 아니라 §0.1의 실수-안전 장치이며, 단순 문자열 변형으로 우회할 수 있다는 한계를 전제로 운영한다.
 
