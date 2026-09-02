@@ -22,6 +22,8 @@ harnie 가드는 **fallible·over-eager 오케스트레이터와 빌더의 실�
 
 `captureTree`는 run root의 `.harnie/objects`를 harnie 전용 Git 오브젝트 저장소로 준비한다. 먼저 원 Git 오브젝트 DB로 캡처하고, 오브젝트 임시 파일 생성이 `EPERM`·`EACCES`로 거부된 경우에만 `GIT_OBJECT_DIRECTORY=.harnie/objects`와 원 Git 오브젝트 DB의 alternate를 사용해 다시 캡처한다. 다른 Git 실패는 fallback으로 바꾸지 않는다.
 
+캡처가 실행된 CLI 성공 JSON에는 `captureBackend: "default" | "redirected"`가 들어간다. 한 명령에서 redirect가 한 번이라도 발생하면 recoverable한 첫 Git 시도의 raw stderr는 출력하지 않고, stderr에 `harnie: Git object store redirected to .harnie/objects`를 한 번만 남긴다. fallback 대상이 아닌 Git 실패는 기존처럼 실패 원인을 노출하고 명령을 중단한다.
+
 캡처가 어느 경로에서 성공했는지는 읽기 규칙을 바꾸지 않는다. `computeDelta`의 `git diff`와 `execution.mjs`의 `git ls-tree`·완료·drift 판정은 `.harnie/objects`를 항상 `GIT_ALTERNATE_OBJECT_DIRECTORIES`에 포함하고, 호출자가 이미 지정한 alternate도 보존한다. 저장소가 없거나 요청한 tree SHA가 원 Git DB와 harnie 저장소 어디에도 없으면 SHA와 두 저장소 경로를 포함한 원인으로 fail-closed한다. 이 규칙 때문에 리다이렉트 캡처 뒤 Claude나 대화형 Codex가 run을 이어받아도 같은 SHA를 읽는다.
 
 `.harnie/objects`는 개별 run이 아니라 run root 수명주기에 속한다. `handoff`·`abandon`·run 교체는 이를 지우지 않는다. `.harnie/` 전체를 제거하면 보관된 캡처 SHA도 함께 유실되며, 그 SHA를 참조하는 run은 복구 전까지 진행할 수 없다. 사람이 리다이렉트된 tree를 조사할 때도 같은 alternate를 명시한다.

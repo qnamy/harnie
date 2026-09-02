@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process"
 import { chmodSync, mkdtempSync, writeFileSync, rmSync, renameSync, mkdirSync, readdirSync, statSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { CaptureObjectUnavailable, captureObjectStore, captureTree, computeDelta } from "./delta.mjs"
+import { CaptureObjectUnavailable, captureBackendStatus, captureObjectStore, captureTree, computeDelta } from "./delta.mjs"
 
 const sh = (repo, ...args) => execFileSync("git", ["-C", repo, ...args], { encoding: "utf8" })
 let pass = 0, fail = 0
@@ -92,6 +92,7 @@ const redirectedBaseline = redirectCapture(repoR)
 t("기본 object DB 쓰기 권한이 없으면 harnie object store로 캡처한다", () => {
   assert.ok(statSync(captureObjectStore(repoR)).isDirectory())
   assert.throws(() => sh(repoR, "cat-file", "-e", `${redirectedBaseline}^{tree}`))
+  assert.equal(captureBackendStatus(), "redirected")
 })
 
 writeFileSync(join(repoR, "source.txt"), "interactive post\n")

@@ -2,8 +2,8 @@
 // delta/ledger 자체는 각 파일 테스트가 커버 → 여기선 조합·상태머신·CLI 계약만.
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync } from "node:child_process"
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, rmSync } from "node:fs"
+import { execFileSync, spawnSync } from "node:child_process"
+import { chmodSync, mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync, symlinkSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -205,6 +205,23 @@ test("delta CLI: --out으로 harnie control 파일 덮어쓰기 거부", () => {
   const root = tmpBase()
   assert.equal(runFailRaw(["delta", root, captureTree(root), "--out", join(root, ".harnie", "active.json")]), 2)
   assert.equal(existsSync(join(root, ".harnie", "active.json")), false)
+})
+
+test("capture CLI: object store redirect는 raw Git 오류 대신 상태 한 줄과 backend를 남긴다", () => {
+  const root = tmpBase()
+  captureTree(root)
+  writeFileSync(join(root, "source.txt"), "redirect me\n")
+  const objects = join(root, ".git", "objects")
+  chmodSync(objects, 0o555)
+  let result
+  try {
+    result = spawnSync(process.execPath, [CLI, "capture", root], { encoding: "utf8", stdio: "pipe" })
+  } finally {
+    chmodSync(objects, 0o755)
+  }
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stderr, "harnie: Git object store redirected to .harnie/objects\n")
+  assert.equal(JSON.parse(result.stdout).captureBackend, "redirected")
 })
 
 const REJ = ["VERDICT: REJECT", "ISSUES:", "- [CR-001] (blocking) (open) [a.ts:1] x → y → z"].join("\n")

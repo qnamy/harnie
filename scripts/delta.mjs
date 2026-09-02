@@ -8,10 +8,27 @@ import { delimiter, isAbsolute, join, resolve } from "node:path"
 
 // maxBuffer: 기본 1MB로는 대형 diff(대량 rebase 등)에서 ENOBUFS로 원인 불명 크래시(digest 제안 5).
 function git(repo, args, env) {
-  return execFileSync("git", ["-C", repo, ...args], { env: { ...process.env, ...env }, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 })
+  return execFileSync("git", ["-C", repo, ...args], {
+    env: { ...process.env, ...env }, encoding: "utf8", maxBuffer: 256 * 1024 * 1024,
+    stdio: ["ignore", "pipe", "pipe"],
+  })
 }
 
 export class CaptureObjectUnavailable extends Error {}
+
+let captureBackend = null
+let redirectNoticeWritten = false
+
+export function captureBackendStatus() { return captureBackend }
+
+function recordCaptureBackend(backend) {
+  if (backend === "redirected") captureBackend = "redirected"
+  else if (captureBackend == null) captureBackend = "default"
+  if (backend === "redirected" && !redirectNoticeWritten) {
+    process.stderr.write("harnie: Git object store redirected to .harnie/objects\n")
+    redirectNoticeWritten = true
+  }
+}
 
 export function captureObjectStore(repo) { return join(repo, ".harnie", "objects") }
 
@@ -110,10 +127,16 @@ function captureWithRedirectedObjects(repo, store) {
  */
 export function captureTree(repo) {
   const store = prepareCaptureStore(repo)
-  try { return captureWithDefaultObjects(repo) }
+  try {
+    const tree = captureWithDefaultObjects(repo)
+    recordCaptureBackend("default")
+    return tree
+  }
   catch (e) {
     if (!objectWritePermissionDenied(e)) throw e
-    return captureWithRedirectedObjects(repo, store)
+    const tree = captureWithRedirectedObjects(repo, store)
+    recordCaptureBackend("redirected")
+    return tree
   }
 }
 

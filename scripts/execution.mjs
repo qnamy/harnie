@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url"
 import { execFileSync, spawnSync } from "node:child_process"
 import { createHash } from "node:crypto"
 import {
-  CaptureObjectUnavailable, assertTreeReadable, captureTree, computeDelta, prepareCaptureObjectStore,
+  CaptureObjectUnavailable, assertTreeReadable, captureBackendStatus, captureTree, computeDelta, prepareCaptureObjectStore,
 } from "./delta.mjs"
 import { validateLedger, openBlockingCount } from "./ledger.mjs"
 import { extractSelectedAnswers, ensureExcludeEntries } from "../hooks/lib.mjs"
@@ -369,7 +369,8 @@ function writeJSONAtomic(path, obj) {
 }
 
 function out(obj) {
-  process.stdout.write(JSON.stringify(obj, null, 2) + "\n")
+  const captureBackend = captureBackendStatus()
+  process.stdout.write(JSON.stringify({ ...obj, ...(captureBackend ? { captureBackend } : {}) }, null, 2) + "\n")
 }
 
 function planDir(root, track, slug) {

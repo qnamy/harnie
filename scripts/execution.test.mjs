@@ -1,8 +1,8 @@
 // execution.mjs 테스트 — 순수 권위 함수 + fail-closed IO 경로(init/approve/seal/verify/completion).
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { execFileSync, execFile } from "node:child_process"
-import { mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from "node:fs"
+import { execFileSync, execFile, spawnSync } from "node:child_process"
+import { chmodSync, mkdtempSync, writeFileSync, mkdirSync, existsSync, readFileSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join, dirname } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
@@ -319,6 +319,28 @@ test("init: sentinel-first 부트스트랩", () => {
   assert.ok(existsSync(join(root, ".harnie", "active.json")))
   assert.ok(existsSync(join(root, ".harnie", "plan", "feat-x", "execution.json")))
   assert.ok(existsSync(captureObjectStore(root)))
+})
+
+test("completion CLI: redirect된 캡처 backend를 성공 JSON에 남긴다", () => {
+  const root = gitRepo()
+  run(["init", "--root", root, "--slug", "feat-x"])
+  setMode(root, "feat-x", "S")
+  const reviewedPostSHA = captureTree(root)
+  const reviewDir = join(root, ".harnie", "plan", "feat-x", "review", "code")
+  mkdirSync(reviewDir, { recursive: true })
+  writeFileSync(join(reviewDir, "state.json"), JSON.stringify({ round: 1, stagnation: 0, machineState: "APPROVED", reviewedPostSHA }))
+  writeFileSync(join(root, "source.txt"), "post-review drift\n")
+  const objects = join(root, ".git", "objects")
+  chmodSync(objects, 0o555)
+  let result
+  try {
+    result = spawnSync(process.execPath, [CLI, "completion", "--root", root, "--slug", "feat-x"], { encoding: "utf8", stdio: "pipe" })
+  } finally {
+    chmodSync(objects, 0o755)
+  }
+  assert.equal(result.status, 0, result.stderr)
+  assert.equal(result.stderr, "harnie: Git object store redirected to .harnie/objects\n")
+  assert.equal(JSON.parse(result.stdout).captureBackend, "redirected")
 })
 
 test("init --authority cli: info/exclude EPERM만 허용하고 다른 등록 오류는 fail-closed", () => {

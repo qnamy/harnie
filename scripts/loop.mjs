@@ -3,7 +3,7 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync, realpathSync, readdirSync, renameSync } from "node:fs"
 import { dirname, resolve, basename, join, sep, relative, isAbsolute } from "node:path"
 import { fileURLToPath } from "node:url"
-import { captureTree, computeDelta } from "./delta.mjs"
+import { captureBackendStatus, captureTree, computeDelta } from "./delta.mjs"
 import { parseReview, mergeLedger } from "./ledger.mjs"
 
 function die(msg) {
@@ -54,7 +54,8 @@ function writeJSON(path, obj) {
 }
 
 function out(obj) {
-  process.stdout.write(JSON.stringify(obj, null, 2) + "\n")
+  const captureBackend = captureBackendStatus()
+  process.stdout.write(JSON.stringify({ ...obj, ...(captureBackend ? { captureBackend } : {}) }, null, 2) + "\n")
 }
 
 const VALID_MACHINE_STATES = new Set(["REVISING", "APPROVED", "STALLED"])
