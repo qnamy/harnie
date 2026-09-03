@@ -38,6 +38,7 @@
 | `quality-digest` | 누적된 리뷰 지적을 클러스터링해 lint·CI·리뷰 기준으로 승격할 후보를 제안한다(제안까지만) |
 | `pr-delivery` | 주입된 Delivery Profile에 따라 PR 제목·본문과 리뷰요청 내용을 작성한다 |
 | `confluence-doc` | 개발 문서를 Confluence 페이지로 구조화하고 Mermaid를 네이티브 렌더링해 발행한다 |
+| `requirements` | 모호한 개발 요청에서 해석이 갈리는 지점을 좁혀 요구사항 문서로 만든다 |
 | `design-authoring` | 루프 밖 독립 설계 요청을 정본 계약으로 라우팅하는 얇은 래퍼 |
 | `dev` · `dev-solo` | 개발 파이프라인 — §3 |
 
