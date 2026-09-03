@@ -1,6 +1,6 @@
 ---
 name: requirements
-description: Turn a short or vague development request into a requirements document that admits only one reading, by scanning it for ambiguity, resolving the ambiguities that would change the resulting software, and recording the rest as explicit assumptions. Use before design or implementation starts, whenever scope, failure behavior, or completion criteria are still open — including requests that look small. Produces a Korean requirements file at the path the user names.
+description: Turn a short or vague development request into a requirements document that admits only one reading, by scanning it for ambiguity, resolving the ambiguities that would change the resulting software, and recording the rest as explicit assumptions. Use before design or implementation starts, whenever scope, failure behavior, or completion criteria are still open — including requests that look small. Produces a Korean requirements file at the path the user names, and produces neither the design nor the implementation. Do NOT use to review existing code.
 ---
 
 # Requirements Analysis (Ambiguity First)
@@ -76,7 +76,7 @@ One pass over the finished draft, before showing it. Read each requirement sente
 
 A sentence that trips one of these gets rewritten as an observable outcome. **If it cannot be rewritten, it was never a requirement — move it to `[미결정]` with what is missing.** Do not extend this list; wider wording rules produce about one false alarm per real one.
 
-Then, over the whole document: can each requirement be observed as met or not met, and does each trace to a stated need or a failure it prevents? Cut what fails the second question.
+Then, over the whole document, three passes. Is every `[미결정]` you wrote inside a requirement sentence also listed in section 5 — a marker left only inline carries none of its reason, decider, or blocked work, so an open item reaches the next stage unowned. Can each requirement be observed as met or not met? Does each trace to a stated need or a failure it prevents? Cut what fails the last question.
 
 ## Do not
 
