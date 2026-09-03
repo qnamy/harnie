@@ -39,7 +39,7 @@
 | `pr-delivery` | 주입된 Delivery Profile에 따라 PR 제목·본문과 리뷰요청 내용을 작성한다 |
 | `confluence-doc` | 개발 문서를 Confluence 페이지로 구조화하고 Mermaid를 네이티브 렌더링해 발행한다 |
 | `requirements` | 모호한 개발 요청에서 해석이 갈리는 지점을 좁혀 요구사항 문서로 만든다 |
-| `design-authoring` | 루프 밖 독립 설계 요청을 정본 계약으로 라우팅하는 얇은 래퍼 |
+| `software-design` | 요구사항 문서나 짧은 직접 요청을 저추론 구현자가 실행할 수 있는 설계 문서로 만든다(자기완결형, Claude·Codex 공용) |
 | `dev` · `dev-solo` | 개발 파이프라인 — §3 |
 
 ## 3. dev 파이프라인

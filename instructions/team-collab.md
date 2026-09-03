@@ -8,7 +8,7 @@ General Agent Teams rules — routing (5-question test), hard rules, member axes
 
 Two places only:
 
-- **Standalone architecture design** — an ARCH document authored through the `design-authoring` skill (`design/arch-rev-N.md`), outside any run.
+- **Standalone architecture design** — an ARCH document authored against `instructions/design-authoring-arch.md` (`design/arch-rev-N.md`), outside any run.
 - **Incident analysis** — the T-B competing-hypothesis template, artifact path named by the orchestrator.
 
 At those points, when the general file's ≥3-of-5 test passes **and the user consents in the same turn**, upgrade the single `harnie-designer` subagent to a team. Everything inside a `harnie:dev` run (grounding, design, build, code review, verification) never forms a team.

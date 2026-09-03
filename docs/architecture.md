@@ -24,7 +24,7 @@
 | 역할 | 프로바이더 | 실행 | 쓰기 | 지침 |
 |---|---|---|---|---|
 | `harnie-scout` (코드 탐색) | Claude (T1 기본) | 서브에이전트 | read-only | 최소 출력계약(절대경로+요약, 병렬) |
-| `harnie-designer` (설계 producer) | Claude (T3) | 서브에이전트 | 설계 텍스트 반환(파일은 main이 씀) | `design-authoring-{arch,detail}.md` 주입 |
+| `harnie-designer` (설계 producer) | Claude (T3) | 서브에이전트 | 설계 텍스트 반환(파일은 main이 씀) | ARCH는 `design-authoring-arch.md`, TASK-DETAIL은 `skills/software-design/SKILL.md` 주입 |
 | 설계 리뷰어 | **Codex** | codex MCP `read-only` | ✕ | `design-review.md`, REJECT 편향 |
 | 코드 빌더 (개발 producer) | **Codex** | codex MCP `workspace-write` | ✍️ | 6-section 계약 + 주입된 설계 |
 | `harnie-reviewer` (코드 리뷰어) | **Claude** | read-only 서브에이전트 | ✕ | `code-review.md` + `verification-tiers.md`, REJECT 편향 |
@@ -104,6 +104,7 @@ codex MCP·플러그인 메커니즘의 확정 사실(재현 가능) = [codex-me
 - [`instructions/review-loop-driver.md`](../instructions/review-loop-driver.md) — 루프 CLI·codex 배선(R1~R5).
 - [`instructions/verification-tiers.md`](../instructions/verification-tiers.md) — 검증 tier(위험 기준) + Manual QA + 대체 검증.
 - [`instructions/code-review.md`](../instructions/code-review.md) · [`instructions/design-review.md`](../instructions/design-review.md) — 리뷰 기준(blocking/non-blocking).
-- [`instructions/design-authoring-arch.md`](../instructions/design-authoring-arch.md) · [`instructions/design-authoring-detail.md`](../instructions/design-authoring-detail.md) — 설계 **작성** 출력 계약(고도별 경량/정식 분기). designer body는 역할·원칙만, 계약은 이 프로필을 주입.
+- [`instructions/design-authoring-arch.md`](../instructions/design-authoring-arch.md) — ARCH 고도 설계 **작성** 출력 계약(경량/정식 분기). designer body는 역할·원칙만, 계약은 이 프로필을 주입.
+- [`skills/software-design/SKILL.md`](../skills/software-design/SKILL.md) — TASK-DETAIL 고도 설계 작성 계약(잠정 바인딩). 자기완결형 스킬이라 plain 세션에서도 같은 계약이 돈다. 이 파일이 대체한 `instructions/design-authoring-detail.md`는 파이프라인이 더 읽지 않는다.
 
 이 문서는 **설계 근거·구조**만 담고, 실행 규칙은 위 canonical을 따른다.

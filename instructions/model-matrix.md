@@ -4,8 +4,8 @@ Owns three decisions for the `harnie:dev` pipeline: ① the design-altitude boun
 
 ## 1. Design Altitude (two layers, never mixed in one document or loop)
 
-- **ARCH** — boundaries, new components, data ownership, technology selection, cross-module/repo contracts, SPOF/scaling decisions (formal profile `design-authoring-arch.md`). Produced by the standalone `design-authoring` skill, outside any run; its trigger checklist is also what tells `harnie:dev` a job is **larger than M** and belongs to the human + orca process.
-- **TASK-DETAIL** — implementation design inside settled boundaries (`design-authoring-detail.md`): M's single design, and any standalone detailed design.
+- **ARCH** — boundaries, new components, data ownership, technology selection, cross-module/repo contracts, SPOF/scaling decisions (formal profile `instructions/design-authoring-arch.md`). Authored directly against that profile outside any run — the former `design-authoring` skill wrapper is gone; its trigger checklist is also what tells `harnie:dev` a job is **larger than M** and belongs to the human + orca process.
+- **TASK-DETAIL** — implementation design inside settled boundaries (`skills/software-design/SKILL.md`): M's single design, and any standalone detailed design. This is a provisional binding; `instructions/design-authoring-detail.md` is the contract it replaced and is no longer read by the pipeline.
 
 ## 2. Run Difficulty — judged at entry, re-judged at two checkpoints
 
@@ -46,7 +46,7 @@ Difficulty tiers producer models and, conservatively, the Claude code reviewer; 
 |---|---|---|---|---|
 | Codex builder (all sizes) | `gpt-5.6-luna` — `gpt-5.3-codex-spark` when purely mechanical | `gpt-5.6-terra` | `gpt-5.6-sol` | `gpt-5.6-sol` (effort high) |
 | Claude designer, TASK-DETAIL (M inline/designer; standalone detailed design) | sonnet | sonnet | opus | opus (effort high) |
-| Claude designer, ARCH (standalone `design-authoring`) | opus | opus | opus (effort high) | **fable** (fallback opus, effort high — noted in the plan) |
+| Claude designer, ARCH (standalone) | opus | opus | opus (effort high) | **fable** (fallback opus, effort high — noted in the plan) |
 
 **Reviewers (never below sonnet):**
 
