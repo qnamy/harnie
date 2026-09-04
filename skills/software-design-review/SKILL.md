@@ -15,7 +15,7 @@ The failure this exists to prevent: a design that reads well, is implemented fai
 
 ## Reviewer
 
-**Input.** The design file path (required); the requirements file path, or — when the design came from a direct request — that request's text or a stable path to it; a lens, when the coordinator named one; the previous round's findings, from round 2 on; the path to write the result to. **Requirement coverage is judged against whichever of the two you were given, and the result names which.** Given neither, the round fails: ask for that input and state no verdict. Never infer the requirements from the design — a review that skipped coverage cannot say 착수 가능.
+**Input.** The design file path (required); the requirements file path, or — when the design came from a direct request — that request's text or a stable path to it; a lens, when the coordinator named one; from round 2 on, the previous round's findings together with the coordinator's disposition record for them (`response-N.md`); the path to write the result to. **Requirement coverage is judged against whichever of the two you were given, and the result names which.** Given neither, the round fails: ask for that input and state no verdict. Never infer the requirements from the design — a review that skipped coverage cannot say 착수 가능.
 
 **Procedure.**
 
@@ -92,6 +92,21 @@ Nothing below rung 3 is a review. Pass the reviewer its input list in full — a
 
 **Accepting findings.** Accept by necessity, never by severity label. Accept one that prevents a concrete failure, names a real defect, or is cheap with clear value. Reject one that only adds a mechanism with no named mistake scenario, expands scope, or is taste. Accepting everything and fixing nothing both fail this test. `discuss:` findings are not yours to settle — carry each into the design's `[미결정]` with the decider it names, the requester for intent and whoever can reach the source for an unconfirmed claim, and raise it to the user.
 
+**The response file.** `response-N.md` is the round's disposition record, and the reviewer's input for verifying closure next round. One line per finding raised so far, in id order, four fields and no prose around them.
+
+| Field | Rule |
+|---|---|
+| id | The reviewer's id, never renumbered |
+| 처분 | `수용` · `기각` |
+| 사유 | Required for `기각`; omit it for `수용` |
+| 반영 위치 | The design section numbers the change landed in; `-` for `기각` |
+
+A `수용` with no 반영 위치 is not verifiable, and the round is not finished until it has one.
+
+**After applying, check the revised document yourself** before handing it back: section 6's verification still reaches the change, and every `[미결정]` carried from the requirements is still there. A revision that changes a decision breaks those two first, and that break is yours, not a reviewer finding.
+
+**A finding never leaves the loop unrecorded.** When the loop stops with an `issue:` still open — the round limit, or the user ending it — write that finding into the design's section 7 as a `[미결정]` under its own id, carrying what that section requires — the reason (the failure the reviewer named), the user as the one who settles it, and what it blocks — so the implementation stage inherits it instead of reading a design that looks settled.
+
 **Lenses.** One reviewer by default. **Split into lenses only when a decision in this design cannot be undone if it is wrong** — production data lost or altered, money moved, an authentication or authorization boundary changed, a contract already published to another system. At most three, and only in round 1; from round 2 a single reviewer follows the merged findings.
 
 | Lens | Pushes | Reads |
@@ -108,3 +123,4 @@ Give each lens four things — its objective, the finding form above, which sour
 - Never treat finding count, round count, or result length as quality.
 - Never fill in a `[미결정]` on behalf of the person it names.
 - Never modify any file other than the ones this skill assigns you: the reviewer writes only its result, and the coordinator changes only the design file and the round files.
+- Never end the loop by dropping an `issue:`: each one ends resolved, rejected with a reason the reviewer settled, or recorded as a `[미결정]`. A non-blocking finding may end open and unfixed — report it that way rather than opening a round to close it.
