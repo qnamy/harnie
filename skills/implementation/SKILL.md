@@ -1,73 +1,70 @@
 ---
 name: implementation
-description: Implements a software design document as written, runs the verification step the design fixed, and stops on whatever that design left open instead of deciding it. Takes the design file path and, optionally, a scope limit naming which of the design's files this session owns, so several sessions can run one design side by side without any of them deciding how the work is split. Use once a design document exists, including one whose review cleared only part of it, and implementation is what is being asked for. Do NOT use when there is no design document to execute, to write or revise a design or requirements, to settle an open item, or to split work into units and dispatch them.
+description: Implements a contract as written — a software design document when one exists, otherwise the requester's request — records the baseline commit it started from, runs the verification that reaches the change, and stops on whatever the contract left open instead of deciding it. Takes the design file path, or the request when there is no design, and optionally a scope limit naming which files this session owns so several sessions can run one design side by side. Use when implementation is what is being asked for. Do NOT use to write or revise a design or requirements, to settle an open item, to review code, or to split work into units and dispatch them.
 ---
 
-# Software Implementation (The Design Is the Plan)
+# Implementation (The Contract Is the Plan)
 
-**The design document is the plan, and there is no second one.** Sections 1 to 7 are the contract this session executes; section 8 records the alternatives the designer rejected and is not an instruction. No task file, no step list, no checklist is produced here — the design already fixed the files, the interfaces, the failure behavior, and the verification, and a plan written on top of it becomes a second source of record that drifts from the first.
+**The contract is the plan, and there is no second one.** With a design document, sections 1 to 7 are the contract and section 8 is not an instruction. Without one, the requester's request — or the requirements file — is the contract, read verbatim. No task file, step list, or checklist is produced here; a plan written on top of the contract becomes a second source of record that drifts from the first.
 
 Three rules hold over everything below.
 
-- **No design-level decision is made here.** A `[미결정]` in section 7 that blocks the work stops the work, and so does a choice sections 1 to 6 were supposed to fix and did not. An implementer that settles one produces code nobody agreed to, under a document that still says the question is open. Local expression inside this repository's conventions, a variable name or the shape of a private helper, is not such a decision and stops nothing.
-- **Verification is section 6 run for real, and its output compared to the pass condition section 6 states.** Code that looks done and a command that was never run are the same evidence.
-- **A design that turns out to be wrong routes back. It is not patched around locally.** The cheapest moment to find a design error is here; the most expensive place to bury one is inside the code that was supposed to follow it.
+- **No contract-level decision is made here.** A `[미결정]` that blocks the work stops the work. So does a choice the contract was supposed to fix and did not, and, without a design, a reading of the request that would produce different software. Ask the requester or route back; never choose. Local expression inside this repository's conventions — a name, the shape of a private helper — is not such a decision.
+- **Verification is run for real, and its output compared to the pass condition.** Code that looks done and a command that was never run are the same evidence.
+- **A contract that turns out to be wrong routes back.** It is not patched around locally.
 
 ## Input
 
-- **The design file path.** Required. Read sections 1 to 7 in full; that is the source of record for what to build and what not to touch.
-- **The review result.** The current one is whichever the caller names; with none named and review files sitting beside the design, it is the highest-numbered `review-N.md` there, and an earlier round's verdict is not the verdict. 착수 불가 means do not start, and say so. 조건부 착수 means build only the part the review named as buildable and leave the blocked part alone.
-- **A scope limit.** Optional, and only when the caller gives one. See §Scope limit.
-
-**A request that arrives here with no design document is outside this skill.** Every rule below points at a section of a document that does not exist. Report that in one line and stop. This skill implements nothing without a design, and it does not write one to fill the gap: a design invented inline is one nobody reviewed, which is the failure the earlier stages exist to prevent. What the session does with the request after that is settled outside this skill.
+- **The contract.** The design file path, sections 1 to 7 read in full; or, with no design, the request text or the requirements file path. The report says which one you worked from.
+- **The design review verdict**, when a design exists: the `design-review-N.md` the caller names, or the caller's statement that the design review was skipped. Given neither, ask; never pick a review file up on your own, since a file lying nearby may belong to another design. Record which you got in the report. 착수 불가 means do not start, and say so. 조건부 착수 means build only the part the review named as buildable.
+- **A scope limit**, only when the caller gives one (§Scope limit).
 
 ## Procedure
 
-1. **Restate in one sentence** what this session builds and what it must not touch. If you cannot, name the one thing missing and stop.
-2. **Read section 7 before writing any code.** A blocking open item stops the work now rather than halfway through it. Report which item and who settles it. An item missing any of its three parts — the reason, who settles it, what it blocks — goes back to the design (§Routing back), because deciding how far an incomplete one reaches is the decision you are here not to make.
-3. **Confirm the ground.** The paths, signatures, and conventions section 3 names must exist in this repository as written. A mismatch is a design fact error, not something to absorb here (§Routing back).
-4. **Implement what section 2 decided, in the files section 3 names**, following what this repository already does. No mechanism section 2 did not decide enters the code: no abstraction, config surface, or defensive branch away from a trust boundary. Local expression the design left to you is yours, on the same boundary the rules above draw. **Never implement a section from your memory of it.** A long run can be compacted, taking the design's text out of the session while the work goes on, and continuing from a remembered version is how the code drifts from what was decided. After a compaction, get sections 2, 3, and 6 back in front of you before continuing.
-5. **Run section 6's command** and compare its output to the condition section 6 calls passing. On a failure, say whether that same command already failed before this change, and say it only from that command run against the tree as it stood immediately before you touched it. An older record, the design's grounding included, describes a tree that has since moved. Without evidence from this tree, report the attribution as unknown. Attributing a pre-existing failure to this work, or this work's failure to the baseline, each send the next stage the wrong way, and a guess between them is how that happens.
-6. **Self-check, then report.**
+1. **Record the baseline.** The tree must be clean at HEAD — `_chain/`, where the chain's own artifacts live, excepted — and that commit is the baseline the review and verification stages diff against. A dirty tree stops the work: report it and have the pre-existing work committed first. Never stash it; the stash stack is shared across worktrees.
+2. **Restate in one sentence** what you build and what you must not touch. If you cannot, name the missing thing and stop.
+3. **Read the open items before writing code.** With a design, section 7: a blocking item stops the work now, and an item missing its reason, decider, or blocked work routes back. Without a design, list every reading of the request that would produce different software, ask the requester about each before coding, and record the answers in the report.
+4. **Confirm the ground.** The paths, signatures, and conventions the contract names must exist in this repository as written. A mismatch routes back.
+5. **Implement what the contract decided, in the files it names**, following what this repository already does. No mechanism the contract did not decide enters the code: no abstraction, config surface, or defensive branch away from a trust boundary. **Never implement from your memory of the contract.** After a compaction, get its text back in front of you before continuing.
+6. **Run the verification.** With a design, section 6's command, its output compared to the condition section 6 calls passing. Without one, the repository's existing check that reaches the change — its test command, a build, a run of the changed path; when none reaches it, say so rather than substituting a command that passes. On a failure, attribute it to the baseline only from that same command run at the baseline; without that run, report the attribution as unknown.
+7. **Self-check, then report.**
 
 ## Scope limit
 
-A scope limit names the subset of section 3's files this session owns. Whoever is running several sessions against one design assigns it; this session never derives one for itself.
+A scope limit names the subset of the contract's files this session owns. Whoever runs several sessions assigns it; this session never derives one.
 
-- You own exactly the files you were given. Every other file in section 3 belongs to another session that is running right now.
-- **Needing to change a file outside your scope stops the work.** Report the file and what you needed from it. Do not edit it, and do not build a local workaround that avoids it. Two sessions editing one file means the split was made wrong, and the fix belongs in the split.
-- Run section 6 regardless. When it cannot pass until another scope lands, report which part passed and which is waiting. **Never weaken the command or the pass condition to make it green.**
+- You own exactly those files. Needing to change a file outside them stops the work: report the file and what you needed from it, edit nothing, and build no local workaround. The fix belongs in the split.
+- Run the verification regardless. When it cannot pass until another scope lands, report which part passed and which is waiting. Never weaken the command or the pass condition.
 
 ## Routing back
 
-These findings go back to the design instead of being handled here, and they carry the same weight as each other. In each case, stop, report what the design says against what you found, name the section, and state the smallest change that would settle it. Do not revise the design yourself, and do not implement your own version of the decision.
+Stop, report what the contract says against what you found, name the section or the sentence, and state the smallest change that would settle it. Do not revise the contract, and do not implement your own version of the decision.
 
 | Finding | Why it is not yours |
 |---|---|
-| Section 3's path, signature, or convention does not match the repository | The design rests on a fact that is false, and other decisions may rest on it too |
-| A decision in section 2 cannot be implemented as written | Choosing the replacement is a design decision |
+| A named path, signature, or convention does not match the repository | The contract rests on a false fact, and other decisions may too |
+| A decision cannot be implemented as written | Choosing the replacement is a design decision |
 | A requirement no decision covers surfaces mid-implementation | Covering it changes scope |
-| Section 6's command passes without reaching what you built | You are the first to run it, so this defect surfaces nowhere else. Report the command that would observe the change instead of quietly substituting one |
-| A section 7 item is missing its reason, its decider, or what it blocks | Completing it belongs to the designer or to whoever it should have named, and reading its blast radius out of an incomplete item is a decision |
+| The verification command passes without reaching what you built | You are the first to run it; report the command that would observe the change instead of substituting one |
+| An open item is missing its reason, decider, or blocked work | Completing it belongs to whoever wrote it |
 
 ## Self-check
 
-Over the finished change, before reporting.
-
-- Does every decision in section 2 that your scope covers appear in the code, and does every file you changed trace back to section 3 or to the scope you were given? Both directions.
-- Did section 6's command actually run in this session, and did you compare its real output to the stated condition rather than to what you expected?
-- Did a mechanism enter that section 2 did not decide — an abstraction, a knob, error handling for a case that cannot occur, a test for trivial code or framework wiring? Remove it. Local expression the design left open is not that.
-- Is anything left that you settled yourself instead of stopping on it?
+- Does every decision your scope covers appear in the code, and does every changed file trace to the contract or to your scope? Both directions.
+- Did the verification actually run in this session, compared to its stated condition rather than to what you expected?
+- Did a mechanism enter that the contract did not decide — an abstraction, a knob, handling for a case that cannot occur, a test for trivial code or framework wiring? Remove it.
+- Is anything left that you settled yourself instead of stopping on?
 
 ## Report
 
-Korean, four lines at most: the design path and the scope you were given, the verification command with its actual result, the files changed, and any item you stopped on with who settles it. Do not paste the diff or the design; the code and the file are the artifacts.
+Korean, six lines at most: the contract you worked from and your scope; the baseline commit; the verification command with its actual result; the files changed; without a design, the readings you asked about and the answers; any item you stopped on and who settles it. The review and verification stages receive this report unchanged — it is the change's only record of its baseline and its verification. Do not paste the diff.
 
 ## Do not
 
 - Do not write or revise the design, the requirements, or the review files.
 - Do not settle a `[미결정]`, and do not treat a missing decision as an invitation to make one.
-- Do not split the work into units, write a task or plan file, or dispatch anyone. When one design is larger than one session, that split belongs to the person opening the sessions.
-- Do not implement from section 8. The alternatives there were rejected.
-- Do not touch code the design does not reach, and do not "improve" adjacent code, comments, or formatting on the way past.
+- Do not split the work, write a task or plan file, or dispatch anyone.
+- Do not implement from section 8; those alternatives were rejected.
+- Do not touch code the contract does not reach, and do not "improve" adjacent code, comments, or formatting on the way past.
 - Do not report done on a verification you did not run, or on one you loosened until it passed.
+- Do not write a design to fill a gap. Without one, the request is the contract, and what it does not fix is asked, not designed.

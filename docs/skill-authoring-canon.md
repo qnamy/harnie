@@ -10,7 +10,7 @@
 | 메타데이터 상주 비용 | 스킬당 **~100토큰**(name + description) | Agent Skills overview |
 | 번들 파일 비용 | 열기 전까지 **0** | 동일 |
 | `description` 길이 | 1,024자(중립 스펙) / Claude Code 목록에서 description+when_to_use 합산 **1,536자** 캡, 초과분 절단 | agentskills.io, Claude Code frontmatter 레퍼런스 |
-| Codex 스킬 선택기 목록 | 컨텍스트의 **2%**(윈도 미상이면 8,000자) | learn.chatgpt.com/docs/build-skills |
+| Codex 스킬 선택기 목록 | 컨텍스트의 **2%**(윈도 미상이면 8,000자). 선택 전 목록 예산이며 선택 후 본문은 전체 로드가 문서상 계약(2026-09-08 조사). 24.9KB 스킬 꼬리 인용 실측 1건이 일치하되 계측 한계 있음(`docs/codex-mechanisms.md`) | learn.chatgpt.com/docs/build-skills |
 | Codex AGENTS.md 인제스트 | **32 KiB**(`project_doc_max_bytes`) | Codex agents-md 문서 |
 | Claude Code 압축 후 재부착 | 스킬당 앞 **5,000토큰**, 전체 **25,000토큰** 예산 | Claude Code skills 레퍼런스 |
 
@@ -39,7 +39,8 @@ Agent Skills는 벤더 중립 표준(agentskills.io)이고 Codex도 같은 `SKIL
 | 호출 문법 | `/name` | `$name`(CLI·IDE), `@name`(ChatGPT 데스크톱) | 본문 산문에 호출 문법을 쓰지 않는다 |
 | 스킬 디렉터리 | 플러그인 `skills/`, 프로젝트 `.claude/skills/` | `.agents/skills`, `$HOME/.agents/skills`, `/etc/codex/skills` | 양쪽에 물리적으로 존재해야 한다 |
 | 웹 조사 | `WebSearch` + `WebFetch`(전체 페이지) | 내장 검색 기본 `cached` 모드, **스니펫만**. 전체 페이지 fetch 대응물 없음(MCP로만). 샌드박스 네트워크는 `workspace-write`에서도 기본 off | 조사 능력을 전제하지 않는다 |
-| 서브에이전트 | Task/Agent 도구, 모델 자율 디스패치 | TOML 정의(`~/.codex/agents/`), 내장 `explorer`, **위임 기본 수동**(자율은 상위 티어만) | "스킬이 서브에이전트를 띄운다"를 계약으로 못 박지 않는다 |
+| 서브에이전트 | Task/Agent 도구, 모델 자율 디스패치. 정의는 `agents/*.md`(frontmatter + 본문) | TOML 정의(`~/.codex/agents/`, `developer_instructions`), 내장 `default`·`worker`·`explorer`, **위임 기본 수동**. 플러그인이 에이전트를 배포하지 못함 | "스킬이 서브에이전트를 띄운다"를 계약으로 못 박지 않는다. 에이전트 정의는 공용 불가 |
+| 스킬 차단 | `permissions.deny` `Skill(name)`, `PreToolUse` matcher `Skill`, 직접 `/name`은 `UserPromptExpansion` | 스킬 전용 훅 이벤트 없음(공식 계약). `$name` 직접 입력은 `UserPromptSubmit` prompt 차단으로 잡을 수 있고 자동 매칭은 관측 계약 없음(둘 다 실행 미검증). 문서화된 비활성은 `[[skills.config]] enabled=false`(파일 단위)·`allow_implicit_invocation: false` | 자동 매칭까지 훅으로 막는 강제는 Claude 한정 |
 | 도구 이름 | `Read`·`Grep`·`Bash` 등 | 다른 표면 | 본문에 도구 이름을 쓰지 않는다 |
 | 마크다운 본문 | 제약 없음 | 제약 없음 | 유일하게 비호환이 확인되지 않은 축 |
 

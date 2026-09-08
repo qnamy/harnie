@@ -1,15 +1,5 @@
 {
   "name": "harnie",
-  "version": "0.14.18",
-  "description": "개발자의 설계·리뷰·개발·문서 작업을 돕는 AI 서브에이전트 하네스 + 스킬 허브. 크로스-모델 빌드/리뷰 루프, PR 리뷰·댓글 해결·배포 승인 등 스킬이 계속 추가된다. 한 세션, 구독 auth.",
-  "commands": [
-    "./commands/dev.md",
-    "./commands/dev-resume.md"
-  ],
-  "agents": [
-    "./agents/harnie-scout.md",
-    "./agents/harnie-designer.md",
-    "./agents/harnie-builder.md",
-    "./agents/harnie-reviewer.md"
-  ]
+  "version": "0.15.0",
+  "description": "개발 체인 스킬 허브 — 요구사항 → 설계 → 설계리뷰 → 구현 → 구현리뷰 → 검증 6단계 스킬(Claude Code · Codex 공용, 크로스모델 리뷰는 orca 대화형 세션)과 PR 리뷰·댓글 해결·배포 승인·문서 발행 스킬. 구독 auth."
 }

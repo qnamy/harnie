@@ -13,9 +13,10 @@ Defect hunting, code-against-design consistency, and correctness judgment alread
 
 ## Input
 
-1. **The criteria.** The requirements document's completion criteria. If there is no requirements document, derive the criteria from the user's original request. **A derived criterion may never widen the user's original request** — 6 stated requirements do not become 16. Record the derived list, and where it came from, at the top of the result file before running anything.
-2. **The commands.** The design's verification section. If there is no design document, take the commands that the repository actually has; confirm each one exists rather than assuming it.
-3. **The baseline.** The commit whose tree is the change's starting point. You do not compute it — take it from implementation review, or have the user name it. Without a baseline neither the failure-first gate nor the test-file audit runs, and no criterion whose evidence is a test run can be 검증됨.
+1. **The criteria.** From the requirements document: each functional requirement, each quality constraint, and each completion criterion — a document with no separate completion section still yields its requirements as criteria. If there is no requirements document, derive the criteria from the user's original request. **A derived criterion may never widen the user's original request** — 6 stated requirements do not become 16. Record the list, and where each item came from, at the top of the result file before running anything. An empty list is a failed input, never a 통과.
+2. **The commands.** The design's verification section, and the verification command the implementation report names with what it observed. Without a design, the report's command is the primary one; add a repository check only for a criterion no named command reaches, confirming the check exists rather than assuming it.
+3. **The baseline.** The commit whose tree is the change's starting point. You do not compute it — take it from the implementation report, or from the implementation review's scope line, or have the user name it. Without a baseline neither the failure-first gate nor the test-file audit runs, and no criterion whose evidence is a test run can be 검증됨.
+4. **The implementation review verdict.** Under 조건부 착수, only the released part is verified: criteria the blocked part covers stay 미검증, marked blocked, and its commands are not run.
 
 Write the criteria list before you run anything. Criteria assembled after seeing results are fitted to the results.
 
@@ -54,11 +55,11 @@ The overall verdict follows mechanically from the counts, in exactly these words
 
 ## Output
 
-Write one Korean file, `acceptance-verification.md`, beside the design document. When there is no design document, the user names the path. One file, no rounds, no revisions of it.
+Write one Korean file, `_chain/acceptance-verification.md` — wherever the design itself lives — unless the user names another path. One file, no rounds, no revisions of it.
 
 The file carries four things, in this order.
 
-1. **기준** — the criteria list and where each came from (requirements document, or derived from the request), plus the baseline commit.
+1. **기준** — the criteria list and where each came from (requirements document, or derived from the request), the baseline commit, and the implementation review verdict worked under.
 2. **판정** — the overall verdict on its own line, then a table of criterion, 판정, and the run that decided it.
 3. **실행 기록** — for each command: the command, its exit code, and the output lines you are relying on. A 실패 quotes the failing output verbatim.
 4. **사람 확인** — the checklist of what a person must confirm, and what confirming it would decide.

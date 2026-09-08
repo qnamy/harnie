@@ -65,4 +65,4 @@ Do **not vote** in merged context; it has no effect.
 
 For each thread, return `resolve` | `keep open (+ reason)` | `no action`, plus a revote recommendation when the context is active. The caller uses this judgment to perform the actual resolution, follow-up reply, vote, and platform calls.
 
-> This is distinct from `pr-review`: `pr-review` evaluates new changes and identifies problems; `comment-resolve` verifies whether a response has resolved a reported problem. It is also distinct from in-loop development review (REJECT bias, `instructions/`).
+> This is distinct from `pr-review`: `pr-review` evaluates new changes and identifies problems; `comment-resolve` verifies whether a response has resolved a reported problem. It is also distinct from implementation review against a design (the `implementation-review` skill).

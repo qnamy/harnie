@@ -35,14 +35,14 @@ Do not fill every section evenly. Concentrate detail in the three to five areas 
 
 ## Mapping Notes (Upstream Methodology → This Skeleton)
 
-Fold the outputs produced under upstream `instructions/design-authoring-arch.md` (lightweight: Executive Summary / goals and scope / requirements / alternatives comparison / recommended architecture / key scenarios / risks) and `instructions/design-authoring-detail.md` (lightweight: design summary / requirements traceability / key processing logic / contracts / data and state / work breakdown / open decisions) into the seven sections above:
+Fold the output of the upstream `software-design` skill (대상·범위·비범위 / 결정 / 변경 대상 / 데이터·상태 / 실패 동작 / 검증 / 가정·미결정 / 대안 비교) into the seven sections above, by concept:
 
-- Executive Summary / design summary → top summary panel + §1
-- Requirements (FR/NFR) / traceability table → §2
-- Recommended architecture · component internals · key scenarios → §3
-- Architecture alternatives comparison · ADR → §4
-- Data architecture · API/event contracts · DB details → §5
-- Failure handling · error conventions · constraints → §6
-- Risks and open decisions → §7
+- 1절 대상·범위·비범위 → top summary panel + §1
+- The requirements file the design cites (기능 요구·품질 제약) → §2. The design does not restate requirements, so take them from that file; without one, from the request the design names
+- 3절 변경 대상 (files, interfaces, what must not be touched) → §3
+- 2절 결정 + 8절 대안 비교 → §4
+- 4절 데이터·상태 → §5
+- 5절 실패 동작 + 6절 검증 → §6. Carry the verification as its own table — command · pass condition · what must stay intact — so the reader can see how completion is observed
+- 7절 가정·미결정 → §7 (`[가정]` as assumptions, `[미결정]` as `undecided` with decider and blocked scope)
 
 Handle upstream **Mermaid diagrams (C4 Container, sequence, and state)** per the diagram-rendering rules in `SKILL.md`: render natively when a Mermaid macro **and** a compatible publication adapter are available (Mode A), otherwise degrade to tables/ASCII plus preserved source in an Expand (Mode B).

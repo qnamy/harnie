@@ -19,9 +19,9 @@ Three rules hold over everything below.
    - *A requirements file path.* Read the whole file. It is the source of record. An open `[미결정]` there is settled here only when it is a technical choice the requirements left to design; a product or intent decision is settled only by the requester, or by whoever that item names, and until then it is carried into this design's own `[미결정]` list. Record which of the two happened. Never resolve one silently.
    - *A direct request.* Restate it in one sentence. If you cannot, ask for that one missing thing and stop. Otherwise proceed, recording each gap you filled as `[가정]`. Do not run a requirements interrogation, and do not send the request back for one.
 2. **Ground the decisions.** Search narrowly, then read only the range you need. Cover what the decisions actually rest on: the modules and conventions already in place, dependency versions, migration head, how tests are run and whether they currently pass, and the concrete runtime or driver behavior a decision assumes. Write each fact with the path it came from.
-3. **Look outward only when a decision turns on it.** An external reference is warranted when the choice depends on a fact outside this repository: a library's actual API, a version constraint, a protocol rule. Cite what you used. **If this session has no way to look it up, do not guess** — mark the item `[미결정]` and say what it blocks. Never go reading general best practice; that is token spend with no decision attached.
+3. **Look outward only when a decision turns on it.** An external reference is warranted when the choice depends on a fact outside this repository: a library's actual API, a version constraint, a protocol rule. Cite what you used. **If this session has no way to look it up, do not guess** — mark the item `[미결정]` and say what it blocks. A behavior of an external system that nobody has observed gets no handling logic: mark it `[미결정]` naming the observation that would settle it. Never go reading general best practice; that is token spend with no decision attached.
 4. **Decide.** Where a choice is not obvious and is expensive to reverse, weigh at least two workable options before picking one. Where the choice is obvious, one line is the whole comparison. Put the depth into the three to five decisions with the highest change cost and keep the rest short.
-5. **Write the document** to the path the requester named (default `design.md`), in Korean.
+5. **Write the document** in Korean to `_chain/design.md` in this worktree unless the requester named another path. `_chain/` holds one chain's artifacts — requirements, design, review rounds, verification — and is never committed or ignored. When it already holds another chain's files, stop and ask; the user clears it, and this skill deletes nothing.
 6. **Self-check, then report** the path.
 
 ## Output document
@@ -34,7 +34,7 @@ Korean. A few lines per section for small work; a section that removes no ambigu
 | 2 | 결정 | Each decision as what will be done, not why. The comparison behind it lives in 8 |
 | 3 | 변경 대상 | The files to touch by path, the interfaces or signatures involved, and what must not be touched |
 | 4 | 데이터 · 상태 | Only when persistence is involved: ownership, transaction boundary, idempotency, migration |
-| 5 | 실패 동작 | Every failure mode that can occur here among errors, duplicates, timeouts, retries, partial success, concurrent execution, and none that cannot |
+| 5 | 실패 동작 | Every failure mode that can occur here among errors, duplicates, timeouts, retries, partial success, concurrent execution, and none that cannot. The requirements' stated tolerance is the ceiling: a failure the requester accepts — manual recovery, a bounded outage — gets no handling beyond what they asked for |
 | 6 | 검증 | The command to run and the condition that counts as passing, reaching the requested outcome and whatever has to remain intact |
 | 7 | 가정 · 미결정 | `[가정]` with what would make it wrong; `[미결정]` with its reason, who can settle it, and what it blocks. Include every item carried over from the requirements |
 | 8 | 대안 비교 | The options weighed and why the chosen one won |

@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review submitted code changes in a PR at a senior-engineer standard, classify findings as `issue:`/`discuss:`/`nit:`, and recommend approval status. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Use for human PR reviews and automated PR-review routines. In-loop development review is separate and lives in instructions/code-review.md.
+description: Review submitted code changes in a PR at a senior-engineer standard, classify findings as `issue:`/`discuss:`/`nit:`, and recommend approval status. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Use for human PR reviews and automated PR-review routines. Reviewing an implementation against its design document is separate and belongs to the implementation-review skill.
 ---
 
 # PR Review Criteria (Judgment Core)
@@ -24,7 +24,7 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 - **Missing exception/error handling:** swallowed exceptions, unrecoverable states after failure.
 - **Security:** missing authentication/authorization, injection, secret exposure, untrusted input.
 - **Breaking changes:** API signatures, compatibility-breaking configuration, risky DB schema changes (migrations, indexes, NULL constraints).
-- **Untested critical logic:** new or changed business or critical logic with no test at the sufficiency bar of `instructions/builder-contract.md` §Test scope.
+- **Untested critical logic:** new or changed business or critical logic with no test at the sufficiency bar of the global guidelines' §Coding Guidelines (Test scope).
 
 ### Priority 2 — Flag as Tradeoffs (Design and Future Cost)
 
@@ -36,7 +36,7 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 
 ### Do Not Flag
 
-Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**. Code comment content is judged separately (§Comment Classification). Test breadth beyond the sufficiency bar of `instructions/builder-contract.md` §Test scope — coverage-number demands, tests for trivial code or framework wiring.
+Formatting, whitespace, or import order a linter catches; minor naming or style preferences **unless they seriously harm readability**. Code comment content is judged separately (§Comment Classification). Test breadth beyond the sufficiency bar of the global guidelines' §Coding Guidelines (Test scope) — coverage-number demands, tests for trivial code or framework wiring.
 
 ## How to Write Findings
 
@@ -65,7 +65,7 @@ The three prefixes communicate **the expected author response and whether the fi
 
 `issue:` and `discuss:` block merge until resolved. `nit:` is non-blocking; response and implementation are both optional. A `discuss:` finding can be resolved **without a code change** once the concern is addressed or the tradeoff reaches a conclusion. Leave comments only for problems actually found.
 
-**Code comment content is always `nit:`** — a code comment recording the change (dates, prior values, commented-out old code) or restating the code it sits on. Never raise it as `issue:` or `discuss:`. The criteria are canonical in `instructions/builder-contract.md` §Comments and are not restated here.
+**Code comment content is always `nit:`** — a code comment recording the change (dates, prior values, commented-out old code) or restating the code it sits on. Never raise it as `issue:` or `discuss:`. The criteria are canonical in the global guidelines' §Coding Guidelines (Comments carry the reason) and are not restated here.
 
 Examples:
 
@@ -80,4 +80,4 @@ nit: 조건식에 이름을 붙이면 의도가 조금 더 잘 드러날 것 같
 - **Input:** the change to review (diff or changed-file set) + optional caller-supplied criteria such as team rules.
 - **Output:** findings classified `issue:`/`discuss:`/`nit:` (location, what is wrong, why it matters, remediation direction) + an approval recommendation: open `issue:`/`discuss:` → hold; only `nit:` → conditional; none → approval possible. **Do not vote, mention users, choose comment placement, add disclaimers, or call platform APIs** — the caller receives the judgment and performs execution.
 
-> Single source of judgment for **PR review** (external changes, merge perspective). **In-loop development review** (REJECT bias, cross-model build loop) is separate — `instructions/code-review.md` · `instructions/loop.md`. Native `/code-review` is a built-in for working-tree diffs, unrelated to this skill.
+> Single source of judgment for **PR review** (external changes, merge perspective). **Implementation review against a design document** is separate — the `implementation-review` skill. Native `/code-review` is a built-in for working-tree diffs, unrelated to this skill.

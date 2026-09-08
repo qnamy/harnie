@@ -29,7 +29,7 @@ Mark each axis **명확 / 부분 / 누락**.
 | 데이터·상태 소유 | Which store is already the system of record, what persists, what is derived. Choosing a new store is design, not this |
 | 실패·예외 동작 | What happens on error, timeout, duplicate, and concurrent execution |
 | 외부 연동 | Which systems are touched, under whose contract |
-| 품질·제약 | The numbers that change the design: volume, latency, retention, limits |
+| 품질·제약 | The numbers that change the design: volume, latency, retention, limits. And the failure tolerance the requester accepts — manual recovery allowed, a bounded outage — which later stages treat as the ceiling for failure handling |
 | 완료 판정 | How anyone observes that this is done |
 | 용어 | Terms carrying more than one meaning in this codebase or team |
 
@@ -54,7 +54,7 @@ Log resolved questions as `Q: … → A: …` at the end, and **replace** the te
 
 ## 4. Output document
 
-Korean, at the path the user names (default `requirements.md`). A few lines per section for small work; never pad a section to fill it. The eight axes do not map one-to-one onto these sections — what a scan resolved goes into the requirement sentence describing that behavior.
+Korean, at `_chain/requirements.md` in this worktree unless the user names another path. `_chain/` holds one chain's artifacts — requirements, design, review rounds, verification — and is never committed or ignored. When it already holds another chain's files, stop and ask; the user clears it, and this skill deletes nothing. A few lines per section for small work; never pad a section to fill it. The eight axes do not map one-to-one onto these sections — what a scan resolved goes into the requirement sentence describing that behavior.
 
 1. **목표와 문제** — what is being solved and why now.
 2. **범위 · 비범위** — including at least one line of what will not be built. 비범위 is a decision to exclude; anything still undecided belongs in 5 instead.

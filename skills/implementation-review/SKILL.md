@@ -1,196 +1,129 @@
 ---
 name: implementation-review
-description: Reviews the code an implementation produced against the design document it was supposed to execute, and drives rounds of review and revision — three on its own, and more only when the user releases them. Finds decisions the design left open that the code answered anyway, changes outside the files the design named, decisions with no code behind them, a design error patched around locally instead of routed back, mechanisms nothing decided, missing failure behavior, and correctness defects in the change and its blast radius. Use once code exists for a design and before the verification stage starts. Do NOT use on a change that has no design document, to review a design, to write code beyond the findings the coordinator accepted, for visual or UI review, or for PR review at merge time.
+description: Reviews the code an implementation produced against its contract — the design document when one exists, otherwise the requester's request — and drives rounds of review and revision, two on its own and more only when the user releases them. Finds open items the code answered anyway, files changed outside the contract, decisions with no code behind them, contract errors patched around locally, mechanisms nothing needed, missing failure behavior, and correctness defects in the change and its blast radius. Use once code exists and before the verification stage starts. Do NOT use to review a design, to write code beyond the findings the coordinator accepted, for visual or UI review, or for PR review at merge time.
 ---
 
 # Implementation Review
 
 **Two roles share this file. Decide which you are before reading on, and read "Both roles, never" at the end either way.**
 
-- Asked to review a change against a design → you are the **reviewer**. Read §Reviewer. Change no tracked file — the only file you write is your own result — and start no session, dispatch no one. Untracked output a command you were cleared to run leaves behind (a build directory, a cache) is not a write in this sense.
-- Asked to run or continue an implementation review → you are the **coordinator**. Read §Coordinator, and read §Reviewer only to write the reviewer's instructions.
-- **A session that wrote the code never reviews it alone.** If you implemented this change and were asked to review it, you are the coordinator: stand up a reviewer that does not carry your reasoning.
+- Asked to review a change against its contract → you are the **reviewer**. Read §Reviewer. Change no tracked file; the only file you write is your own result.
+- Asked to run or continue an implementation review → you are the **coordinator**. Read §Coordinator, and §Reviewer only to write the reviewer's request.
+- A session that wrote the code never reviews it alone. If you implemented this change and were asked to review it, you are the coordinator.
 
-The failure this exists to prevent: code that runs, passes its command, and quietly answers a question the design left open or abandons one the design decided.
+The failure this exists to prevent: code that runs, passes its command, and quietly answers a question the contract left open or abandons one the contract decided.
 
 Three rules hold over everything below.
 
-- **Every finding carries a proof, and a finding whose proof you could not construct is deleted.** What counts as proof depends on the kind: a conformance finding quotes the design section and names the code location; a correctness finding names the input or state that produces the wrong outcome. A behavior claimed from a name rather than from source is not a finding.
-- **The design's decisions are settled, and this review does not reopen them.** A decision in section 2, implemented as decided, is not a finding because you would have decided otherwise. The stage that judged those decisions already ran.
-- **A design defect is not fixed here.** It goes back to the design. Code that absorbs a design error is the drift the implementation stage was built to refuse, and a review that patches one re-creates it.
+- **Every finding carries a proof, and a finding whose proof you could not construct is deleted.** A conformance finding quotes the contract and names the code location. A correctness finding names the input or state that produces the wrong outcome. A behavior claimed from a name rather than from source is not a finding.
+- **The contract's decisions are settled, and this review does not reopen them.** A decision implemented as decided is not a finding because you would have decided otherwise.
+- **A contract defect is not fixed here.** It goes back to the contract. Code that absorbs a contract error is the drift the implementation stage refuses, and a review that patches one re-creates it.
 
-**Three different things sit near the word verification, and this file keeps them apart.** The **verification stage** is the chain stage after this review. The **section 6 command** is the design's own runnable check, and it is always named with its section number. The **cross-check pass** in §Coordinator judges candidate findings and never takes that word. Use these three names as written.
+**The requirements are the baseline.** What is missing and what is too much are judged against the requirements or the requester's words — never against scope the code or a previous round created for itself.
+
+Two names are kept apart here. The **verification stage** is the chain stage after this review. The **verification command** is the design's section 6 command, or, without a design, the command the implementation report names.
 
 ## Reviewer
 
-**Input.** All five of these are required, and the result names what it received.
+**Input.** All five are required, the result names what it received, and missing any of them the round fails: name what is missing, ask, and state no verdict.
 
-1. **The design file path.** Every rule below points at a section of that document, and a review that reconstructed the design from the code is judging the code against itself.
-2. **The design review verdict the implementation actually worked under**, and which `review-N.md` it came from. `조건부 착수` means part of the design was never releasable to the implementer, and that part is outside this review.
-3. **The scope limit the implementation session was given**, or a statement that it had none. Under a limit, the other sections 3 files belong to sessions running in parallel.
-4. **The change under review**, as the coordinator pinned it (see below).
-5. **The implementation stage's report** for this change, which is where the section 6 command and the result it produced come from.
+1. **The contract and the requirements.** The design file path, sections 1 to 7, together with the requirements file path or the requester's request verbatim; or, with no design, the request or the requirements alone. Scope is judged against the requirements, and a design does not stand in for them.
+2. **The design review verdict** the implementation worked under and its `design-review-N.md` — when a design exists; a statement that the design review was skipped counts as this input. Under 조건부 착수 the blocked part is outside this review.
+3. **The scope limit** the implementation was given, or a statement that it had none.
+4. **The baseline commit**, as the implementation report recorded it.
+5. **The implementation report**: the verification command and its real result, the files changed, and, without a design, the readings asked about and their answers.
 
-From round 2 on, add the previous round's findings and the coordinator's disposition record for them (`response-N.md`). Also take the path to write the result to.
+From round 2 on, add the previous result and the coordinator's `implementation-response-N.md`. Also take the path to write the result to. Do not infer a scope from the code or from the contract alone: a reviewer that guesses at it manufactures findings against work that was never asked for.
 
-**Missing any of the five, the round fails: name what is missing, ask for it, and state no verdict.** Do not infer a scope from the code or from the design alone. What items 2 and 3 authorize is the only ground on which a missing decision or an unauthorized file can be judged, and a reviewer that guesses at it manufactures findings against work that was never asked for.
+**Scope is two axes crossed.** Establish both before looking for anything.
 
-**Review scope is two axes crossed.** Establish both before looking for anything.
-
-- *The change axis.* What this implementation produced, and nothing that predates it. The axis is a **baseline commit with the tree confirmed clean at it**: `git diff <baseline>` plus what `git status --porcelain` reports as untracked. A tree that was dirty when the implementation started does not get a second form of axis — the coordinator commits that pre-existing work first, which makes the baseline clean and every later line the implementation's (see §Coordinator). **Given no such baseline the round fails**, with one escape: the coordinator may instead name the paths the implementation touched **and** confirm that none of them carried pre-existing uncommitted work, in which case the axis is those paths and the result says so. A path that carried both is outside the axis until its pre-existing half is committed; without that, its old hunks and the implementation's cannot be told apart, and this review would attribute either one to the other.
-- *The design axis.* Section 3's file list, narrowed to what the scope limit authorizes when there was one, plus what section 3 says must not be touched.
-- *The crossing.* A changed file that neither axis authorizes is a finding, and so is a section 3 file that section 2's decisions needed and the change never reached. Both directions, in the same round. **A decision or a file the design review verdict or the scope limit kept out of this implementation's reach is not missing** — it was never due here, and reporting it is the false finding this crossing is most likely to produce.
-- Unchanged lines of a function the change touched are in scope. When a signature or a return shape changed, follow the call sites.
-
-**The size gate.** Past roughly 400 changed lines, review the change in groups drawn from section 3 rather than in one pass, and name the grouping in the result. Finding quality falls sharply with diff size; one pass over a large change returns the same verdict with less behind it.
+- *The change axis.* `git diff <baseline>` plus untracked files, `_chain/` excepted — the chain's own artifacts live there. Nothing that predates the baseline.
+- *The contract axis.* Section 3's files, narrowed by the scope limit, plus what section 3 says must not be touched. Without a design, the files the implementation report names.
+- *The crossing.* A changed file neither axis authorizes is a finding, and so is a contract file that a decision needed and the change never reached. Both directions, in the same round. What the design review verdict or the scope limit kept out of this implementation's reach is not missing.
+- Unchanged lines of a function the change touched are in scope. When a signature or return shape changed, follow the call sites.
+- Past roughly 400 changed lines, review in groups drawn from the contract's file list and name the grouping in the result.
 
 **Procedure.**
 
-1. Read the design's sections 1 to 7, then restate in one sentence what this change was supposed to do. If you cannot, that is the first finding.
-2. Establish both scope axes and cross them.
-3. Sweep the conformance list, then the correctness angles, then the verification evidence gate.
-4. For each candidate, construct its proof. Drop what you cannot.
-5. Run the self-check and delete what fails it.
-6. Deliver the result, in Korean. Write it to the path you were given; when you cannot write files, return it as your answer and say so.
+1. Read the contract and restate in one sentence what this change was supposed to do. If you cannot, that is the first finding.
+2. Establish both axes and cross them.
+3. Sweep conformance, then correctness, then the verification evidence.
+4. Construct each candidate's proof; drop what you cannot.
+5. Self-check, delete what fails it, and deliver in Korean to the result path. When you cannot write files, return the result as your answer and say so.
 
-**MUST find — conformance.** Each of these is `issue:` when it holds.
+**MUST find — conformance.** Each is `issue:` when it holds.
 
-- **A decision with no code** — a section 2 decision this implementation was cleared to make and the change does not implement. Name the decision.
-- **A boundary crossed** — a file changed that section 3, or the scope limit, does not authorize; or a change to something section 3 names as untouchable.
-- **An open item the code settled** — a section 7 `[미결정]` the code answers. The implementation stage was to stop on it, so the answer in the code is one nobody agreed to.
-- **A design error absorbed** — the code works but diverges from what section 2 decided, or it works around a section 3 fact that turned out to be false, instead of routing that back. Name the design section and the code that departs from it.
-- **A mechanism nothing decided** — an abstraction, interface, config surface, cache, retry layer, extra round trip, or defensive branch away from a trust boundary that section 2 did not decide. Local expression the design left open (a variable name, the shape of a private helper) is not this.
-- **A failure mode left open** — a failure section 5 names, on a path this change owns, with nothing handling it.
+- **A decision with no code** — a decision this implementation was cleared to make that the change does not implement. Name it.
+- **A boundary crossed** — a file changed that the contract axis does not authorize, or a change to something named untouchable.
+- **An open item the code settled** — a section 7 `[미결정]` the code answers; or, without a design, a reading of the request that changes the software, decided in code with no requester's answer in the report.
+- **A contract error absorbed** — the code diverges from a decision, or works around a false fact, instead of routing back. Name the contract location and the code that departs from it.
+- **A mechanism nothing needed** — an abstraction, interface, config surface, cache, retry layer, extra round trip, or defensive branch away from a trust boundary that no decision and no requirement needs. Local expression — a name, a private helper's shape — is not this.
+- **A failure mode left open** — a failure section 5 names, or that the request's words imply, on a path this change owns, with nothing handling it. **The requirements' stated tolerance is the ceiling**: a failure the requester accepts is not missing handling.
 
-**MUST find — correctness.** Three angles, each over the change axis.
+**MUST find — correctness.** Three angles over the change axis.
 
-- **Removed behavior.** For every line the change deletes or replaces, ask whether it carried an observable behavior or an invariant. When it did, find where the new code re-establishes it, and the finding exists only when you can show it does not: a dropped guard, a narrowed validation, a removed error path, a deleted test that covered a real case. A deleted line that carried none — a comment, dead code, a rename's other half — is not a finding, and being unable to name an invariant for it is the expected outcome rather than evidence of one.
-- **Blast radius.** For every changed signature, return shape, raised error, or ordering dependency, check each call site for what the change breaks: a new precondition, a value the caller does not handle, a timing assumption.
-- **The hunks themselves.** Read every hunk and the function around it. For each line, name the input, state, timing, or platform that makes it wrong: inverted or wrong condition, off-by-one, null dereference on a reachable path, a falsy-zero check, a missing await, a wrong-variable copy, an error swallowed in a catch that should propagate.
+- **Removed behavior.** For every deleted or replaced line, ask whether it carried an observable behavior or an invariant. The finding exists only when you can show the new code does not re-establish it: a dropped guard, a narrowed validation, a removed error path, a deleted test over a real case. A line that carried none — a comment, dead code, a rename's other half — is not a finding.
+- **Blast radius.** For every changed signature, return shape, raised error, or ordering dependency, check each call site for what breaks: a new precondition, an unhandled value, a timing assumption.
+- **The hunks themselves.** Read every hunk and the function around it. For each line, name the input, state, timing, or platform that makes it wrong: an inverted condition, an off-by-one, a null dereference on a reachable path, a falsy-zero check, a missing await, a wrong-variable copy, an error swallowed where it should propagate.
 
-**Verification evidence.** Section 6 is the change's only independent signal, so judge it directly.
+**Verification evidence.** The report's command and its real result are the evidence; comparing them to the pass condition is your work. `issue:` belongs to a report that omits the command, reports a result that fails the condition, contradicts itself, or names a command that passes without reaching the change. A failure attributed to the baseline without that same command run at the baseline is `issue:`; an attribution reported as unknown is not. A new test that structurally cannot fail is unverified scope. Run the command yourself only when this environment permits it and it changes no tracked file; otherwise judge the report and say the check was downgraded. The test bar runs both ways: business logic and logic whose failure is expensive — money, data integrity, security, irreversible side effects — must have a test, and coverage numbers, tests for trivial code, and tests for framework wiring are past the bar.
 
-- **What counts as evidence.** The implementation stage reports the section 6 command and the result it actually produced, so that report is the evidence, and comparing it against section 6's pass condition is your work rather than the report's. It is sufficient when it names the command and that real result. **Neither raw output nor a restatement of the condition is required, and the absence of either is never a finding.** `issue:` belongs to a report that omits the command, reports a result that does not meet section 6's condition, or contradicts itself.
-- Does the command reach what was built? One that passes without exercising the change is `issue:` no matter how green it is.
-- Is a failure attributed to the baseline backed by that same command run against the tree as it stood before the change? An unbacked attribution is `issue:`; an attribution reported as unknown is not.
-- Can a new test fail when the target behavior breaks? One that structurally cannot fail is unverified scope, not coverage.
-- **Run the command yourself only when both hold**: this environment permits it, and the command changes **no tracked file at all** (untracked build output is fine). A command that rewrites a tracked generated file, a snapshot, or a lockfile would move the change you are reviewing, so it is never run here. When you cannot establish that it changes no tracked file, treat it as one that does. Then compare its output to section 6's condition rather than to the report. Otherwise judge the report against the bar above, and say in the result that this check was downgraded and why. A downgraded check is not a finding.
-- The test bar, both ways: business logic and logic whose failure is expensive (money, data integrity, security, irreversible side effects) must have a test, and new or changed logic of that kind with none is `issue:`. Coverage numbers, tests for trivial code, and tests for framework wiring are past the bar, and demanding them is over-flagging.
+**Never raise.** A decision implemented as decided that you would have decided differently. A defense against a failure the contract excludes or the requirements accept. A defect that predates the change and that the change neither introduced nor worsened — one 참고 line outside the findings and the verdict. Formatting, whitespace, import order, naming, style, comment content. Test breadth past the bar. A finding already rejected with a reason that still holds. The contract document's wording. Anything the requirements do not put in scope. From round 2 on, a new `nit:`.
 
-**Never raise.** These look like findings and are not. Each is here because raising it costs a round and settles nothing.
-
-- A section 2 decision, implemented as decided, that you would have decided differently. The design review closed that question.
-- A defense against a failure section 5 judged cannot occur here, or against anything section 1 puts out of scope.
-- A defect that existed before this change and that this change neither introduced nor worsened. Put it in the result as one 참고 line, outside the findings and outside the verdict. When the change worsened it, it is an ordinary finding.
-- Formatting, whitespace, import order, naming, or style, unless readability is materially broken.
-- Code comment content.
-- Test breadth past the bar above.
-- A finding the design review already rejected with a reason, or one the coordinator rejected with a reason that still holds.
-- Wording, section order, or length of the design document. That review already ran.
-- From round 2 on, a new `nit:`.
-
-**Overengineering fence.** Before raising anything that can only be satisfied by **adding a mechanism**, answer two questions: is the failure it prevents inside the design's stated scope, and is it not already covered? Raise it as `issue:` **only with a concrete mistake scenario**; otherwise it is `nit:` or nothing. Never stack mechanisms across rounds, and withdraw an earlier demand a later revision made unnecessary.
+**The fence.** A finding that can only be satisfied by **adding a mechanism** names the requirement, or the failure inside the requirements' scope, that needs it, with a concrete mistake scenario; otherwise it is `nit:` or nothing. Withdraw an earlier demand a later revision made unnecessary.
 
 **Finding form.** One line each, in Korean, opening with a stable id and a severity.
 
 | Prefix | Meaning | Blocks |
 |---|---|---|
-| `issue:` | A defect the change must fix, or a design defect to route back | 검증 착수 차단 |
-| `discuss:` | A decision or a check this review cannot settle — product intent only the requester can fix, or a claim only someone with access to its source can confirm. Names its own decider | 그 항목이 닿는 범위만 |
-| `nit:` | Optional suggestion | 아니오 |
+| `issue:` | A defect the change must fix, or a contract defect to route back | 검증 착수 |
+| `discuss:` | A decision or check this review cannot settle. Names its decider | That item's reach only |
+| `nit:` | Optional suggestion | No |
 
-Ids run `C-01`, `C-02` in the order findings are first raised, and are never renumbered or reused; a later round reports the same defect under the same id. Each finding carries four things after the id: **where** — `file:line`, or the design section for a conformance finding, with both when the finding pairs them — **what is wrong**, **the failure it produces**, and **the condition a fix must satisfy**, not the fix itself. Say whether the fix belongs in the code or in the design.
+Ids run `C-01`, `C-02` in the order first raised, never renumbered or reused. Severity is fixed for an id's life; if it changes, close the id and open a new one. After the id: **where** — `file:line`, the contract location, or both when the finding pairs them; **what is wrong**; **the failure it produces**; **the condition a fix must satisfy**, not the fix, and whether it belongs in the code or in the contract; and, for any finding whose fix adds something, **the requirement it rests on**.
 
-**Self-check, before delivering.**
+**Self-check.** A finding with no proof is deleted, and so is an additive finding with no requirement behind it. A suspicion of your own you could not confirm is a question, or `discuss:` when a decision rests on it; a claim the code or the report makes without support stays a finding. Both crossing directions were checked, and the scope line says so.
 
-- A finding with no proof is deleted, whatever its severity felt like.
-- A suspicion you could not confirm is not a finding. Put it in the result as a question, unless a decision rests on it, in which case it is `discuss:` with the decider who can confirm it. This does not soften the rules above it: a claim the *code* or the *report* makes without support is a finding, and only your own unconfirmed counter-claim becomes a question.
-- Severity is fixed for the life of an id. If your assessment changed, close that id and open a new one.
-- Did both crossing directions get checked, or only the changed files? Write the answer into the scope line either way.
-
-**Result.** Korean, in this order: the scope line, the verdict line, findings ordered by severity, questions, any 참고 line.
-
-The **scope line** is one line naming what this round actually covered, so a skipped check is visible instead of silent: the baseline the change axis came from, or the named paths and the confirmation behind them, the design axis it was crossed with (the section 3 files, narrowed by the scope limit), the design review verdict this implementation worked under, whether both crossing directions were checked, and whether the section 6 check ran or was downgraded. A verdict with no scope line behind it is not a review result.
-
-The **verdict** is one of these three and nothing else. Each names the transition it allows, and the only transition at stake is whether the chain's verification stage may start. Judge by whether the change does what the design decided and leaves the code no worse; perfection is not the bar.
+**Result.** Korean, in this order: the scope line, the verdict line, findings by severity, questions, any 참고 line. The **scope line** names the baseline, the contract axis, the design review verdict worked under (or that there was no design), whether both crossing directions were checked, and whether the verification command ran or was downgraded. A verdict with no scope line is not a result. From round 2 on, report every earlier finding as `open` or `resolved`, resolved only where verified in the current code — omission is not resolution. A finding the coordinator rejected with a reason closes if the reason holds; otherwise it stays open with its failure restated. Re-review covers the open findings and the revision delta.
 
 | Verdict | Condition | Allows |
 |---|---|---|
-| 검증 착수 가능 | no open `issue:`, no open `discuss:` | the verification stage starts on the whole change |
-| 조건부 착수 | no open `issue:`, and the open `discuss:` items leave a part untouched — name what is releasable and what is blocked | the verification stage starts on the released part only |
-| 착수 불가 | one or more open `issue:`, or open `discuss:` items that block the whole path | nothing; the change returns to the coordinator |
-
-From round 2 on, report every previously open finding as `open` or `resolved`, resolved only where you verified it in the current code. **Omission is not resolution.** A finding the coordinator rejected with a reason is settled the same way: close it `resolved` if the reason holds, or keep it `open` and restate the concrete failure it produces. Re-review covers the open findings and the revision delta, not a fresh full pass.
+| 검증 착수 가능 | No open `issue:`, no open `discuss:` | The verification stage starts on the whole change |
+| 조건부 착수 | No open `issue:`; the open `discuss:` items leave a part untouched — name both parts | The verification stage starts on the released part |
+| 착수 불가 | An open `issue:`, or `discuss:` items blocking the whole path | Nothing; the change returns to the coordinator |
 
 ## Coordinator
 
-**Stand up a reviewer.** Not yourself: a reviewer that reads the change with none of your reasoning behind it. Require three properties, and take the highest rung the environment actually offers.
+**The reviewer.** Open, through orca, one interactive session in this worktree running the other provider's agent — from Claude, Codex; from Codex, Claude — and tell it to act as this skill's reviewer. It starts with none of your context and the same session continues across rounds. Open it with the narrowest write surface that runtime offers — `_chain/` writable, the rest of the tree not — since nothing else enforces that the reviewer writes only its result. When the runtime cannot draw that line, open it anyway and rely on this skill's rule; never open it read-only, which blocks the result file. Requests and results travel as files. When orca is not available, ask the user to open that session. Nothing else is a review: not this session, not a same-provider subagent. Give each round a time limit, 15 minutes unless the user says otherwise, and report a failed round instead of waiting.
 
-1. **Fresh context** — it does not inherit this session's history.
-2. **A different provider from the one that wrote the code**, whenever the environment has one. Same-family reviewers share blind spots, and a model reviewing its own output drifts toward approving it.
-3. **State across rounds** — the same reviewer thread continues, or you hand it the previous round's findings.
+**The request.** Pass all five inputs. The baseline comes from the implementation report; when the report has none, it is the commit the tree was clean at when implementation started, and pre-existing uncommitted work is committed as its own commit first — never stashed. The requirements go as the file path or the requester's words verbatim, never your restatement.
 
-| Rung | Reviewer |
-|---|---|
-| 1 | A separate interactive session opened through orca, running a different provider's agent, told to use this skill as the reviewer |
-| 2 | A cross-provider thread from this session, with a read-only sandbox and a continuation id |
-| 3 | A fresh same-provider subagent — read-only by instruction only, so treat a reviewer that writes code as a protocol failure |
-| 4 | Ask the user to open the reviewer session |
+**Rounds.** Round 1 is a full review. Per round: accept or reject each finding, apply the accepted ones, and hand back the open findings plus what you changed. Results go to `implementation-review-N.md` and dispositions to `implementation-response-N.md`, in `_chain/` — wherever the design itself lives — unless the user names other paths.
 
-Nothing below rung 3 is a review. **Pass all five of §Reviewer's required inputs, and establish the change axis yourself.** A reviewer left to derive the delta from the branch or from the current tree reviews work the implementer never touched. When the tree was not clean at the point the implementation started, commit that pre-existing work as its own commit and use it as the baseline; never set it aside on the stash stack, which other sessions share. Only when that is impossible, fall back to naming the touched paths and confirming that none of them carried pre-existing uncommitted work. Set a time limit on each reviewer call, 15 minutes unless the user says otherwise, and on a limit report the round failed rather than waiting. Save the result yourself when the reviewer could not write it.
+- The loop ends when no `issue:` is open — not at a round count.
+- **Two rounds on your own.** At that limit with findings still open, stop and report them to the user. A round the user releases has the same scope as any re-review.
+- A rejected finding goes to the next round with its reason. If it is still open after that one exchange, put it to the user.
 
-**Rounds.** Round 1 is a full review. Then, per round: accept or reject each finding, apply the accepted ones, and hand the reviewer the open findings plus what you changed. Write each result to `review-N.md` and each response to `response-N.md`, beside the design file unless the user names other paths.
+**Accepting.** By necessity, never by label. Accept what prevents a concrete failure inside the requirements, names a real defect, or is cheap with clear value. Reject what adds a mechanism with no named failure, expands scope past the requirements, or is taste. **Before accepting a fix that adds a runtime mechanism — state, retry, lock, controller, health check — first check whether removing something, narrowing scope, or leaving it to observation closes the finding. When a finding arose from the previous round's fix, evaluate reverting that fix first.** `discuss:` is not yours to settle: carry it to its decider and raise it to the user.
 
-- The loop ends when **no `issue:` is open** — not at a round count.
-- **Three rounds on your own.** On reaching that limit with findings still open, stop and report them to the user. Never start a further round on your own judgment; the user releases one, and a released round carries the same scope as any re-review.
-- Rejected findings go to the next round **with the reason**, and the reviewer's next result settles them. If one is still open after that single exchange, put it to the user rather than arguing it across rounds.
+**Fixing.** The fix is the smallest change that removes the failure the finding named; nothing else rides along. No mechanism the contract did not decide enters as a fix. A finding whose fix is a contract decision is routed back, not fixed. Re-run the verification command after fixing and report its real output; never loosen the command or the condition to close a finding.
 
-**Accepting findings.** Accept by necessity, never by severity label. Accept one that prevents a concrete failure, names a real defect, or is cheap with clear value. Reject one that only adds a mechanism with no named mistake scenario, expands scope, or is taste. Accepting everything and fixing nothing both fail this test. `discuss:` findings are not yours to settle: carry each to the decider it names and raise it to the user.
+**Routing back.** An accepted finding that names a contract defect — a false fact, a decision that cannot be implemented as written, an uncovered requirement, a verification command that cannot reach the change — goes into the design's section 7 as a `[미결정]` under its `C` id with the reason, the decider, and what it blocks; without a design, it goes to the requester. Then the design review reopens or the user decides. Do not revise the contract's decisions yourself.
 
-**Fixing.** The fix is bound by the same contract the code was written under, and this is where a review turns into overengineering if it is not.
+**The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`기각`/`설계 회귀`) · 사유 (required for `기각` only) · 반영 위치 (`file:line` for `수용`, the contract location for `설계 회귀`, `-` for `기각`). Then one round line: the verification command and its real result after this round's fixes. A `수용` without 반영 위치 is unfinished.
 
-- The fix is the **smallest change that removes the failure the finding named**. Nothing else rides along.
-- **No mechanism section 2 did not decide** enters the code as a fix: no abstraction, no config surface, no defensive branch away from a trust boundary, no test for a case that cannot occur.
-- **A finding whose fix is a design decision is not fixed here.** Route it to the design (see below) and say so in the response file.
-- **Re-run section 6 after fixing** and report its real output. Never loosen the command or the pass condition to close a finding.
+**After applying, check the change yourself**: every accepted finding's 반영 위치 is real; the verification command still reaches what was built; no fix introduced a mechanism the contract did not decide; and **the code's mechanisms have not grown past round 1 without a requirement naming why**. That growth is yours to reverse, not a reviewer finding.
 
-**Routing a finding back to the design.** An accepted finding that names a design defect — a false fact in section 3, a decision in section 2 that cannot be implemented as written, a requirement no decision covers, a section 6 command that cannot reach the change — is recorded in the design's section 7 as a `[미결정]` under its own `C` id, carrying what that section requires: the reason, who settles it, and what it blocks. Then either the design review reopens or the user decides. Do not revise the design's decisions yourself, and do not implement your own version of one.
-
-**The response file.** `response-N.md` is the round's disposition record, and the reviewer's input for verifying closure next round. It has two parts and no prose around them.
-
-One line per finding raised so far, in id order, four fields each.
-
-| Field | Rule |
-|---|---|
-| id | The reviewer's id, never renumbered |
-| 처분 | `수용` · `기각` · `설계 회귀` |
-| 사유 | Required for `기각`, and for any finding a cross-check pass ruled on — carry the ruling word and the proof it quoted. Omit it for a plain `수용` |
-| 반영 위치 | `file:line` for `수용`, the design section for `설계 회귀`, `-` for `기각` |
-
-Then one round-level line, once, after the finding lines: the section 6 command and the real result it produced after this round's fixes.
-
-A `수용` with no 반영 위치 is not verifiable, and the round is not finished until it has one.
-
-**A cross-check pass, only when the change cannot be undone.** By default the reviewer's own proof requirement is the gate. Add a separate cross-checker — one per finding, fresh context, reading only the finding, the design, and the code it points at — when the change touches production data, moves money, or alters an authentication or authorization boundary. **This pass can only remove a finding, never soften one**, so it introduces no state the finding form and the verdict do not already have. Two rulings:
-
-| Ruling | Condition | Effect |
-|---|---|---|
-| `기각` | Constructible from the code: the claim is factually wrong (quote the actual line), impossible from a type, constant, or invariant (show it), already handled in this change (cite the guard), or has no observable effect | The id closes, and the quoted proof is the rejection reason |
-| `유지` | Anything else, including a real mechanism whose trigger is uncertain | The finding stands exactly as the reviewer raised it, at its severity |
-
-Record both rulings in `response-N.md`'s 사유 field with the ruling word and its proof, so the next round can re-examine the judgment instead of inheriting it blind. Never appoint an arbiter over two cross-checkers and never take a majority vote; a judge that shares their blind spots is worse than no judge.
-
-**After applying, check the change yourself** before handing it back: every accepted finding's 반영 위치 is real, section 6 still reaches what was built, and no fix introduced a mechanism section 2 did not decide. That last one is yours, not a reviewer finding.
-
-**A finding never leaves the loop unrecorded.** When the loop stops with an `issue:` still open — the round limit, or the user ending it — write it into the design's section 7 as a `[미결정]` under its own id, with the failure the reviewer named, the user as the one who settles it, and what it blocks, so the verification stage inherits it instead of reading a change that looks clean.
+**Unfinished findings.** When the loop stops with an `issue:` open, write it into the design's section 7 as a `[미결정]` under its id — the reviewer's failure as the reason, the user as decider, what it blocks — or, without a design, report it to the user as open. The verification stage inherits it instead of reading a change that looks clean.
 
 ## Both roles, never
 
-- Never let the session that wrote the code review it alone — the review's value is the context it does not have.
+- Never let the session that wrote the code review it alone.
 - Never raise or accept a finding whose proof nobody constructed.
+- Never judge scope against what the code or a previous round created; the requirements are the baseline.
 - Never treat finding count, round count, or result length as quality.
-- Never reopen a decision the design made and the design review cleared.
-- Never fix a design defect in the code.
-- Never fill in a `[미결정]` on behalf of the person it names.
-- Never modify any file other than the ones this skill assigns you: the reviewer writes only its result, and the coordinator changes only the code the accepted findings reach, the design's section 7 when routing back, and the round files.
-- Never end the loop by dropping an `issue:`: each one ends resolved, rejected with a reason the reviewer settled, routed into the design, or recorded as a `[미결정]`. A non-blocking finding may end open and unfixed — report it that way rather than opening a round to close it.
+- Never reopen a decision the contract made and the design review cleared.
+- Never fix a contract defect in the code.
+- Never fill in a `[미결정]` for the person it names.
+- Never modify a file this skill does not assign you: the reviewer writes only its result; the coordinator changes only the code the accepted findings reach, the design's section 7 when routing back, and the round files.
+- Never end the loop by dropping an `issue:`: each ends resolved, rejected with a reason the reviewer settled, routed into the contract, or recorded as a `[미결정]`. A non-blocking finding may end open and unfixed.

@@ -41,4 +41,4 @@ The deployment gate considers **blocking problems only**: concerns at the **`iss
 
 For each request, return `approve` (plus a workflow-advancement recommendation when quorum is met) | `hold (+ reason)`. The caller uses this judgment to record the approval signal, count the quorum, transition state, and send any manual-verification notification.
 
-> Apply a narrowed version of `pr-review` judgment for the deployment gate: blocking problems only. This is separate from in-loop development review (`instructions/`).
+> Apply a narrowed version of `pr-review` judgment for the deployment gate: blocking problems only. This is separate from implementation review against a design (the `implementation-review` skill).
