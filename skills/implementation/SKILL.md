@@ -31,7 +31,7 @@ Three rules hold over everything below.
 
 ## Scope limit
 
-A scope limit names the subset of the contract's files this session owns. Whoever runs several sessions assigns it; this session never derives one.
+A scope limit names the subset of the contract's files this session owns — one unit from the design's 병렬 단위, or a list the caller gives. Whoever runs several sessions assigns it; this session never derives one.
 
 - You own exactly those files. Needing to change a file outside them stops the work: report the file and what you needed from it, edit nothing, and build no local workaround. The fix belongs in the split.
 - Run the verification regardless. When it cannot pass until another scope lands, report which part passed and which is waiting. Never weaken the command or the pass condition.

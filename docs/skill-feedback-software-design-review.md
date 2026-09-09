@@ -45,7 +45,7 @@
 
 **F-11.** 루프는 열린 `issue:` 0에서 끝나고 코디네이터 재량 상한이 3이다(`SKILL.md:89`, `SKILL.md:90`). 기본을 1회로 바꾸고 열린 차단 발견이 있을 때만 재검토하는 안은 프론트매터 description(`SKILL.md:3`, "three on its own")까지 같이 바꿔야 한다.
 
-**F-12.** 기각 규칙은 있다 — `SKILL.md:93`의 "Reject one that only adds a mechanism with no named mistake scenario, **expands scope**, or is taste", 그리고 `response-N.md`의 처분·사유 필드(`SKILL.md:100`). boot service·상태 파일 확장은 "expands scope"로 기각 가능한 항목이었고 적용되지 않았다. 강제 장치는 없다(`response-N.md`는 문서 규약이고 훅이 아니다 — `docs/enforcement-map.md` 자격 기준 참조). 생성 측(MUST-find 8종)이 반대 방향으로 밀기 때문에 억제 책임이 코디네이터 한쪽에만 걸린 불균형은 규칙 부재와 별개의 구조 문제다.
+**F-12.** 기각 규칙은 있다 — `SKILL.md:93`의 "Reject one that only adds a mechanism with no named mistake scenario, **expands scope**, or is taste", 그리고 `response-N.md`의 처분·사유 필드(`SKILL.md:100`). boot service·상태 파일 확장은 "expands scope"로 기각 가능한 항목이었고 적용되지 않았다. 강제 장치는 없다(`response-N.md`는 문서 규약이고 훅이 아니다). 생성 측(MUST-find 8종)이 반대 방향으로 밀기 때문에 억제 책임이 코디네이터 한쪽에만 걸린 불균형은 규칙 부재와 별개의 구조 문제다.
 
 ## 사용자 제안 규칙 (원문)
 
@@ -73,5 +73,4 @@
 
 ## 미점검
 
-- `instructions/design-review.md`(dev 파이프라인 인루프 설계 리뷰)에 같은 결함이 있는지 대조하지 않았다. 두 문서에 걸친 조건 불일치는 어느 리뷰 범위에도 안 들어간다는 것이 이미 관측된 사각지대다.
-- 사용자가 이번 실사용에서 함께 쓴 `agents/harnie-designer.md`·`instructions/design-authoring-detail.md`가 상세화를 어디까지 유도하는지 대조하지 않았다. 사용자 보고는 이 둘을 "구현자가 판단하지 않도록 상세화를 유도"하는 부차 기여로 지목했고 주된 위치는 이 스킬이라고 판정했다.
+당시 함께 쓰인 인루프 설계 리뷰 지침·설계 에이전트·상세 설계 지침이 같은 결함을 갖는지, 상세화를 어디까지 유도하는지는 대조하지 않았다. 사용자 보고는 그것들을 부차 기여로 지목했고 주된 위치는 이 스킬이라고 판정했다. 그 파일들은 0.15.0에서 전부 삭제되어 이 항목은 닫혔다.

@@ -1,6 +1,6 @@
 # harnie
 
-> 플러그인/repo 이름 = **harnie**(개발 체인 스킬 허브). 개발 체인 6단계 = `requirements` → `software-design` → `software-design-review` → `implementation` → `implementation-review` → `acceptance-verification`. 요구사항·설계·검증은 스킵할 수 있다(예: 설계 → 구현 → 구현리뷰, 구현 → 구현리뷰). 체인과 무관한 스킬 = `pr-review` · `comment-resolve` · `deploy-approval` · `pr-delivery` · `quality-digest` · `confluence-doc`. 에이전트·커맨드·`instructions/`·run-state 훅은 없다 — 스킬 본문이 계약의 전부다. 훅은 `hooks/skill-guard.mjs` 하나로, Claude Code에서 체인이 대체하는 번들 스킬(`code-review`·`simplify`) 호출을 막는다.
+> 플러그인/repo 이름 = **harnie**(개발 체인 스킬 허브). 개발 체인 6단계 = `requirements` → `software-design` → `software-design-review` → `implementation` → `implementation-review` → `acceptance-verification`. 요구사항·설계·검증은 스킵할 수 있다(예: 설계 → 구현 → 구현리뷰, 구현 → 구현리뷰). `dev`는 간단한 작업을 한 지시로 설계 → 설계리뷰 → 구현 → 구현리뷰 → 검증까지 돌리는 조합 스킬이고, 크거나 위험한 신호가 있으면 시작 전에, 설계가 3절 파일 6개를 넘거나 병렬 단위를 담으면 설계 뒤에 넘긴다. 병렬은 설계 3절의 선택적 **병렬 단위**(파일 단독 소유·의존)가 정하고, 하위 워크트리 디스패치·머지는 orca 소유다(`~/workspace/agent-ops/claude/orca-dispatch.md`). 체인과 무관한 스킬 = `pr-review` · `comment-resolve` · `deploy-approval` · `pr-delivery` · `quality-digest` · `confluence-doc`. 에이전트·커맨드·`instructions/`·run-state 훅은 없다 — 스킬 본문이 계약의 전부다. 훅은 `hooks/skill-guard.mjs` 하나로, Claude Code에서 체인이 대체하는 번들 스킬(`code-review`·`simplify`) 호출을 막는다.
 
 설계 근거는 `docs/`(design-artifact-references · skill-authoring-canon · codex-mechanisms · skill-feedback-software-design-review)와 git 히스토리를 참조한다(필요할 때 on-demand로 읽는다). **`docs/`에는 현행 계약의 근거만 둔다** — 폐기된 구조의 서사는 git 히스토리가 보관하므로 문서에 "이력" 절로 남기지 않는다.
 

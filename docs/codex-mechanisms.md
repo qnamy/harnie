@@ -39,7 +39,7 @@
 
 Claude Code 쪽 대응물(비교용): `permissions.deny`에 `Skill(name)`·`Skill(name *)` 지원(deny > ask > allow), 모델 호출은 `PreToolUse` matcher `Skill`, 사용자 직접 `/name`은 `UserPromptExpansion`(`command_name`·`command_source`, `decision:"block"`)이 받는다. 번들 전체 off는 `disableBundledSkills`, 개별은 `skillOverrides: off`. `tool_input.skill` 키는 공식 스키마가 보장하지 않는다(이전 harnie 훅이 실측으로 썼다).
 
-**에이전트는 공용 불가.** Codex 커스텀 에이전트는 `~/.codex/agents/*.toml`·`.codex/agents/*.toml`, 필수 `name`·`description`·`developer_instructions`, 선택 `model`·`model_reasoning_effort`·`sandbox_mode`·`mcp_servers`·`skills.config`. `tools` 필드가 없고 도구 표면은 sandbox로 제어한다. 내장은 `default`·`worker`·`explorer`(읽기 중심). **Codex 플러그인 구성요소는 skills + MCP server뿐이라 에이전트를 배포하지 못한다.** 읽기 전용 탐색은 양쪽 내장(`Explore` / `explorer`)이 이미 있다.
+**에이전트는 공용 불가.** Codex 커스텀 에이전트는 `~/.codex/agents/*.toml`·`.codex/agents/*.toml`, 필수 `name`·`description`·`developer_instructions`, 선택 `model`·`model_reasoning_effort`·`sandbox_mode`·`mcp_servers`·`skills.config`. `tools` 필드가 없고 도구 표면은 sandbox로 제어한다. 내장은 `default`·`worker`·`explorer`(읽기 중심). **Codex 플러그인 구성요소는 skills + MCP server뿐이라 에이전트를 배포하지 못한다.** 읽기 전용 탐색은 양쪽 내장(`Explore` / `explorer`)이 이미 있다. 외부 레퍼런스 조사용 에이전트는 두지 않는다(2026-09-09 검토 후 제외) — 설계 세션이 직접 찾고, 큰 조사는 orca로 luna 세션을 연다. 웹이 필요한 Codex 세션은 `workspace-write`여야 한다(전역 `[sandbox_workspace_write] network_access = true`가 네트워크를 켠다; read-only에서 웹 검색이 되는지는 `[미확인]`).
 
 **스킬 본문 크기.** 공식 문서상 8,000자는 선택 전 initial skills list 예산(컨텍스트 2% 또는 8,000자)이고, 선택되면 `SKILL.md` 전체를 읽는다. 설치 바이너리 `strings`에 `MAX_SKILL_PROMPT_BYTES`가 없고 system skill도 19KB 파일을 포함한다(2026-09-08 조사). 별도 실행 실측 하나가 이와 일치한다 — 2026-09-08 Codex에서 플러그인 스킬 `implementation-review`(24,929바이트)를 호출시켜 주입된 지침의 꼬리 200자를 인용하게 하니 파일 끝과 정확히 일치했다. 계측 한계: 파일을 읽지 말라고 지시했으나 실제로 안 읽었는지는 검증하지 못했다.
 

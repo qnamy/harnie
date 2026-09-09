@@ -32,7 +32,7 @@ Korean. A few lines per section for small work; a section that removes no ambigu
 |---|---|---|
 | 1 | 대상 · 범위 · 비범위 | What is built, and at least one line of what is not. Cite the requirements file path when there is one |
 | 2 | 결정 | Each decision as what will be done, not why. The comparison behind it lives in 8 |
-| 3 | 변경 대상 | The files to touch by path, the interfaces or signatures involved, and what must not be touched |
+| 3 | 변경 대상 | The files to touch by path, the interfaces or signatures involved, and what must not be touched. When the work will run as several sessions — the requester asked for it, or the list is more than one session should own, said so here — close the section with **병렬 단위**: each unit named, every file this section names to touch in exactly one unit (the files it names as untouchable belong to none), the shared foundation (schema, shared types, registrations, wiring) in one unit the others depend on, and each unit's dependencies on other units. A unit whose internals this design leaves to its own session is marked 상세설계 위임; its entry becomes that session's request verbatim and its only baseline, so it states the boundary — the files it owns and the interfaces the other units call — plus what the unit must do and every requirement condition (tolerance, quality limit) that binds it; the unit's session designs the rest and never reads the parent requirements. Omit the whole list when one session will do the work |
 | 4 | 데이터 · 상태 | Only when persistence is involved: ownership, transaction boundary, idempotency, migration |
 | 5 | 실패 동작 | Every failure mode that can occur here among errors, duplicates, timeouts, retries, partial success, concurrent execution, and none that cannot. The requirements' stated tolerance is the ceiling: a failure the requester accepts — manual recovery, a bounded outage — gets no handling beyond what they asked for |
 | 6 | 검증 | The command to run and the condition that counts as passing, reaching the requested outcome and whatever has to remain intact |
@@ -52,7 +52,7 @@ These bind the design the same way they bind the code it produces.
 - A value that differs by environment, or that has to change without a code change, goes in the repository's existing configuration path. Other constants stay inline; do not build a configuration surface for them.
 - Defensive handling belongs at trust boundaries (external input, API, DB, network) and nowhere else. Do not design error handling for a case that cannot occur.
 - Tests cover business logic and logic whose failure is expensive (money, data integrity, security, irreversible side effects). No coverage-driven tests, none for trivial code or framework wiring, and none of that logic left untested. A stricter repository or CI convention wins.
-- Do not break out tasks or an ordered step list. That belongs to the implementation stage, and a plan that fights the implementer's own reasoning does more harm than no plan.
+- Do not break out tasks or an ordered step list. That belongs to the implementation stage, and a plan that fights the implementer's own reasoning does more harm than no plan. 병렬 단위 is file ownership and order between sessions, not a step list inside one.
 
 ## Self-check
 
