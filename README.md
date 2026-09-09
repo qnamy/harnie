@@ -2,7 +2,7 @@
 
 **개발 체인 스킬 허브** — Claude Code · Codex 공용 플러그인. 요구사항 → 설계 → 설계리뷰 → 구현 → 구현리뷰 → 검증의 6단계를 스킬 여섯 개로 나누고, 리뷰와 검증은 다른 프로바이더의 별도 세션에서 돌린다. 구독 로그인만으로 동작하고 API 키는 쓰지 않는다.
 
-`v0.16.0` · 테스트 5 pass (`node --test hooks/*.test.mjs`) · MIT
+`v0.16.1` · 테스트 5 pass (`node --test hooks/*.test.mjs`) · MIT
 
 > 이 도구들을 일상 업무에서 어떻게 운영하는가(지침 정본 단일화 · Claude/Codex 동기화 · 자동화 루틴 · 토큰 경제)는 자매 레포 [agent-ops](https://github.com/qnamy/agent-ops)에 있다.
 
