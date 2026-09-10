@@ -9,7 +9,7 @@ description: Turns a settled requirements document, or a short direct request, i
 
 Three rules hold over everything below.
 
-- **Nothing enters the design that no stated requirement or named failure needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, an extra round trip), write in one line the concrete failure it prevents. If you cannot write that line, leave it out.
+- **Nothing enters the design that no stated requirement needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, a lock, a staged handoff, an extra round trip), write in one line the requirement sentence it serves and the concrete failure, inside the tolerance that requirement states, it prevents. A failure the requirements do not put in scope, however plausible, earns no mechanism. If you cannot write that line, leave it out.
 - **The decision half ends with a verification step someone can run, and that step must observe the outcome the request asked for, including any behavior or invariant that has to survive the change.** A command that passes without reaching the change — an existing suite that never exercises it — is not verification, and it leaves "it looks done" as the only signal the implementer can produce.
 - **Assert no environment fact you did not verify in this repository.** A decision resting on an unverified fact is `[미결정]`, not a guess.
 
@@ -62,7 +62,7 @@ Run this over the finished draft before showing it.
 - Does section 6 reach the requested outcome, rather than pass on a suite that never exercises the change?
 - Does every environment claim carry the path it was verified against?
 - Is every requirements `[미결정]` either settled here with a note saying which kind of decision it was, or listed in section 7?
-- Does every mechanism you added name the failure it prevents?
+- Does every mechanism you added name the requirement it serves and the failure, inside that requirement's tolerance, it prevents?
 
 Anything failing the first four gets fixed. Anything failing the last one gets removed.
 

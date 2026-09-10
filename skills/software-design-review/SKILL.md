@@ -17,7 +17,7 @@ Two failures this exists to prevent. A design that reads well, is implemented fa
 
 ## Reviewer
 
-**Input.** The design file path. The requirements file path, or the requester's original request verbatim — a restatement by the coordinator is not an input, and given neither the round fails: ask, and state no verdict. From round 2 on, the previous result and the coordinator's `design-response-N.md`. The path to write the result to. The result names which requirements source it judged against.
+**Input.** The design file path. The requirements file path, or the requester's original request verbatim — a restatement by the coordinator is not an input, and given neither the round fails: ask, and state no verdict. From round 2 on, the previous result and the coordinator's `design-response-N.md`. The path to write the result to. The result names which requirements source it judged against. From round 3 on, the request opens with the user's release of that round quoted in the user's words; a round-3-or-later request whose first line is not that quotation fails the same way: state no verdict and name the missing release.
 
 **Procedure.**
 
@@ -69,15 +69,15 @@ Ids run `D-01`, `D-02` in the order first raised, never renumbered or reused. Se
 
 **The request.** Pass the input list in full. The requirements go as the file path or the requester's words verbatim — never your restatement, and never a list longer than what the requester wrote.
 
-**Rounds.** Round 1 is a full review. Per round: accept or reject each finding, apply the accepted ones to the design yourself, and hand back the open findings plus what you changed. Results go to `design-review-N.md` and dispositions to `design-response-N.md`, in `_chain/` — wherever the design itself lives — unless the user names other paths.
+**Rounds.** Round 1 is a full review. Per round: accept or reject each finding, apply the accepted ones to the design yourself, and hand back the open findings plus what you changed. Results go to `design-review-N.md` and dispositions to `design-response-N.md`, in `_chain/` — wherever the design itself lives — unless the user names other paths. `N` counts every round this chain has run, restarts and route-backs included; a number is never reused, a result file is never overwritten, and no round file carries a name other than its number.
 
 - The loop ends when no `issue:` is open — not at a round count.
-- **Two rounds on your own.** At that limit with findings still open, stop and report them to the user. A round the user releases has the same scope as any re-review.
+- **Two rounds on your own.** At that limit with findings still open, stop and report them to the user. A round the user releases has the same scope as any re-review. A released round's request opens with the user's release quoted in their words; a decision the user made on a `discuss:` item is not a release.
 - A rejected finding goes to the next round with its reason. If it is still open after that one exchange, put it to the user.
 
 **Accepting.** By necessity, never by label. Accept what prevents a concrete failure inside the requirements, names a real defect, or is cheap with clear value. Reject what adds a mechanism with no named failure, expands scope past the requirements, or is taste. **Before accepting a fix that adds a runtime mechanism — state, retry, lock, controller, health check, boot service — first check whether removing something, narrowing scope, or leaving it to pilot observation closes the finding. When a finding arose from the previous round's fix, evaluate reverting that fix first.** `discuss:` is not yours to settle: carry it into section 7 with the decider it names and raise it to the user.
 
-**The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`기각`) · 사유 (required for `기각` only) · 반영 위치 (design section numbers; `-` for `기각`). A `수용` without 반영 위치 is unfinished.
+**The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`기각`) · 사유 (required for `기각`; for a `수용` whose fix adds a mechanism, the requirements sentence or the requester's words that need it — a `수용` that cannot quote one becomes `기각`) · 반영 위치 (design section numbers; `-` for `기각`). A `수용` without 반영 위치 is unfinished.
 
 **After applying, check the design yourself**: section 6 still reaches the change; every requirements `[미결정]` is still there; and **the design's mechanisms have not grown past round 1 without a requirement naming why**. That growth is yours to reverse, not a reviewer finding.
 
@@ -89,5 +89,6 @@ Ids run `D-01`, `D-02` in the order first raised, never renumbered or reused. Se
 - Never judge scope against the design's own declared scope; the requirements are the baseline.
 - Never treat finding count, round count, or result length as quality.
 - Never fill in a `[미결정]` for the person it names.
+- Never split a round across sub-reviewers, lenses, or subagents: one reviewer session reads the whole input and writes the whole result.
 - Never modify a file this skill does not assign you: the reviewer writes only its result; the coordinator changes only the design and the round files.
 - Never end the loop by dropping an `issue:`: each ends resolved, rejected with a reason the reviewer settled, or recorded as a `[미결정]`. A non-blocking finding may end open and unfixed.

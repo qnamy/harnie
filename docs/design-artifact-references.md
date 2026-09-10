@@ -154,6 +154,19 @@ harnie 밖(agent-ops) 훅이지만 이 체인이 도는 환경의 중단점이�
 
 같은 날 정리한 것: `~/.claude/settings.json`의 삭제된 harnie `scripts/`·MCP allow 항목 4개, `~/.codex/config.toml`의 옛 harnie 훅 trusted_hash 7개, harnie `.gitignore`의 `.harnie/` 줄, `~/Tradlinx/GIT-PR.md`의 `.harnie-wt` 예시. `.harnie` run-state 디렉터리 3개와 `~/Tradlinx/.harnie-wt/`(git 등록이 이미 풀린 옛 run 워크트리 3개)는 `~/.Trash/harnie-cleanup-2026-09-08/run-state/`로 이동.
 
+## 17. 네 체인 실사용에서 본 라운드 폭주와 그 뒤에 넣은 텍스트 장치 (2026-09-10)
+
+2026-09-10 열려 있던 체인 네 개(`azure_infra`·`tower-of-god`·`harnie/routine-orca`·`skia/new-heros`)의 `_chain/`을 대조했다. 잘 끝난 azure_infra(설계 4라운드, 3차는 사용자 승인, 4차는 인수검증 실측 실패의 회귀)를 기준으로 나머지 셋에서 반복된 것은 넷이고, 넷 모두 규칙은 텍스트에 있었으나 지켜졌는지 확인할 자리가 없었다. 아래 조치는 전부 지침이며 훅은 두지 않는다(§14).
+
+| 관측 | 조치 | 어디에 |
+|---|---|---|
+| 2라운드 상한을 넘긴 라운드에 사용자 해제 기록이 없다. routine-orca v2 17라운드·구현 R4, tower-of-god 설계 3~12차. 코디네이터가 `discuss:` 항목의 제품 결정을 라운드 진행 승인으로 읽었다 | 3라운드부터 요청 파일이 사용자 해제를 원문 인용으로 열고, 리뷰어는 그 줄이 없는 요청을 라운드 실패로 돌려보낸다. `discuss:` 결정은 해제가 아니다 | 두 리뷰 스킬 §Input(리뷰어)·§Rounds(코디네이터) |
+| 메커니즘을 리뷰어가 아니라 코디네이터가 먼저 넣었다. routine-orca 락 회수·게이트 3파일·`az` 격리, tower-of-god 이중 블라인드+제3세션 조정(FR-007 한 문장 근거). 설계 첫 규칙의 "named failure"가 상상한 실패를 허용했다 | 첫 규칙을 "요구사항 문장 + 그 허용치 안의 실패"로 좁혔다. 요구사항이 범위에 넣지 않은 실패는 장치를 얻지 못한다 | `software-design` 첫 규칙·자기점검 |
+| 선택적 수용이 작동하지 않았다. routine-orca v1 R1~12 전부 수용, tower-of-god 설계 발견 28건 기각 0, skia 기각 2/13. 리뷰어 발견에는 근거 요구가 있고 코디네이터 수용에는 없었다 | 메커니즘을 추가하는 `수용`은 사유 칸에 요구사항 문장 인용을 적는다. 인용할 수 없으면 `기각` | 두 리뷰 스킬 §The response file |
+| 라운드 파일 재사용으로 이력이 유실됐다(tower-of-god `design-review-8/9.md`·`implementation-review-1.md` 덮어씀, `implementation-review-final.md` 뒤에 5·6·7차). routine-orca의 Codex 리뷰어는 라운드마다 하위 에이전트 3개에 리뷰를 나눴다 | `N`은 재시작·회귀를 포함해 체인 전체에서 증가하고 재사용·덮어쓰기·번호 외 이름을 금지한다. 리뷰어는 라운드를 하위 리뷰어에 나누지 않는다 | 두 리뷰 스킬 §Rounds·§Both roles, never |
+
+같은 조사에서 확인한 실행 환경 사실 둘. Claude Code는 스킬 본문을 세션 시작 시 한 번 주입하므로 0.16.1 설치(2026-09-09 11:49) 전에 열린 세션(routine-orca: software-design 0.14.15·software-design-review 0.15.0, skia: 0.14 `dev` 파이프라인과 삭제된 `instructions/loop.md`)은 옛 텍스트로 계속 돌았다. 릴리스 뒤 열려 있는 코디네이터 세션은 재시작해야 새 텍스트를 받는다(§릴리스 후속과 같은 이유). skia의 13라운드는 라운드 상한이 없던 구 `loop.md`와 `blocking>0 → REJECT` 스키마의 조합이 종료를 구조적으로 막은 경우라 현행 텍스트에는 해당 항목이 없다.
+
 ## 출처
 
 - https://github.com/github/spec-kit (`templates/spec-template.md`, `plan-template.md`, `tasks-template.md`)
