@@ -75,5 +75,6 @@ Three lines, nothing more: the path written, the requirements file (or 직접 �
 - Do not write code, and do not modify any file other than the design document.
 - Do not settle a requirements `[미결정]` without recording that you did.
 - Do not restate the requirements document. Cite its path and carry over only what a decision rests on.
+- Do not restate in one section a decision another section fixes. Refer to it by its identifier; a restated copy goes stale the moment the decision moves. A 상세설계 위임 unit's entry is the exception: it is the only baseline its session receives, so it carries in full the interfaces and conditions that bind that unit.
 - Do not "improve" adjacent code, conventions, or structure that the request did not reach.
 - Do not treat section count or document length as quality.
