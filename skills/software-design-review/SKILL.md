@@ -1,6 +1,6 @@
 ---
 name: software-design-review
-description: Reviews a software design document against the requirements it was written from, before implementation starts, and drives rounds of review and revision — two on its own, more only when the user releases them. Finds decisions left for the implementer, environment claims not grounded in the repository, verification that never reaches the change, uncovered requirements, dropped open items, and mechanisms no requirement needs. Use once a design document exists and before code is written. Do NOT use for visual, UI, or graphic design, for code or PR review, or to author a design document.
+description: Reviews a software design document against the requirements it was written from, before implementation starts, and drives rounds of review and revision — three on its own, more only when the user releases them. Finds decisions left for the implementer, environment claims not grounded in the repository, verification that never reaches the change, uncovered requirements, dropped open items, and mechanisms no requirement needs. Use once a design document exists and before code is written. Do NOT use for visual, UI, or graphic design, for code or PR review, or to author a design document.
 ---
 
 # Software Design Review
@@ -17,7 +17,7 @@ Two failures this exists to prevent. A design that reads well, is implemented fa
 
 ## Reviewer
 
-**Input.** The design file path. The requirements file path, or the requester's original request verbatim — a restatement by the coordinator is not an input, and given neither the round fails: ask, and state no verdict. From round 2 on, the previous result and the coordinator's `design-response-N.md`. The path to write the result to. The result names which requirements source it judged against. From round 3 on, the request opens with the user's release of that round quoted in the user's words; a round-3-or-later request whose first line is not that quotation fails the same way: state no verdict and name the missing release.
+**Input.** The design file path. The requirements file path, or the requester's original request verbatim — a restatement by the coordinator is not an input, and given neither the round fails: ask, and state no verdict. From round 2 on, the previous result and the coordinator's `design-response-N.md`. The path to write the result to. The result names which requirements source it judged against. From round 4 on, the request opens with the user's release of that round quoted in the user's words; a round-4-or-later request whose first line is not that quotation fails the same way: state no verdict and name the missing release.
 
 **Procedure.**
 
@@ -72,7 +72,7 @@ Ids run `D-01`, `D-02` in the order first raised, never renumbered or reused. Se
 **Rounds.** Round 1 is a full review. Per round: dispose of each finding, apply what you accepted to the design yourself, and hand back the open findings plus what you changed. Results go to `design-review-N.md` and dispositions to `design-response-N.md`, in `_chain/` — wherever the design itself lives — unless the user names other paths. `N` counts every round this chain has run, restarts and route-backs included; a number is never reused, a result file is never overwritten, and no round file carries a name other than its number.
 
 - The loop ends when no `issue:` is open — not at a round count.
-- **Two rounds on your own.** At that limit with findings still open, stop and report them to the user. A round the user releases has the same scope as any re-review. A released round's request opens with the user's release quoted in their words; a decision the user made on a `discuss:` item is not a release.
+- **Three rounds on your own.** At that limit with findings still open, stop and report them to the user. A round the user releases has the same scope as any re-review. A released round's request opens with the user's release quoted in their words; a decision the user made on a `discuss:` item is not a release.
 - A rejected finding goes to the next round with its reason and the reviewer settles whether that reason holds; a rejection never closes a finding on its own. If it is still open after that one exchange, put it to the user.
 
 **Accepting.** By necessity, never by label. Accept what prevents a concrete failure inside the requirements, names a real defect, or is cheap with clear value. Reject what adds a mechanism with no named failure, expands scope past the requirements, or is taste. Check a rejection reason against the boundaries and decisions the design itself already set before you write it; where the reason and that boundary disagree, the boundary is right. **Before accepting a fix that adds a runtime mechanism — state, retry, lock, controller, health check, boot service — first check whether removing something, narrowing scope, or leaving it to pilot observation closes the finding. When a finding arose from the previous round's fix, evaluate reverting that fix first.** `discuss:` is not yours to settle: carry it into section 7 with the decider it names and raise it to the user.

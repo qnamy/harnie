@@ -9,7 +9,7 @@ description: Runs the harnie development chain end to end on one instruction for
 
 Two rules hold over everything below.
 
-- **A stage's own stop ends this run at that stage.** A route-back from implementation, a review that ends its two rounds with an `issue:` open, a verification other than 통과 — each is reported as that skill reports it, the artifacts stay in `_chain/`, and the user decides what comes next. Nothing is retried by loosening a stage.
+- **A stage's own stop ends this run at that stage.** A route-back from implementation, a review that ends its autonomous rounds with an `issue:` open, a verification other than 통과 — each is reported as that skill reports it, the artifacts stay in `_chain/`, and the user decides what comes next. Nothing is retried by loosening a stage.
 - **This session never reviews or verifies its own work.** One interactive session of the other provider, opened through orca in this worktree, is the reviewer for both reviews and the runner of the verification. It is opened once and kept across stages.
 
 ## Gate 1 — before anything
