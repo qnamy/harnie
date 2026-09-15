@@ -110,7 +110,25 @@ Ids run `C-01`, `C-02` in the order first raised, never renumbered or reused. Se
 
 **Routing back.** An accepted finding that names a contract defect — a false fact, a decision that cannot be implemented as written, an uncovered requirement, a verification command that cannot reach the change — goes into the design's section 7 as a `[미결정]` under its `C` id with the reason, the decider, and what it blocks; without a design, it goes to the requester. Then the design review reopens or the user decides. Do not revise the contract's decisions yourself.
 
-**The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`부분 수용`/`기각`/`설계 회귀`) · 사유 (required for `기각` and for `부분 수용`, where it states what was not taken and why; for a `수용` whose fix adds a mechanism, the requirements sentence or the requester's words that need it — a `수용` that cannot quote one becomes `기각`) · 반영 위치 (`file:line` for `수용` and `부분 수용`, the contract location for `설계 회귀`, `-` for `기각`). Use `부분 수용` when the finding names something real but the fix it asks for goes past it: apply what the defect needs and reject the rest with its reason. Then one round line: the verification command and its real result after this round's fixes. A `수용` or `부분 수용` without 반영 위치 is unfinished.
+**When the disposition turns on an environment fact** — the code and the contract disagree and which one reality supports is what decides it — take these two questions in order before routing.
+
+1. *Has the failure that mechanism prevents actually been observed?* No → **drop the mechanism from both**. §Accepting's removal-first check is this question; nothing new is needed for it.
+2. *Is the contract's premise still true?* Yes → **restore the code to the contract**. No → **move the contract**.
+
+All three landings are inside this rule, and the first two are cases where the contract holds no false fact. **Answer both questions by observing now; an answer from memory is not an answer.** For the first two landings the disposition records what you observed. For the third it **quotes the raw observation as it reads** — the command and its output, the log line, the record's actual field value. Your diagnosis of an observation is not the observation, and a record identifier with a categorical summary is not either. Without that quotation you cannot take the third landing.
+
+A contract defect whose disposition turns on no environment fact does not take these questions: a decision that cannot be implemented as written, an uncovered requirement, a verification command that cannot reach the change. There is nothing to ask reality about, so they route in the form above.
+
+**The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`부분 수용`/`기각`/`설계 회귀`) · 사유 · 반영 위치 (`file:line` for `수용` and `부분 수용`, the contract location for `설계 회귀`, `-` for `기각`). **사유 is required on every disposition**, and what it holds differs by one.
+
+| 처분 | 사유 holds |
+|---|---|
+| `수용` | What you checked against the original source this round to confirm the finding's failure scenario held in the code as it stood before the fix — the `file:line` you opened, the command you ran and its result, the contract sentence you compared. Confirming the quoted line exists is not that check. When the fix adds a mechanism, add the requirements sentence or the requester's words that need it; a `수용` that cannot quote one becomes `기각` |
+| `부분 수용` | The same check for the part taken, plus what was not taken and why |
+| `기각` | The reason |
+| `설계 회귀` | §Routing back's form for the landing you took |
+
+A `수용` whose 사유 you cannot fill is unfinished: do the check and fill it, or it becomes `기각`. Use `부분 수용` when the finding names something real but the fix it asks for goes past it: apply what the defect needs and reject the rest with its reason. Then one round line: the verification command and its real result after this round's fixes. A `수용` or `부분 수용` without 반영 위치 is unfinished.
 
 **After applying, check the change yourself**: every accepted finding's 반영 위치 is real; the verification command still reaches what was built; no fix introduced a mechanism the contract did not decide; when every disposition this round was `수용`, each finding's failure scenario held against the code as it stood before the fix — an all-accepted round is itself the signal to check; and **the code's mechanisms have not grown past round 1 without a requirement naming why**. That growth is yours to reverse, not a reviewer finding.
 
