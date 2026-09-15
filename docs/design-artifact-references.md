@@ -60,7 +60,7 @@ Ponytail AGENTS.md가 7단 사다리(YAGNI → 이미 있나 → 한 줄로 되�
 
 Amp/Sourcegraph: *"Local guard > cross-layer refactor. Single-purpose util > new abstraction layer. Don't introduce patterns not used by this repo."*
 
-Spec Kit의 Complexity Tracking 표(`Violation | Why Needed | Simpler Alternative Rejected Because`)는 메커니즘 추가에 근거를 강제하는 장치다. 스킬 본문의 "추가한 메커니즘마다 막는 실패 시나리오를 한 줄로" 규칙과 같은 계열이고, harnie `harnie-designer.md`도 같은 요구를 이미 갖고 있다.
+Spec Kit의 Complexity Tracking 표(`Violation | Why Needed | Simpler Alternative Rejected Because`)는 메커니즘 추가에 근거를 강제하는 장치다. 스킬 본문의 "추가한 메커니즘마다 막는 실패 시나리오를 한 줄로" 규칙과 같은 계열이다. 이 요구는 현재 `software-design` 첫 규칙과 자기점검, 두 리뷰 스킬의 fence가 담당한다(당시 같은 요구를 갖고 있던 `agents/harnie-designer.md`는 0.15.0에서 에이전트 정의와 함께 삭제됐다).
 
 ## 7. 사람 설계문서 실무에서 가져온 것
 
@@ -215,7 +215,5 @@ routine-orca 체인의 네 라운드에서 발견 27건 중 26건을 수용했�
 설계 리뷰 계약(§9~13)의 출처
 
 - https://code.claude.com/docs/en/code-review · https://code.claude.com/docs/en/sub-agents · https://www.anthropic.com/engineering/building-effective-agents · https://www.anthropic.com/engineering/multi-agent-research-system
-- https://owasp.org/www-project-secure-by-design-framework/ · https://docs.gitlab.com/development/database_review · https://pcidssguide.com/change-control-management-for-pci-dss/ · https://standards.ieee.org/standard/1028-2008.html
-- https://en.wikipedia.org/wiki/Architecture_tradeoff_analysis_method · https://dl.acm.org/doi/10.5555/319568.319599 (Parnas & Weiss, ICSE 1985) · https://www.cs.ubc.ca/~gregor/teaching/papers/4+1view-architecture.pdf
-- https://thecloudstrap.com/design-assurance-level-dal-in-do-178c/ · https://www.perforce.com/blog/qac/what-iec-61508-safety-integrity-levels-sils · https://www.hbkworld.com/en/knowledge/resource-center/articles/examining-risk-priority-numbers-in-fmea
-- arXiv 2308.07201(ChatEval, ICLR 2024) · Smit et al., ICML 2024(proceedings.mlr.press/v235/smit24a.html) · arXiv 2402.08115 · arXiv 2605.29800 · arXiv 2606.29270 · arXiv 2604.19049 · arXiv 2603.16244 · arXiv 2411.03079
+- https://en.wikipedia.org/wiki/Architecture_tradeoff_analysis_method · https://dl.acm.org/doi/10.5555/319568.319599 (Parnas & Weiss, ICSE 1985)
+- arXiv 2308.07201(ChatEval, ICLR 2024) · Smit et al., ICML 2024(proceedings.mlr.press/v235/smit24a.html) · arXiv 2402.08115 · arXiv 2605.29800 · arXiv 2604.19049 · arXiv 2603.16244

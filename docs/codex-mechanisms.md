@@ -22,8 +22,10 @@
 
 - **셸 도구의 `tool_name`은 `Bash`이고 `tool_input.command`는 문자열이다**(`shell`도 배열도 아니다). Claude와 같은 형태이므로 `toolName === "Bash"` 분기와 문자열 파싱 가드가 Codex에서 그대로 발화한다.
 - **`permission_mode`는 `-a never`에서 `bypassPermissions`로 온다.** 런타임 판별에는 쓰지 않는다 — 판별자는 `turn_id`의 존재다(Claude 페이로드에는 없다).
-- **deny가 실제로 명령을 막는다.** 전역 bash-guard의 복합 명령 deny에 Codex가 `error=Command blocked by PreToolUse hook: …` + `hook: PreToolUse Blocked`로 반응하고 명령을 실행하지 않았다. 훅 출력 계약(`permissionDecision: "deny"`)이 Codex에서 유효하다.
-- **헤드리스에서도 돈다.** 같은 실행에서 PreToolUse 훅 3개(bash-guard · orca · harnie)가 모두 발화했다. `claude -p`가 MCP를 로드하지 않는 제약과 달리, `codex exec`의 훅에는 그런 제약이 없다.
+- **deny가 실제로 명령을 막는다.** 복합 명령 deny에 Codex가 `error=Command blocked by PreToolUse hook: …` + `hook: PreToolUse Blocked`로 반응하고 명령을 실행하지 않았다. 훅 출력 계약(`permissionDecision: "deny"`)이 Codex에서 유효하다.
+- **헤드리스에서도 돈다.** 같은 실행에서 PreToolUse 훅 3개가 모두 발화했다. `claude -p`가 MCP를 로드하지 않는 제약과 달리, `codex exec`의 훅에는 그런 제약이 없다.
+
+위 두 줄의 측정 도구였던 전역 `bash-guard` 훅은 2026-09-08에 제거됐다(`design-artifact-references.md` §16). 성립하는 사실은 Codex의 deny 동작과 헤드리스 발화이고, 그 훅을 현재 설정에서 찾으면 안 된다 — 지금 이 레포가 싣는 훅은 `skill-guard.mjs` 하나다.
 
 ## effort 오버라이드 실측 (2026-08-26)
 
