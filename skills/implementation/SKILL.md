@@ -21,7 +21,7 @@ Three rules hold over everything below.
 
 ## Procedure
 
-1. **Record the baseline.** The tree must be clean at HEAD — `_chain/`, where the chain's own artifacts live, excepted — and that commit is the baseline the review and verification stages diff against. A dirty tree stops the work: report it and have the pre-existing work committed first. Never stash it; the stash stack is shared across worktrees.
+1. **Record the baseline.** The tree must be clean at HEAD — `_chain/`, where the chain's own artifacts live, excepted — and that commit is the baseline the review and verification stages diff against. A dirty tree stops the work: report it and have the pre-existing work committed first. Never stash it; the stash stack is shared across worktrees. `_chain/` holds one chain's artifacts, and a chain ends when its verification file is written or its change is merged or released; when `_chain/` already holds another chain's files, stop and ask — the user clears it, and this skill deletes nothing.
 2. **Restate in one sentence** what you build and what you must not touch. If you cannot, name the missing thing and stop.
 3. **Read the open items before writing code.** With a design, section 7: a blocking item stops the work now, and an item missing its reason, decider, or blocked work routes back. Without a design, list every reading of the request that would produce different software, ask the requester about each before coding, and record the answers in the report.
 4. **Confirm the ground.** The paths, signatures, and conventions the contract names must exist in this repository as written. A mismatch routes back.

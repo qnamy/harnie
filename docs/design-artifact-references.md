@@ -167,6 +167,17 @@ harnie 밖(agent-ops) 훅이지만 이 체인이 도는 환경의 중단점이�
 
 같은 조사에서 확인한 실행 환경 사실 둘. Claude Code는 스킬 본문을 세션 시작 시 한 번 주입하므로 0.16.1 설치(2026-09-09 11:49) 전에 열린 세션(routine-orca: software-design 0.14.15·software-design-review 0.15.0, skia: 0.14 `dev` 파이프라인과 삭제된 `instructions/loop.md`)은 옛 텍스트로 계속 돌았다. 릴리스 뒤 열려 있는 코디네이터 세션은 재시작해야 새 텍스트를 받는다(§릴리스 후속과 같은 이유). skia의 13라운드는 라운드 상한이 없던 구 `loop.md`와 `blocking>0 → REJECT` 스키마의 조합이 종료를 구조적으로 막은 경우라 현행 텍스트에는 해당 항목이 없다.
 
+## 18. 끝난 체인의 `_chain/` 위에서 시작한 새 체인이 라운드 4 게이트에 걸린 사건 (2026-09-15)
+
+구현 리뷰 6라운드가 전부 resolved로 끝나고 변경이 라이브로 나간 뒤, 같은 워크트리에서 새 베이스라인(21커밋)의 구현이 시작됐고 코디네이터가 첫 리뷰 요청에 `implementation-review-7.md`를 붙였다. 리뷰어는 §Input의 라운드 4 게이트대로 해제 인용이 없다며 판정 없이 반환했고, 계약도 코드도 읽지 않았다. §17의 두 장치(라운드 4 해제 게이트·`N` 재사용 금지)는 "한 `_chain/` = 한 연속 루프"를 전제하는데, 그 전제를 지키는 규칙(§14 표 "체인이 끝나면 디렉터리를 지운다", `requirements`·`software-design`·`dev` Gate 1의 점유 게이트)은 요구사항·설계를 건너뛰어 구현으로 들어오는 경로에 없었다. 번호 재사용과 번호 외 이름이 금지라 코디네이터에게 남은 선택이 이어 붙이기뿐이었다.
+
+| 후보 | 기각 사유 |
+|---|---|
+| 베이스라인이 바뀌면 카운터를 1로 | 설계 회귀 뒤 재구현은 베이스라인이 정당하게 이동할 수 있고, `N`은 재시작·회귀를 포함해 증가한다(§17 4행). 리셋은 §17 1행이 막은 폭주 우회로를 다시 연다 |
+| 파일명에 스코프 식별자 | 번호 외 이름 금지(§17 4행)와 "한 워크트리에 한 체인"에 어긋나고, 체인 스킬 전부와 `acceptance-verification`의 약속 경로에 새 입력이 생긴다 |
+
+넣은 것은 체인 경계 문장 셋이다. `implementation` §Record the baseline과 `implementation-review` §Rounds에 체인 종료 정의(검증 파일 작성, 또는 변경의 머지·릴리스)와 점유 게이트(다른 체인 파일이 있으면 멈추고 묻는다, 사용자가 지운다)를 두고, `implementation-review` §Input에 리뷰어 판별(이전 결과의 베이스라인이 다르거나, 이전 결과 없이 이전 `implementation-review-N.md`가 있으면 "다른 체인 파일" 사유로 판정 없이 반환)을 뒀다. 외부 대응물은 Gerrit이다. 머지된 Change-Id로 다시 push하면 `change closed`로 거부하고 새 change를 만들라고 안내하며, 카운터를 잇지도 리셋하지도 않는다. Kubernetes `observedGeneration`(status가 계산된 generation을 기록해 stale을 판별)이 리뷰 결과 스코프 줄의 베이스라인 비교와 같은 장치고, spec-kit flow-forward·ADR은 후속 범위를 새 디렉터리·새 번호로 만든다.
+
 ## 출처
 
 - https://github.com/github/spec-kit (`templates/spec-template.md`, `plan-template.md`, `tasks-template.md`)
