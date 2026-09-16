@@ -57,7 +57,7 @@ From round 2 on, add the previous result and the coordinator's `implementation-r
 - **A boundary crossed** — a file changed that the contract axis does not authorize, or a change to something named untouchable.
 - **An open item the code settled** — a section 7 `[미결정]` the code answers; or, without a design, a reading of the request that changes the software, decided in code with no requester's answer in the report.
 - **A contract error absorbed** — the code diverges from a decision, or works around a false fact, instead of routing back. Name the contract location and the code that departs from it.
-- **A mechanism nothing needed** — an abstraction, interface, config surface, cache, retry layer, extra round trip, or defensive branch away from a trust boundary that no decision and no requirement needs. Local expression — a name, a private helper's shape — is not this.
+- **A mechanism nothing needed** — an abstraction, interface, config surface, cache, retry layer, extra round trip, or defensive branch away from a trust boundary that no decision and no requirement needs; a runtime number or condition a mechanism turns on — a timeout, retry count, interval, rate or concurrency limit, the error code or state it branches on — that the code chose because the contract did not fix it is the same finding, and one the contract fixes with no measurement behind it is a contract defect to route back. Local expression — a name, a private helper's shape — is not this.
 - **A failure mode left open** — a failure section 5 names, or that the request's words imply, on a path this change owns, with nothing handling it. **The requirements' stated tolerance is the ceiling**: a failure the requester accepts is not missing handling.
 
 **MUST find — correctness.** Three angles over the change axis.
@@ -70,7 +70,7 @@ From round 2 on, add the previous result and the coordinator's `implementation-r
 
 **Never raise.** A decision implemented as decided that you would have decided differently. A defense against a failure the contract excludes or the requirements accept. A defect that predates the change and that the change neither introduced nor worsened — one 참고 line outside the findings and the verdict. Formatting, whitespace, import order, naming, style, comment content. Test breadth past the bar. A finding already rejected with a reason that still holds. The contract document's wording. Anything the requirements do not put in scope. From round 2 on, a new `nit:`.
 
-**The fence.** A finding that can only be satisfied by **adding a mechanism** names the requirement, or the failure inside the requirements' scope, that needs it, with a concrete mistake scenario; otherwise it is `nit:` or nothing. Withdraw an earlier demand a later revision made unnecessary.
+**The fence.** A finding that can only be satisfied by **adding a mechanism** names the requirement, or the failure inside the requirements' scope, that needs it, with a concrete mistake scenario; otherwise it is `nit:` or nothing. Where the mechanism itself already stands, a finding that asks for a specific number or condition carries the measurement behind it; without one, it asks for that measurement as `discuss:`. Withdraw an earlier demand a later revision made unnecessary.
 
 **Finding form.** One line each, in Korean, opening with a stable id and a severity.
 

@@ -9,7 +9,7 @@ description: Implements a contract as written — a software design document whe
 
 Three rules hold over everything below.
 
-- **No contract-level decision is made here.** A `[미결정]` that blocks the work stops the work. So does a choice the contract was supposed to fix and did not, and, without a design, a reading of the request that would produce different software. Ask the requester or route back; never choose. Local expression inside this repository's conventions — a name, the shape of a private helper — is not such a decision.
+- **No contract-level decision is made here.** A `[미결정]` that blocks the work stops the work. So does a choice the contract was supposed to fix and did not, and, without a design, a reading of the request that would produce different software. Ask the requester or route back; never choose. Local expression inside this repository's conventions — a name, the shape of a private helper — is not such a decision. A runtime number or condition a mechanism turns on that the contract left open — a timeout, a retry count, an interval, a rate or concurrency limit, the error code or state it branches on — is one: stop on it instead of writing in the usual value.
 - **Verification is run for real, and its output compared to the pass condition.** Code that looks done and a command that was never run are the same evidence.
 - **A contract that turns out to be wrong routes back.** It is not patched around locally.
 
@@ -44,6 +44,7 @@ Stop, report what the contract says against what you found, name the section or 
 |---|---|
 | A named path, signature, or convention does not match the repository | The contract rests on a false fact, and other decisions may too |
 | A decision cannot be implemented as written | Choosing the replacement is a design decision |
+| The contract names a mechanism but not the number or condition it turns on, or fixes one with no measurement behind it | Choosing the value is a design decision, and the usual number is not a measurement of this system |
 | A requirement no decision covers surfaces mid-implementation | Covering it changes scope |
 | The verification command passes without reaching what you built | You are the first to run it; report the command that would observe the change instead of substituting one |
 | An open item is missing its reason, decider, or blocked work | Completing it belongs to whoever wrote it |
@@ -52,7 +53,7 @@ Stop, report what the contract says against what you found, name the section or 
 
 - Does every decision your scope covers appear in the code, and does every changed file trace to the contract or to your scope? Both directions.
 - Did the verification actually run in this session, compared to its stated condition rather than to what you expected?
-- Did a mechanism enter that the contract did not decide — an abstraction, a knob, handling for a case that cannot occur, a test for trivial code or framework wiring? Remove it.
+- Did a mechanism enter that the contract did not decide — an abstraction, a knob, a runtime number or condition the contract did not fix, handling for a case that cannot occur, a test for trivial code or framework wiring? Remove it.
 - Is anything left that you settled yourself instead of stopping on?
 
 ## Report

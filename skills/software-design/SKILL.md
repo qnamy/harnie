@@ -9,9 +9,9 @@ description: Turns a settled requirements document, or a short direct request, i
 
 Three rules hold over everything below.
 
-- **Nothing enters the design that no stated requirement needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, a lock, a staged handoff, an extra round trip), write in one line the requirement sentence it serves — quoted as the requirements or the requester wrote it, never a goal you inferred from them — and the concrete failure, inside the tolerance that requirement states, it prevents. A failure the requirements do not put in scope, however plausible, earns no mechanism. If you cannot write that line, leave it out.
+- **Nothing enters the design that no stated requirement needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, a lock, a staged handoff, an extra round trip), write in one line the requirement sentence it serves — quoted as the requirements or the requester wrote it, never a goal you inferred from them — and the concrete failure, inside the tolerance that requirement states, it prevents. A failure the requirements do not put in scope, however plausible, earns no mechanism. If you cannot write that line, leave it out. **When that sentence asks for the mechanism itself, the requester's words justify it and what it turns on — its numbers and conditions — still needs grounding (third rule). When the sentence states the goal and you are the one choosing the mechanism, that choice stands on an external reference or an observation before it enters** — the source that states the behavior it answers, or the failure observed in this system, quoted either way. With neither, it is `[미결정]` naming the observation that would settle it.
 - **The decision half ends with a verification step someone can run, and that step must observe the outcome the request asked for, including any behavior or invariant that has to survive the change.** A command that passes without reaching the change — an existing suite that never exercises it — is not verification, and it leaves "it looks done" as the only signal the implementer can produce.
-- **Assert no environment fact you did not verify in this repository.** A decision resting on an unverified fact is `[미결정]`, not a guess.
+- **Assert no environment fact you did not verify in this repository.** A decision resting on an unverified fact is `[미결정]`, not a guess. **A runtime number or condition a mechanism turns on — a timeout, a retry count, an interval, a rate or concurrency limit, the error code it retries on, the state it skips on, anything whose being wrong reproduces the failure that mechanism exists to prevent — is such a fact, and it stands on a measurement of this system**, named with the command and its result. A value the requirements themselves name is no exception: the requester fixing a number does not make it observed. An external reference can justify a mechanism; it does not fix what that mechanism turns on, and what is usually done fixes nothing. One with neither behind it is `[미결정]` naming the observation that would settle it.
 
 ## Procedure
 
@@ -63,9 +63,10 @@ Run this over the finished draft before showing it.
 - Does section 6 reach the requested outcome, rather than pass on a suite that never exercises the change?
 - Does every environment claim carry the path it was verified against?
 - Is every requirements `[미결정]` either settled here with a note saying which kind of decision it was, or listed in section 7?
-- Does every mechanism you added name the requirement it serves and the failure, inside that requirement's tolerance, it prevents?
+- Does every mechanism you added name the requirement it serves and the failure, inside that requirement's tolerance, it prevents — and, where that requirement states the goal rather than the mechanism, the reference or observation you chose it on?
+- Does everything the third rule binds — number and condition alike — carry the measurement it came from?
 
-Anything failing the first four gets fixed. Anything failing the last one gets removed.
+Anything failing the first four gets fixed. A mechanism failing the fifth gets removed; whatever fails the sixth becomes `[미결정]`.
 
 ## Report
 
