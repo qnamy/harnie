@@ -217,3 +217,21 @@ routine-orca 체인의 네 라운드에서 발견 27건 중 26건을 수용했�
 - https://code.claude.com/docs/en/code-review · https://code.claude.com/docs/en/sub-agents · https://www.anthropic.com/engineering/building-effective-agents · https://www.anthropic.com/engineering/multi-agent-research-system
 - https://en.wikipedia.org/wiki/Architecture_tradeoff_analysis_method · https://dl.acm.org/doi/10.5555/319568.319599 (Parnas & Weiss, ICSE 1985)
 - arXiv 2308.07201(ChatEval, ICLR 2024) · Smit et al., ICML 2024(proceedings.mlr.press/v235/smit24a.html) · arXiv 2402.08115 · arXiv 2605.29800 · arXiv 2604.19049 · arXiv 2603.16244
+
+## 20. 국소적으로 옳은 수정 아홉 라운드가 쌓아 올린 기제 덩어리 (2026-09-16)
+
+azure_infra tx-proxy 재설계에서 DEC-008(재연결 중 그 방을 로테이션에서 뺀다)이 1라운드부터 9라운드까지 매 라운드 지적을 받았다. 지적은 매번 옳았고 수정도 매번 최소였다 — `maint`가 기존 연결을 끊지 않는다 → `shutdown sessions`, 실패한 방이 무조건 복귀한다 → `room-check` 게이트, 나은 방이 MAINT에 갇힌다 → `ready` 소유권을 watch로, watch와 재연결의 순서 경쟁 → `is-active` 판정에서 `flock`으로, 락 부모 디렉터리가 없다 → 락 경로 변경, 그리고 이것을 증명하는 6절 9번을 여섯 번 고쳤다. 9라운드 뒤 요청자가 구조를 줄이기로 하자 admin 소켓 쓰기 경로와 스크립트 두 개까지 한 번에 빠졌다(설계 53.5KB → 45.9KB, `azure_infra/_chain/redesign/design-response-9.md`).
+
+DEC-008이 막던 실패(재연결 중 직결 egress)는 관측된 적이 없다. 같은 문서의 DEC-006은 **같은 사실을 근거로** 출구 IP 비교 헬스체크를 기각했다. 코디네이터가 "방 하나 = 출구 IP 하나"라는 목표 문장에서 요구를 유추해 한쪽만 통과시켰고, 라운드마다 "이게 있어야 하나"가 아니라 "어떻게 고칠까"로 받았다.
+
+| 관측 | 조치 | 어디에 |
+|---|---|---|
+| 기제 정당화가 유추한 요구로도 통과했다. 규칙은 "요구 문장과 구체적 실패를 한 줄로 적어라"까지였고 그 문장이 원문인지 묻지 않았다 | 요구 문장을 요구사항이나 요청자가 쓴 그대로 인용하게 한다. 목표에서 유추한 문장은 그 자리를 채우지 못한다 | `software-design` 첫 규칙 |
+| 락은 DEC-008이 만든 경쟁을 막으려고 존재했다. 설계가 스스로 만든 문제를 막는 기제라는 신호를 읽을 자리가 없었다 | 앞선 결정이 만든 문제를 가두는 기제는 그 결정을 다시 보라는 신호로 규정한다 | `software-design` §Minimum design |
+| 같은 결정이 아홉 라운드 연속 지적을 받는 동안 처분은 매번 "고치는 방안"이었다. §Accepting의 되돌리기 규정은 **직전 라운드 수정**에서 나온 발견만 겨냥해 한 라운드짜리였다 | 한 결정(검증 단계 포함)이 3라운드 연속 지적을 받으면 고치기 전에 제거를 먼저 평가하고 그 비교를 사유에 적는다 | `software-design-review` §Accepting |
+| 3라운드 한도가 이 가드였는데 해제가 그것을 통째로 없앴다. 4~9라운드가 정확히 증식 구간이다 | 한도에서 사용자에게 보고할 때 왜 3라운드 안에 닫히지 않았는지를 — 라운드가 맴돈 결정을 지목해 — 먼저 답하게 한다 | 두 리뷰 스킬 §Rounds |
+
+| 후보 | 기각 사유 |
+|---|---|
+| 자기점검에 "요청자가 말하지 않은 실패는 허용 범위 안" 한 줄을 더한다 | 첫 규칙이 이미 같은 말을 한다("A failure the requirements do not put in scope, however plausible, earns no mechanism"). 실패 지점은 규칙 부재가 아니라 유추한 요구를 진술된 요구로 취급한 것이라, 인용 강제로 같은 구멍을 막는다 |
+| 검증 단계가 2라운드 연속 지적을 받으면 그 기제의 값어치를 되묻는 규칙을 따로 둔다 | 누범 규칙과 같은 신호다. 규칙 둘로 나누면 동시 지시 개수만 늘고, 누범 규칙에 "검증 단계 포함"을 넣어 흡수했다 |

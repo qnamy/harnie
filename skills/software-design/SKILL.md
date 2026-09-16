@@ -9,7 +9,7 @@ description: Turns a settled requirements document, or a short direct request, i
 
 Three rules hold over everything below.
 
-- **Nothing enters the design that no stated requirement needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, a lock, a staged handoff, an extra round trip), write in one line the requirement sentence it serves and the concrete failure, inside the tolerance that requirement states, it prevents. A failure the requirements do not put in scope, however plausible, earns no mechanism. If you cannot write that line, leave it out.
+- **Nothing enters the design that no stated requirement needs.** When you add a mechanism (a cache, an abstraction, a config knob, a table, a retry layer, a lock, a staged handoff, an extra round trip), write in one line the requirement sentence it serves — quoted as the requirements or the requester wrote it, never a goal you inferred from them — and the concrete failure, inside the tolerance that requirement states, it prevents. A failure the requirements do not put in scope, however plausible, earns no mechanism. If you cannot write that line, leave it out.
 - **The decision half ends with a verification step someone can run, and that step must observe the outcome the request asked for, including any behavior or invariant that has to survive the change.** A command that passes without reaching the change — an existing suite that never exercises it — is not verification, and it leaves "it looks done" as the only signal the implementer can produce.
 - **Assert no environment fact you did not verify in this repository.** A decision resting on an unverified fact is `[미결정]`, not a guess.
 
@@ -51,6 +51,7 @@ These bind the design the same way they bind the code it produces.
 - No abstraction, interface, or config knob that was not asked for. One implementation does not need a strategy layer.
 - A value that differs by environment, or that has to change without a code change, goes in the repository's existing configuration path. Other constants stay inline; do not build a configuration surface for them.
 - Defensive handling belongs at trust boundaries (external input, API, DB, network) and nowhere else. Do not design error handling for a case that cannot occur.
+- A mechanism that exists to contain a problem an earlier decision in this design created is the signal to revisit that decision first; whether it still enters after that is the first rule's question, not this one's.
 - Tests cover business logic and logic whose failure is expensive (money, data integrity, security, irreversible side effects). No coverage-driven tests, none for trivial code or framework wiring, and none of that logic left untested. A stricter repository or CI convention wins.
 - Do not break out tasks or an ordered step list. That belongs to the implementation stage, and a plan that fights the implementer's own reasoning does more harm than no plan. 병렬 단위 is file ownership and order between sessions, not a step list inside one.
 
