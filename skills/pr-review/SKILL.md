@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Code review of a change — a PR, a branch against its base, or a working-tree diff — at a senior-engineer standard; classifies findings as `issue:`/`discuss:`/`nit:` and recommends approval status. Use for any request to review code that has no design contract behind it, including "code review", "review this diff", and automated PR-review routines. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Do NOT use to review an implementation against its design document — that is implementation-review.
+description: Code review of a change — a PR, a branch against its base, or a working-tree diff — at a senior-engineer standard; classifies findings as `issue:`/`discuss:`/`nit:` and recommends approval status. Use for a change that has no design or request contract behind it — a PR, a branch, a working-tree diff, or an automated PR-review routine. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Do NOT use for a change implemented under a contract, even when the request says "code review" — that is implementation-review; the contract decides the route, not the wording.
 ---
 
 # PR Review Criteria (Judgment Core)
