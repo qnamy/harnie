@@ -3,7 +3,7 @@
 // Blocks the bundled skills the development chain replaces and names the replacement in the reason.
 import { readFileSync } from "node:fs";
 
-const REVIEW = "구현 리뷰는 implementation-review(설계 대비), PR 리뷰는 pr-review를 쓴다";
+const REVIEW = "코드 리뷰·PR 리뷰·작업 트리 diff 리뷰는 pr-review, 설계 계약 대비 구현 리뷰만 implementation-review를 쓴다";
 export const BLOCKED = new Map([
   ["code-review", REVIEW],
   ["review", REVIEW],

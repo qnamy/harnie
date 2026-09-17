@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review submitted code changes in a PR at a senior-engineer standard, classify findings as `issue:`/`discuss:`/`nit:`, and recommend approval status. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Use for human PR reviews and automated PR-review routines. Reviewing an implementation against its design document is separate and belongs to the implementation-review skill.
+description: Code review of a change — a PR, a branch against its base, or a working-tree diff — at a senior-engineer standard; classifies findings as `issue:`/`discuss:`/`nit:` and recommends approval status. Use for any request to review code that has no design contract behind it, including "code review", "review this diff", and automated PR-review routines. Judge only what is wrong, why it matters, and its severity; the caller determines execution details such as voting, mentions, comment placement, disclaimers, and platform operations. Do NOT use to review an implementation against its design document — that is implementation-review.
 ---
 
 # PR Review Criteria (Judgment Core)
@@ -26,13 +26,17 @@ Priority is the **triage order** — what to inspect first. How a found problem 
 - **Breaking changes:** API signatures, compatibility-breaking configuration, risky DB schema changes (migrations, indexes, NULL constraints).
 - **Untested critical logic:** new or changed business or critical logic with no test at the sufficiency bar of the global guidelines' §Coding Guidelines (Test scope).
 
+**How to look — three angles over the diff.** *Removed behavior*: for every deleted or replaced line, ask whether it carried an observable behavior or an invariant; the finding exists only when the new code does not re-establish it. *Blast radius*: for every changed signature, return shape, raised error, or ordering dependency, follow each call site for what breaks. *The hunks themselves*: read every hunk and the function around it, and for each line name the input, state, timing, or platform that makes it wrong.
+
+### Priority 1b — A Mechanism Nothing Needed (`issue:`)
+
+An abstraction, interface, config surface, cache, retry layer, extra round trip, or defensive branch away from a trust boundary that nothing in the change's stated purpose, linked issue, or tests needs is `issue:`, not a tradeoff note — it is the defect the team pays for longest. A runtime number or condition a mechanism turns on — a timeout, retry count, interval, rate or concurrency limit, the error code or state it branches on — that stands on no measurement of this system is the same finding; ask for the measurement as `discuss:` when the mechanism itself is warranted. Local expression — a name, a private helper's shape — is not this.
+
 ### Priority 2 — Flag as Tradeoffs (Design and Future Cost)
 
-- **Abstraction level:** a single use case generalized unnecessarily.
 - **Hidden tradeoffs:** decision costs the author may not see — coupling, reversibility, operational burden.
 - **Six-month technical debt:** works now, will soon impede the team.
 - **Scalability:** the first point to fail as traffic or data grows (evidence required — see guardrails).
-- **Simplicity:** the simplest version that achieves the same goal.
 
 ### Do Not Flag
 
@@ -48,7 +52,8 @@ Formatting, whitespace, or import order a linter catches; minor naming or style 
 
 - **Do not state low-confidence findings as facts.** Use `discuss:` only when the answer could affect approval of the current change; suggestions that cannot affect approval are `nit:` or omitted. High-impact concerns (security, data loss) never downgrade to `nit:` for low confidence — `issue:` when confirmed, `discuss:` when unconfirmed.
 - **Assert scalability or architecture concerns only when the problem is concrete and present**, supported by observable evidence (current scale, execution frequency, data-access patterns). No grand architectural advice on small changes; if unsure but approval-relevant → `discuss:`, otherwise `nit:` or omit.
-- **Do not create overengineering:** suggest added complexity for flexibility or configurability only when a real requirement exists.
+- **The fence — your own additive findings.** A finding that can only be satisfied by **adding a mechanism** names the requirement, or the failure inside this change's scope, that needs it, with a concrete mistake scenario; otherwise it is `nit:` or nothing. A number you ask for carries the measurement behind it, or the finding asks for that measurement instead.
+- **Self-check before delivering.** A finding whose failure you cannot name is not `issue:`; a finding with no proof in the code is deleted; a suspicion you could not confirm is `discuss:` only when approval turns on it.
 - **Do not flood superficial changes with comments** — leave `nit:` only when genuinely useful.
 - **Read the change description, linked issues, and tests first;** do not assume unverified intent.
 - **Do not expand scope unnecessarily:** flag pre-existing problems outside the diff only when this change introduces, worsens, or directly relates to them.
@@ -80,4 +85,4 @@ nit: 조건식에 이름을 붙이면 의도가 조금 더 잘 드러날 것 같
 - **Input:** the change to review (diff or changed-file set) + optional caller-supplied criteria such as team rules.
 - **Output:** findings classified `issue:`/`discuss:`/`nit:` (location, what is wrong, why it matters, remediation direction) + an approval recommendation: open `issue:`/`discuss:` → hold; only `nit:` → conditional; none → approval possible. **Do not vote, mention users, choose comment placement, add disclaimers, or call platform APIs** — the caller receives the judgment and performs execution.
 
-> Single source of judgment for **PR review** (external changes, merge perspective). **Implementation review against a design document** is separate — the `implementation-review` skill. Native `/code-review` is a built-in for working-tree diffs, unrelated to this skill.
+> Single source of judgment for **PR review** (external changes, merge perspective). **Implementation review against a design document** is separate — the `implementation-review` skill.
