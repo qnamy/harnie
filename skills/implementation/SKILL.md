@@ -54,6 +54,7 @@ Stop, report what the contract says against what you found, name the section or 
 - Does every decision your scope covers appear in the code, and does every changed file trace to the contract or to your scope? Both directions.
 - Did the verification actually run in this session, compared to its stated condition rather than to what you expected?
 - Did a mechanism enter that the contract did not decide — an abstraction, a knob, a runtime number or condition the contract did not fix, handling for a case that cannot occur, a test for trivial code or framework wiring? Remove it.
+- Did a comment enter that restates the code or records the change? Remove it.
 - Is anything left that you settled yourself instead of stopping on?
 
 ## Report
@@ -67,5 +68,6 @@ Korean, six lines at most: the contract you worked from and your scope; the base
 - Do not split the work, write a task or plan file, or dispatch anyone.
 - Do not implement from section 8; those alternatives were rejected.
 - Do not touch code the contract does not reach, and do not "improve" adjacent code, comments, or formatting on the way past.
+- Do not write a comment that restates the code beneath it or records the change — dates, prior values, commented-out old code; git holds that history. A comment exists only for a reason the code cannot carry.
 - Do not report done on a verification you did not run, or on one you loosened until it passed.
 - Do not write a design to fill a gap. Without one, the request is the contract, and what it does not fix is asked, not designed.
