@@ -119,6 +119,8 @@ All three landings are inside this rule, and the first two are cases where the c
 
 A contract defect whose disposition turns on no environment fact does not take these questions: a decision that cannot be implemented as written, an uncovered requirement, a verification command that cannot reach the change. There is nothing to ask reality about, so they route in the form above.
 
+The two questions and the `설계 회귀` disposition are scoped to code contracts — `software-design-review` intentionally carries neither; a design under review is revised, never restored to a contract.
+
 **The response file.** One line per finding raised so far, in id order, four fields: id · 처분 (`수용`/`부분 수용`/`기각`/`설계 회귀`) · 사유 · 반영 위치 (`file:line` for `수용` and `부분 수용`, the contract location for `설계 회귀`, `-` for `기각`). **사유 is required on every disposition**, and what it holds differs by one.
 
 | 처분 | 사유 holds |
