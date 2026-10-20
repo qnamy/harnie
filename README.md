@@ -15,7 +15,7 @@
 | 요구사항 | `requirements` | 짧거나 모호한 요청 | `_chain/requirements.md` — 해석이 갈리는 지점을 질문·가정·`[미결정]`으로 고정 |
 | 설계 | `software-design` | 요구사항 파일 또는 직접 요청 | `_chain/design.md` — 저추론 구현자가 결정 없이 실행할 수 있는 1~7절 + 대안 비교 8절 |
 | 설계리뷰 | `software-design-review` | 설계 + 요구사항 원문 | `_chain/design-review-N.md` · `design-response-N.md` — 요구사항을 기준선으로 결정 공백·사실 오류·과설계를 찾음 |
-| 구현 | `implementation` | 설계(없으면 요청 원문) + 선택적 범위 한정 | 코드 + 보고서(baseline 커밋 · 검증 명령과 실제 결과 · 변경 파일) |
+| 구현 | `implementation` | 설계(없으면 요청 원문) + 선택적 범위 한정 | 코드 + 보고서(baseline 커밋 · 검증 명령과 실제 결과 · 변경 파일). 주석은 코드가 담지 못하는 이유만 쓰고 변경 기록은 쓰지 않는다 |
 | 구현리뷰 | `implementation-review` | 계약(설계 또는 요청) + 요구사항 + baseline + 구현 보고서 | `_chain/implementation-review-N.md` · `implementation-response-N.md` — 계약 정합성과 정확성 |
 | 검증 | `acceptance-verification` | 요구사항 기준 · 검증 명령 · baseline · 구현리뷰 판정 | `_chain/acceptance-verification.md` — 기준별 검증됨/미검증/실패 |
 
@@ -26,6 +26,8 @@
 **병렬은 설계가 정하고 orca가 실행한다.** 여러 세션이 할 일이면 `software-design`이 3절 끝에 병렬 단위(유닛별 파일 단독 소유·공유 기반 유닛·의존)를 적고 `software-design-review`가 분할 결함을 검사한다. 하위 워크트리 생성·유닛 세션·머지·정리는 `orca-dispatch.md`(agent-ops)의 절차다. 설계가 결정을 끝낸 유닛은 구현 → 구현리뷰를, 경계만 정하고 내부를 남긴 유닛(상세설계 위임)은 `dev`를 돈다. 검증은 전부 머지한 뒤 부모에서 1회 돈다.
 
 **리뷰어는 다른 프로바이더의 별도 세션이다.** 설계나 코드를 쓴 세션이 코디네이터가 되어 orca로 대화형 세션 하나(Claude에서는 Codex, Codex에서는 Claude)를 열고, 요청과 결과를 파일로 주고받는다. 자율 라운드는 3회이고 4라운드부터는 요청 파일 첫 줄에 사용자 해제를 원문으로 인용한다. 한도 보고는 왜 3라운드 안에 닫히지 않았는지를 먼저 답하고, 한 결정이 3라운드 연속 지적을 받으면 고치기 전에 제거를 먼저 평가한다. 발견은 심각도 라벨이 아니라 필요성으로 수용하고, 장치를 추가하는 수정은 삭제·범위 축소·관찰 유예로 닫히는지 먼저 본다. **수용에도 근거를 적는다** — 처분 표의 사유 칸은 모든 처분에 필수이고, `수용`에는 이번 라운드에 원 출처에 대고 확인한 것을 적는다(인용된 행이 실재한다는 확인은 그 칸을 채우지 못한다). 발견이 실재하지만 요구하는 수정이 과하면 `부분 수용`으로 필요한 만큼만 반영하고 나머지는 사유와 함께 기각한다. 검증 세션은 구현을 쓴 세션이 아니어야 한다.
+
+**검증은 관측으로 판정하고, 검증을 위한 장치는 만들지 않는다.** 설계 6절은 요청한 결과와 실패를 가를 수 있는 관측점과 통과 조건을 적는다. 실행 표면이 없는 변경(프롬프트·문서 등)도 같다. 설계리뷰는 그런 관측이 없을 때만 `issue:`로 올리고, 더 강한 테스트·새 하네스·격리 환경 요구는 1라운드 `nit:`이거나 아무것도 아니다. 검증을 위해 실행 경로를 새로 만드는 것 자체가 기제라 과설계 심사를 받는다. 요청자가 체인 중에 직접 정한 선택은 `Settled by requester` 목록으로 매 라운드 요청에 실려 다시 지적되지 않는다(런타임 수치·조건은 그 목록에 들어갈 수 없다). 근거는 [docs/design-artifact-references.md](docs/design-artifact-references.md) §23.
 
 **요구사항이 기준선이다.** 무엇이 빠졌고 무엇이 과한지는 설계가 스스로 선언한 범위가 아니라 요구사항 파일 또는 요청자의 원문에 대고 판정한다. 실사용에서 수용된 발견마다 기준선이 올라가 설계가 팽창한 사고에서 나온 규칙이다(`docs/skill-feedback-software-design-review.md`).
 
@@ -39,9 +41,11 @@
 
 각 스킬은 판단과 작성만 담당하고, 플랫폼 API 호출·투표·상태 전환은 호출자에게 남긴다. 같은 판단 기준을 사람 리뷰와 자동 루틴이 함께 쓴다.
 
+**코드 리뷰의 갈림은 요청 문구가 아니라 계약 유무다.** 체인 안에서 계약 아래 구현한 변경은 "코드 리뷰"라고 불려도 `implementation-review`로 가고, 계약 없는 변경만 `pr-review`로 간다. `skill-guard`가 막은 번들 리뷰 스킬의 안내도 같은 기준을 쓴다.
+
 | 스킬 | 하는 일 |
 |---|---|
-| `pr-review` | PR을 시니어 기준으로 리뷰해 `issue:`/`discuss:`/`nit:`로 분류하고 승인 권고를 낸다 |
+| `pr-review` | 계약(설계·요청) 없이 들어온 변경 — PR·브랜치·작업 트리 diff — 을 시니어 기준으로 리뷰해 `issue:`/`discuss:`/`nit:`로 분류하고 승인 권고를 낸다. 과설계는 `issue:`다 |
 | `comment-resolve` | 내가 남긴 리뷰 지적에 대한 응답이 실제 해소인지 검증해 resolve·재투표를 권고한다 |
 | `deploy-approval` | 배포 승인 요청의 대상 변경을 검토해 승인/보류를 판정하고 정족수 도달 시 전진을 권고한다 |
 | `quality-digest` | 누적된 리뷰 지적을 클러스터링해 lint·CI·리뷰 기준으로 승격할 후보를 제안한다(제안까지만) |
@@ -50,7 +54,7 @@
 
 ## 3. 스킬 작성 규약
 
-Claude Code와 Codex가 같은 `SKILL.md`를 읽는다. 이식되는 것은 본문과 `name`·`description`뿐이라 Claude 전용 프론트매터·`${CLAUDE_PLUGIN_ROOT}`·도구 이름·호출 문법을 본문에 쓰지 않는다. 길이는 줄 수가 아니라 동시 지시 개수로 관리한다. 규약은 [CLAUDE.md](CLAUDE.md), 근거와 수치는 [docs/skill-authoring-canon.md](docs/skill-authoring-canon.md)에 있다.
+Claude Code와 Codex가 같은 `SKILL.md`를 읽는다. 이식되는 것은 본문과 `name`·`description`뿐이라 Claude 전용 프론트매터·`${CLAUDE_PLUGIN_ROOT}`·도구 이름·호출 문법을 본문에 쓰지 않는다. 길이는 줄 수가 아니라 동시 지시 개수로 관리한다. 규약은 [AGENTS.md](AGENTS.md)(`CLAUDE.md`는 이를 import하는 한 줄), 근거와 수치는 [docs/skill-authoring-canon.md](docs/skill-authoring-canon.md)에 있다.
 
 ## 설치
 
@@ -96,7 +100,7 @@ harnie/
 
 ## 문서
 
-- [docs/design-artifact-references.md](docs/design-artifact-references.md) — 설계·리뷰·체인 계약의 근거와 2026-09-08 확정 사항
+- [docs/design-artifact-references.md](docs/design-artifact-references.md) — 설계·리뷰·체인 계약의 근거. 2026-09-08 확정 사항과 이후 실사용 사건에서 나온 규칙(§14~§23)
 - [docs/skill-authoring-canon.md](docs/skill-authoring-canon.md) — Claude · Codex 공용 스킬 작성 규약의 근거
 - [docs/codex-mechanisms.md](docs/codex-mechanisms.md) — Codex 훅·스킬·에이전트 메커니즘 실측
 - [docs/skill-feedback-software-design-review.md](docs/skill-feedback-software-design-review.md) — 설계리뷰 실사용 결함 원장과 적용 판정
