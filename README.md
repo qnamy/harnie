@@ -47,7 +47,9 @@
 |---|---|
 | `pr-review` | 계약(설계·요청) 없이 들어온 변경 — PR·브랜치·작업 트리 diff — 을 시니어 기준으로 리뷰해 `issue:`/`discuss:`/`nit:`로 분류하고 승인 권고를 낸다. 과설계는 `issue:`다 |
 | `comment-resolve` | 내가 남긴 리뷰 지적에 대한 응답이 실제 해소인지 검증해 resolve·재투표를 권고한다 |
+| `review-response` | 내가 올린 PR에 달린 리뷰 지적을 스레드별로 수용·기각·질문으로 판정하고 게시할 답글 초안을 만든다(resolve는 리뷰어 몫) |
 | `deploy-approval` | 배포 승인 요청의 대상 변경을 검토해 승인/보류를 판정하고 정족수 도달 시 전진을 권고한다 |
+| `deploy-request` | 내가 작업한 티켓의 배포 승인을 요청하기 전에 티켓 상태와 연관 PR 상태를 점검하고, 모두 통과하면 요청 문안을 만든다 |
 | `quality-digest` | 누적된 리뷰 지적을 클러스터링해 lint·CI·리뷰 기준으로 승격할 후보를 제안한다(제안까지만) |
 | `pr-delivery` | 주입된 Delivery Profile에 따라 PR 제목·본문과 리뷰요청 내용을 작성한다 |
 | `confluence-doc` | 개발 문서를 Confluence 페이지로 구조화하고 Mermaid를 네이티브 렌더링해 발행한다 |
