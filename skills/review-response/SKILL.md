@@ -1,6 +1,6 @@
 ---
 name: review-response
-description: For review threads other people left on a PR I authored, judge each finding against the original code as accept, reject, or ask, and draft the reply to post on every thread—a fix reply after the change is pushed, a rejection reason, or a question. The caller retrieves threads, shows the judgment table to the user for one approval, makes the fixes, commits, pushes, and posts the replies. Do NOT use to verify whether an author resolved a finding I raised (that is comment-resolve), to review a change (pr-review), or for review rounds inside the development chain (implementation-review and software-design-review handle their own findings).
+description: For review threads other people left on a PR I authored, judge each finding against the original code as accept, reject, or ask, and draft the reply to post on every thread—a fix reply after the change is pushed, a rejection reason, or a question. The caller retrieves threads, shows the judgment table to the user for one approval, makes the fixes, commits, pushes, posts the replies, and sends a re-review request mentioning the authors of the replied threads. Do NOT use to verify whether an author resolved a finding I raised (that is comment-resolve), to review a change (pr-review), or for review rounds inside the development chain (implementation-review and software-design-review handle their own findings).
 ---
 
 # Review Response (Author-Side Judgment)
@@ -54,6 +54,7 @@ Three checks run before an `accept` stands.
   - `ask`: the question.
   - Contract change needed: no reply; the user decides.
 - After the user approves and the caller pushes the fixes, fill only `{commit}` with the actual commit. If the actual fix differs from the approved direction, do not post that thread's reply; return the changed draft for the user to see again.
+- With the final replies, draft one re-review request addressed to the root authors of the threads that will receive a reply, each author named once, saying the review has been reflected. The caller sends it only after those replies are posted, turning each author into a mention on its own platform and sending it where the original review request was sent; an author none of whose threads got a posted reply is dropped from the request. No thread receives a reply → no re-review request.
 
 ## Self-check
 
@@ -66,7 +67,7 @@ Three checks run before an `accept` stands.
 
 Korean for the table, the checks, and the replies. Prefixes, code identifiers, file paths, commit identifiers, and quoted source text stay in their original form.
 
-First, the judgment table with reply drafts. After the fixes are pushed, the final replies per thread with `{commit}` filled, plus any thread whose draft changed. The caller posts the replies and leaves thread status to the reviewer.
+First, the judgment table with reply drafts. After the fixes are pushed, the final replies per thread with `{commit}` filled, plus any thread whose draft changed, and the re-review request draft. The caller posts the replies, sends the re-review request, and leaves thread status to the reviewer.
 
 ## Never
 
