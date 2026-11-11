@@ -1,6 +1,6 @@
 ---
 name: review-response
-description: For review threads other people left on a PR I authored, judge each finding against the original code as accept, reject, or ask, and draft the reply to post on every thread—a fix reply after the change is pushed, a rejection reason, or a question. The caller retrieves threads, shows the judgment table to the user for one approval, makes the fixes, commits, pushes, posts the replies, and sends a re-review request mentioning the authors of the replied threads. Do NOT use to verify whether an author resolved a finding I raised (that is comment-resolve), to review a change (pr-review), or for review rounds inside the development chain (implementation-review and software-design-review handle their own findings).
+description: For review threads other people left on a PR I authored, judge each finding against the original code as accept, reject, or ask, and draft the reply to post on every thread—a fix reply after the change is pushed, a rejection reason, or a question. The caller retrieves threads, shows the judgment table to the user for one approval, makes the fixes, commits, pushes, posts the replies, and sends a re-review request mentioning the authors of the replied threads. When every thread on the PR is closed and the PR is approved, recommends a squash merge, which the caller performs. Do NOT use to verify whether an author resolved a finding I raised (that is comment-resolve), to review a change (pr-review), or for review rounds inside the development chain (implementation-review and software-design-review handle their own findings).
 ---
 
 # Review Response (Author-Side Judgment)
@@ -13,12 +13,13 @@ Three rules hold over everything below.
 
 - **Every judgment carries the check behind it, and a judgment whose check you could not make becomes `ask`.** The check is what you opened in the original code at that location—the `file:line`, the command and its result, the contract sentence you compared. Confirming that the quoted line exists is not that check.
 - **Accept by necessity, never by prefix or by who asked.** The prefix (`issue`/`discuss`/`nit`) is recorded as severity only. Accepting every thread and rejecting every thread are both the signal to check each one again.
-- **Nothing is posted or changed before the user approves the table, and the table carries every reply that will be posted.**
+- **Nothing is posted or changed before the user approves the table, and the table carries every reply that will be posted.** The one exception is the squash merge under §Merge, whose conditions stand in for that approval.
 
 ## Input (Provided by the Caller)
 
 1. The active threads on my PR whose root was written by someone else. Each item includes the root prefix when present, its content, location, the full reply history with authors, and a way to access the code at that location.
 2. Whether the PR was built under a design or request contract, and where that contract is.
+3. For the merge check: the status of every thread on the PR (whoever wrote it), each reviewer's vote, and whether the target branch's merge requirements are met.
 
 Without a way to access the code, no thread can be judged: name what is missing and stop.
 
@@ -56,6 +57,17 @@ Three checks run before an `accept` stands.
 - After the user approves and the caller pushes the fixes, fill only `{commit}` with the actual commit. If the actual fix differs from the approved direction, do not post that thread's reply; return the changed draft for the user to see again.
 - With the final replies, draft one re-review request addressed to the root authors of the threads that will receive a reply, each author named once, saying the review has been reflected. The caller sends it only after those replies are posted, turning each author into a mention on its own platform and sending it where the original review request was sent; an author none of whose threads got a posted reply is dropped from the request. No thread receives a reply → no re-review request.
 
+## Merge
+
+Recommend a squash merge only when all of these hold; otherwise state which one fails and recommend nothing.
+
+- Every thread on the PR is closed, including threads this skill skipped and threads I opened. An active thread, whoever wrote it, blocks the merge.
+- At least one reviewer approved (approval with suggestions counts) and no reviewer voted reject or waiting.
+- No reply or fix from this response is still pending: every approved reply is posted and every accepted fix is pushed.
+- The target branch's own merge requirements are met. If the caller reports any of them unmet, the merge waits; it is never bypassed.
+
+The merge check runs on every invocation, before thread judgment. With no target thread and every condition met, the output is the merge recommendation alone. The user's request to respond to review on the PR is the authorization for this merge; no separate approval is asked. The merge method is squash; the caller performs it on its own platform.
+
 ## Self-check
 
 - Does every judgment name the check you made in the original code, not the reviewer's quotation of it?
@@ -67,13 +79,14 @@ Three checks run before an `accept` stands.
 
 Korean for the table, the checks, and the replies. Prefixes, code identifiers, file paths, commit identifiers, and quoted source text stay in their original form.
 
-First, the judgment table with reply drafts. After the fixes are pushed, the final replies per thread with `{commit}` filled, plus any thread whose draft changed, and the re-review request draft. The caller posts the replies, sends the re-review request, and leaves thread status to the reviewer.
+First, the judgment table with reply drafts. After the fixes are pushed, the final replies per thread with `{commit}` filled, plus any thread whose draft changed, and the re-review request draft. The caller posts the replies, sends the re-review request, and leaves thread status to the reviewer. When §Merge holds, the merge recommendation with each condition and the state that satisfied it.
 
 ## Never
 
 - Never resolve or close a thread; the reviewer does that with `comment-resolve`.
 - Never raise a new finding about the PR; that belongs to `pr-review`.
-- Never post or change anything before the user approves the table.
+- Never recommend a merge while any thread is active or any merge requirement is unmet, and never recommend bypassing one.
+- Never post or change anything before the user approves the table, except the merge under §Merge.
 - Never accept a finding because of its prefix, its author, or to end the discussion.
 - Never write a fix direction that settles a contract decision; mark it Contract change needed.
 
